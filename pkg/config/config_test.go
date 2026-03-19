@@ -83,3 +83,29 @@ func TestConfigDefaults(t *testing.T) {
 		t.Error("default sendProgress should be true")
 	}
 }
+
+func TestPaths(t *testing.T) {
+	p := NewPaths("/home/test/.nanobot")
+	if p.ConfigFile() != "/home/test/.nanobot/config.json" {
+		t.Errorf("ConfigFile = %q", p.ConfigFile())
+	}
+	if p.Workspace() != "/home/test/.nanobot/workspace" {
+		t.Errorf("Workspace = %q", p.Workspace())
+	}
+	if p.SessionsDB() != "/home/test/.nanobot/sessions.db" {
+		t.Errorf("SessionsDB = %q", p.SessionsDB())
+	}
+	if p.JobsFile() != "/home/test/.nanobot/jobs.json" {
+		t.Errorf("JobsFile = %q", p.JobsFile())
+	}
+	if p.MemoryDir() != "/home/test/.nanobot/workspace/memory" {
+		t.Errorf("MemoryDir = %q", p.MemoryDir())
+	}
+}
+
+func TestDefaultPaths(t *testing.T) {
+	p := DefaultPaths()
+	if p.root == "" {
+		t.Error("root should not be empty")
+	}
+}
