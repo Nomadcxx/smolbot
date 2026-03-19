@@ -1,5 +1,10 @@
 package provider
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 type Message struct {
 	Role             string          `json:"role"`
 	Content          any             `json:"content"`
@@ -29,6 +34,7 @@ type ThinkingBlock struct {
 type ToolCall struct {
 	ID       string       `json:"id"`
 	Function FunctionCall `json:"function"`
+	Index    int          `json:"-"`
 }
 
 type FunctionCall struct {
@@ -73,4 +79,48 @@ type StreamDelta struct {
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
 	FinishReason     *string    `json:"finish_reason,omitempty"`
+}
+
+func (m Message) StringContent() string {
+	switch value := m.Content.(type) {
+	case nil:
+		return ""
+	case string:
+		return value
+	case []ContentBlock:
+		var builder strings.Builder
+		for _, block := range value {
+			switch block.Type {
+			case "text", "input_text", "output_text":
+				builder.WriteString(block.Text)
+			}
+		}
+		return builder.String()
+	case []any:
+		blocks := make([]ContentBlock, 0, len(value))
+		for _, item := range value {
+			raw, err := json.Marshal(item)
+			if err != nil {
+				continue
+			}
+			var block ContentBlock
+			if err := json.Unmarshal(raw, &block); err != nil {
+				continue
+			}
+			blocks = append(blocks, block)
+		}
+		return Message{Content: blocks}.StringContent()
+	case map[string]any:
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return ""
+		}
+		return string(raw)
+	default:
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return ""
+		}
+		return string(raw)
+	}
 }
