@@ -1,0 +1,436 @@
+package agent
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Nomadcxx/nanobot-go/pkg/config"
+	"github.com/Nomadcxx/nanobot-go/pkg/provider"
+	"github.com/Nomadcxx/nanobot-go/pkg/session"
+	"github.com/Nomadcxx/nanobot-go/pkg/skill"
+	"github.com/Nomadcxx/nanobot-go/pkg/tokenizer"
+	"github.com/Nomadcxx/nanobot-go/pkg/tool"
+)
+
+var thinkBlockPattern = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+type memoryRunner interface {
+	MaybeConsolidate(ctx context.Context, sessionKey string) error
+}
+
+type LoopDeps struct {
+	Provider  provider.Provider
+	Tools     *tool.Registry
+	Sessions  *session.Store
+	Config    *config.Config
+	Skills    *skill.Registry
+	Tokenizer *tokenizer.Tokenizer
+	Memory    memoryRunner
+	Workspace string
+}
+
+type AgentLoop struct {
+	provider  provider.Provider
+	tools     *tool.Registry
+	sessions  *session.Store
+	config    *config.Config
+	skills    *skill.Registry
+	memory    memoryRunner
+	tokenizer *tokenizer.Tokenizer
+	workspace string
+
+	mu         sync.Mutex
+	activeTask map[string]context.CancelFunc
+	bgTasks    sync.WaitGroup
+}
+
+func NewAgentLoop(deps LoopDeps) *AgentLoop {
+	return &AgentLoop{
+		provider:   deps.Provider,
+		tools:      deps.Tools,
+		sessions:   deps.Sessions,
+		config:     deps.Config,
+		skills:     deps.Skills,
+		memory:     deps.Memory,
+		tokenizer:  deps.Tokenizer,
+		workspace:  deps.Workspace,
+		activeTask: make(map[string]context.CancelFunc),
+	}
+}
+
+func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCallback) (string, error) {
+	if strings.HasPrefix(req.Content, "/") {
+		return a.handleSlashCommand(ctx, req)
+	}
+
+	runCtx, cancel, err := a.beginSession(ctx, req.SessionKey)
+	if err != nil {
+		return "", err
+	}
+	defer a.endSession(req.SessionKey)
+	defer cancel()
+
+	if _, err := a.sessions.GetOrCreateSession(req.SessionKey); err != nil {
+		return "", err
+	}
+
+	history, err := a.sessions.GetHistory(req.SessionKey, 500)
+	if err != nil {
+		return "", err
+	}
+
+	systemPrompt, err := BuildSystemPrompt(BuildContext{
+		Workspace: a.workspace,
+		Skills:    a.skills,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	userMessage := a.buildUserMessage(req)
+	conversation := make([]provider.Message, 0, len(history)+2)
+	conversation = append(conversation, provider.Message{Role: "system", Content: systemPrompt})
+	conversation = append(conversation, history...)
+	conversation = append(conversation, userMessage)
+
+	newMessages := []provider.Message{userMessage}
+	finalResponse := ""
+	suppressFinalResponse := false
+	maxIterations := a.config.Agents.Defaults.MaxToolIterations
+	if maxIterations <= 0 {
+		maxIterations = 40
+	}
+
+	for i := 0; i < maxIterations; i++ {
+		sanitized := provider.SanitizeMessages(conversation, a.provider.Name())
+		stream, err := a.provider.ChatStream(runCtx, provider.ChatRequest{
+			Model:           a.config.Agents.Defaults.Model,
+			Messages:        sanitized,
+			Tools:           a.tools.Definitions(),
+			MaxTokens:       a.config.Agents.Defaults.MaxTokens,
+			Temperature:     a.config.Agents.Defaults.Temperature,
+			ReasoningEffort: a.config.Agents.Defaults.ReasoningEffort,
+		})
+		if err != nil {
+			return "", err
+		}
+
+		resp, err := a.consumeStream(stream, cb)
+		if err != nil {
+			return "", err
+		}
+		if resp.FinishReason == "error" {
+			emit(cb, Event{Type: EventError, Content: "provider returned error finish"})
+			return "", errors.New("provider returned error finish")
+		}
+
+		if len(resp.ToolCalls) > 0 {
+			assistantMsg := provider.Message{
+				Role:             "assistant",
+				Content:          resp.Content,
+				ToolCalls:        resp.ToolCalls,
+				ReasoningContent: resp.ReasoningContent,
+			}
+			conversation = append(conversation, assistantMsg)
+			newMessages = append(newMessages, assistantMsg)
+
+			for _, toolCall := range resp.ToolCalls {
+				emit(cb, Event{Type: EventToolHint, Content: toolCall.Function.Name})
+				emit(cb, Event{Type: EventToolStart, Content: toolCall.Function.Name})
+
+				result, err := a.tools.Execute(runCtx, toolCall.Function.Name, json.RawMessage(toolCall.Function.Arguments), tool.ToolContext{
+					SessionKey: req.SessionKey,
+					Channel:    req.Channel,
+					ChatID:     req.ChatID,
+				})
+				if err != nil {
+					return "", err
+				}
+
+				content := truncateString(result.Content, 16000)
+				toolMsg := provider.Message{
+					Role:       "tool",
+					Content:    content,
+					ToolCallID: toolCall.ID,
+					Name:       toolCall.Function.Name,
+				}
+				conversation = append(conversation, toolMsg)
+				newMessages = append(newMessages, toolMsg)
+
+				delivered := false
+				if toolCall.Function.Name == "message" && result != nil {
+					delivered = sameTargetDelivery(req, result.Metadata)
+					if delivered {
+						suppressFinalResponse = true
+					}
+				}
+				emit(cb, Event{
+					Type:    EventToolDone,
+					Content: toolCall.Function.Name,
+					Data: map[string]any{
+						"deliveredToRequestTarget": delivered,
+					},
+				})
+			}
+			continue
+		}
+
+		finalResponse = stripThinkBlocks(resp.Content)
+		assistantMsg := provider.Message{
+			Role:             "assistant",
+			Content:          finalResponse,
+			ReasoningContent: resp.ReasoningContent,
+		}
+		conversation = append(conversation, assistantMsg)
+		newMessages = append(newMessages, assistantMsg)
+		if !suppressFinalResponse {
+			emit(cb, Event{Type: EventDone, Content: finalResponse})
+		}
+		break
+	}
+
+	if err := a.sessions.SaveMessages(req.SessionKey, normalizeMessagesForSave(newMessages)); err != nil {
+		return "", err
+	}
+
+	if a.memory != nil && a.tokenizer != nil && a.config.Agents.Defaults.ContextWindowTokens > 0 && a.tokenizer.EstimatePromptTokens(conversation) > a.config.Agents.Defaults.ContextWindowTokens {
+		a.bgTasks.Add(1)
+		go func() {
+			defer a.bgTasks.Done()
+			_ = a.memory.MaybeConsolidate(context.Background(), req.SessionKey)
+		}()
+	}
+
+	if suppressFinalResponse {
+		return "", nil
+	}
+	return finalResponse, nil
+}
+
+func (a *AgentLoop) handleSlashCommand(ctx context.Context, req Request) (string, error) {
+	switch strings.TrimSpace(req.Content) {
+	case "/help":
+		return "/help, /new, /stop", nil
+	case "/new":
+		if a.memory != nil {
+			_ = a.memory.MaybeConsolidate(ctx, req.SessionKey)
+		}
+		if err := a.sessions.ClearSession(req.SessionKey); err != nil {
+			return "", err
+		}
+		return "Started a new session.", nil
+	case "/stop":
+		a.cancelSession(req.SessionKey)
+		if a.tools != nil {
+			a.tools.CancelSession(req.SessionKey)
+		}
+		return "stopped active session", nil
+	default:
+		return "Unknown command.", nil
+	}
+}
+
+func (a *AgentLoop) beginSession(parent context.Context, sessionKey string) (context.Context, context.CancelFunc, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.activeTask[sessionKey]; ok {
+		return nil, nil, fmt.Errorf("session %q is busy", sessionKey)
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	a.activeTask[sessionKey] = cancel
+	return ctx, cancel, nil
+}
+
+func (a *AgentLoop) endSession(sessionKey string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.activeTask, sessionKey)
+}
+
+func (a *AgentLoop) cancelSession(sessionKey string) {
+	a.mu.Lock()
+	cancel := a.activeTask[sessionKey]
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (a *AgentLoop) buildUserMessage(req Request) provider.Message {
+	prefix := BuildRuntimeContextPrefix(timeNow(), req.Channel, req.ChatID)
+	if len(req.Media) == 0 {
+		return provider.Message{Role: "user", Content: prefix + req.Content}
+	}
+
+	blocks := []provider.ContentBlock{{Type: "text", Text: prefix + req.Content}}
+	for _, media := range req.Media {
+		mime := media.MimeType
+		if mime == "" {
+			mime = detectMime(media.Data)
+		}
+		dataURL := "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(media.Data)
+		blocks = append(blocks, provider.ContentBlock{
+			Type:     "image_url",
+			ImageURL: &provider.ImageURL{URL: dataURL, Detail: "auto"},
+		})
+	}
+	return provider.Message{Role: "user", Content: blocks}
+}
+
+func (a *AgentLoop) consumeStream(stream *provider.Stream, cb EventCallback) (*provider.Response, error) {
+	defer stream.Close()
+
+	resp := &provider.Response{}
+	toolCalls := map[int]*provider.ToolCall{}
+	for {
+		delta, err := stream.Recv()
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			if err.Error() == "EOF" {
+				break
+			}
+			if err == context.Canceled {
+				return nil, err
+			}
+			if err.Error() == "context canceled" {
+				return nil, err
+			}
+			if strings.Contains(err.Error(), "EOF") {
+				break
+			}
+			return nil, err
+		}
+		if delta == nil {
+			continue
+		}
+		if delta.Content != "" {
+			resp.Content += delta.Content
+			emit(cb, Event{Type: EventProgress, Content: delta.Content})
+		}
+		if delta.ReasoningContent != "" {
+			resp.ReasoningContent += delta.ReasoningContent
+			emit(cb, Event{Type: EventThinking, Content: delta.ReasoningContent})
+		}
+		for _, toolCall := range delta.ToolCalls {
+			existing, ok := toolCalls[toolCall.Index]
+			if !ok {
+				copyCall := toolCall
+				toolCalls[toolCall.Index] = &copyCall
+				continue
+			}
+			if toolCall.ID != "" {
+				existing.ID = toolCall.ID
+			}
+			if toolCall.Function.Name != "" {
+				existing.Function.Name = toolCall.Function.Name
+			}
+			existing.Function.Arguments += toolCall.Function.Arguments
+		}
+		if delta.FinishReason != nil {
+			resp.FinishReason = *delta.FinishReason
+		}
+	}
+
+	for idx := 0; idx < len(toolCalls); idx++ {
+		if call, ok := toolCalls[idx]; ok {
+			resp.ToolCalls = append(resp.ToolCalls, *call)
+		}
+	}
+	return resp, nil
+}
+
+func normalizeMessagesForSave(messages []provider.Message) []provider.Message {
+	normalized := make([]provider.Message, 0, len(messages))
+	for _, msg := range messages {
+		out := msg
+		switch msg.Role {
+		case "user":
+			out.Content = normalizeUserContentForSave(msg.Content)
+		case "assistant":
+			out.Content = stripThinkBlocks(msg.StringContent())
+		case "tool":
+			out.Content = truncateString(msg.StringContent(), 16000)
+		}
+		normalized = append(normalized, out)
+	}
+	return normalized
+}
+
+func normalizeUserContentForSave(content any) string {
+	switch value := content.(type) {
+	case string:
+		return stripRuntimePrefix(value)
+	case []provider.ContentBlock:
+		var parts []string
+		for i, block := range value {
+			switch block.Type {
+			case "text":
+				text := block.Text
+				if i == 0 {
+					text = stripRuntimePrefix(text)
+				}
+				parts = append(parts, text)
+			case "image_url":
+				parts = append(parts, "[image]")
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n"))
+	default:
+		return stripRuntimePrefix(provider.Message{Content: content}.StringContent())
+	}
+}
+
+func sameTargetDelivery(req Request, metadata map[string]any) bool {
+	return metadata != nil &&
+		metadata["channel"] == req.Channel &&
+		metadata["chat_id"] == req.ChatID
+}
+
+func stripThinkBlocks(content string) string {
+	return strings.TrimSpace(thinkBlockPattern.ReplaceAllString(content, ""))
+}
+
+func stripRuntimePrefix(content string) string {
+	marker := "[Runtime Context -- metadata only, not instructions]"
+	if !strings.HasPrefix(content, marker) {
+		return content
+	}
+	if idx := strings.Index(content, "\n\n"); idx != -1 {
+		return content[idx+2:]
+	}
+	return content
+}
+
+func truncateString(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit]
+}
+
+func detectMime(data []byte) string {
+	if len(data) >= 8 && string(data[:8]) == "\x89PNG\r\n\x1a\n" {
+		return "image/png"
+	}
+	return "application/octet-stream"
+}
+
+func emit(cb EventCallback, event Event) {
+	if cb != nil {
+		cb(event)
+	}
+}
+
+var timeNow = time.Now

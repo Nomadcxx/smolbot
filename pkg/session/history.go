@@ -3,11 +3,38 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Nomadcxx/nanobot-go/pkg/provider"
 )
 
+type StoredMessage struct {
+	ID           int64
+	SessionKey   string
+	Message      provider.Message
+	Consolidated bool
+	CreatedAt    time.Time
+}
+
 func (s *Store) GetHistory(sessionKey string, maxMessages int) ([]provider.Message, error) {
+	records, err := s.GetUnconsolidatedMessages(sessionKey, maxMessages)
+	if err != nil {
+		return nil, err
+	}
+
+	msgs := make([]provider.Message, 0, len(records))
+	for _, record := range records {
+		msgs = append(msgs, record.Message)
+	}
+
+	msgs = dropLeadingNonUser(msgs)
+	msgs = enforceLegalBoundary(msgs)
+	msgs = stripMessages(msgs)
+
+	return msgs, nil
+}
+
+func (s *Store) GetUnconsolidatedMessages(sessionKey string, maxMessages int) ([]StoredMessage, error) {
 	if maxMessages <= 0 {
 		maxMessages = 500
 	}
@@ -52,20 +79,24 @@ func (s *Store) GetHistory(sessionKey string, maxMessages int) ([]provider.Messa
 		return nil, fmt.Errorf("iterate history: %w", err)
 	}
 
-	msgs, err := decodeMessages(stored)
+	msgs, err := decodeStoredMessages(stored)
 	if err != nil {
 		return nil, err
 	}
 
-	msgs = dropLeadingNonUser(msgs)
-	msgs = enforceLegalBoundary(msgs)
-	msgs = stripMessages(msgs)
-
 	return msgs, nil
 }
 
-func decodeMessages(stored []storedMessage) ([]provider.Message, error) {
-	messages := make([]provider.Message, 0, len(stored))
+func (s *Store) CountUnconsolidated(sessionKey string) (int, error) {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM messages WHERE session_key = ? AND consolidated = FALSE`, sessionKey).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count unconsolidated: %w", err)
+	}
+	return count, nil
+}
+
+func decodeStoredMessages(stored []storedMessage) ([]StoredMessage, error) {
+	messages := make([]StoredMessage, 0, len(stored))
 	for _, row := range stored {
 		msg := provider.Message{
 			Role:             row.Role,
@@ -94,7 +125,13 @@ func decodeMessages(stored []storedMessage) ([]provider.Message, error) {
 			}
 		}
 
-		messages = append(messages, msg)
+		messages = append(messages, StoredMessage{
+			ID:           row.ID,
+			SessionKey:   row.SessionKey,
+			Message:      msg,
+			Consolidated: row.Consolidated,
+			CreatedAt:    row.CreatedAt,
+		})
 	}
 
 	return messages, nil
