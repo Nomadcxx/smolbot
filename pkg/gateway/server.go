@@ -284,11 +284,19 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		}
 		return map[string]any{"ok": true}, nil
 	case "models.list":
-		return []map[string]any{{
-			"id":       s.currentModel(),
-			"name":     s.currentModel(),
-			"provider": s.currentProvider(),
-		}}, nil
+		models, err := provider.GetAvailableModels(s.config)
+		if err != nil {
+			return nil, fmt.Errorf("get available models: %w", err)
+		}
+		result := make([]map[string]any, len(models))
+		for i, m := range models {
+			result[i] = map[string]any{
+				"id":       m.ID,
+				"name":     m.Name,
+				"provider": m.Provider,
+			}
+		}
+		return result, nil
 	case "models.set":
 		params := struct {
 			Model string `json:"model"`
