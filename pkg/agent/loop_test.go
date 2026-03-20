@@ -521,7 +521,9 @@ func newTestAgentLoop(t *testing.T, p provider.Provider, tools ...tool.Tool) (*A
 	if err := SyncWorkspaceTemplates(workspace); err != nil {
 		t.Fatalf("SyncWorkspaceTemplates: %v", err)
 	}
-	reg, err := skill.NewRegistry(workspace)
+	paths := config.NewPaths(t.TempDir())
+	paths.SetWorkspace(workspace)
+	reg, err := skill.NewRegistry(paths)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}

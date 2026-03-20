@@ -91,15 +91,15 @@ func TestGatewayConcurrency(t *testing.T) {
 		processor.finish("events", "final text")
 
 		progress := readUntilEvent(t, conn, "chat.progress")
-		if !strings.Contains(string(progress.Event.Event), `"content":"working"`) {
+		if !strings.Contains(string(progress.Event.Payload), `"content":"working"`) {
 			t.Fatalf("unexpected progress event %#v", progress)
 		}
 		thinking := readUntilEvent(t, conn, "chat.thinking.done")
-		if !strings.Contains(string(thinking.Event.Event), `part1 part2`) {
+		if !strings.Contains(string(thinking.Event.Payload), `part1 part2`) {
 			t.Fatalf("unexpected thinking aggregation %#v", thinking)
 		}
 		done := readUntilEvent(t, conn, "chat.done")
-		if !strings.Contains(string(done.Event.Event), `"content":"final text"`) {
+		if !strings.Contains(string(done.Event.Payload), `"content":"final text"`) {
 			t.Fatalf("unexpected done event %#v", done)
 		}
 		if !server.completedDelivery["run-events"] {
@@ -252,7 +252,7 @@ func readUntilEvent(t *testing.T, conn *websocket.Conn, name string) *DecodedFra
 		if err != nil {
 			t.Fatalf("DecodeFrame: %v", err)
 		}
-		if frame.Kind == FrameEvent && frame.Event.Name == name {
+		if frame.Kind == FrameEvent && frame.Event.EventName == name {
 			return frame
 		}
 	}

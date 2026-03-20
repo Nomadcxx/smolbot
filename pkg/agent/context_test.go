@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/nanobot-go/pkg/config"
 	"github.com/Nomadcxx/nanobot-go/pkg/skill"
 )
 
@@ -59,7 +60,9 @@ func TestBuildSystemPrompt(t *testing.T) {
 	writeFile(t, filepath.Join(workspace, "TOOLS.md"), "Tools text")
 	writeFile(t, filepath.Join(workspace, "memory", "MEMORY.md"), "Memory text")
 
-	reg, err := skill.NewRegistry(workspace)
+	paths := config.NewPaths(t.TempDir())
+	paths.SetWorkspace(workspace)
+	reg, err := skill.NewRegistry(paths)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
@@ -93,7 +96,8 @@ func TestBuildSystemPrompt(t *testing.T) {
 		lastIdx = idx
 	}
 
-	if !strings.Contains(prompt, "workspace github skill") && !strings.Contains(prompt, "Maintain durable memory") {
+	// Check that always-on skill content is present (from AlwaysOn(), not SummaryXML)
+	if !strings.Contains(prompt, "Use this skill") {
 		t.Fatalf("prompt missing always-on skill content: %q", prompt)
 	}
 	if !strings.Contains(prompt, workspace) {
@@ -113,7 +117,9 @@ func TestBuildSystemPromptFallsBackToDefaultIdentity(t *testing.T) {
 		t.Fatalf("remove AGENTS.md: %v", err)
 	}
 
-	reg, err := skill.NewRegistry(workspace)
+	paths := config.NewPaths(t.TempDir())
+	paths.SetWorkspace(workspace)
+	reg, err := skill.NewRegistry(paths)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}

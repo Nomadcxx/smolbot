@@ -251,9 +251,9 @@ func TestStatusChannelStatesReturnsDetail(t *testing.T) {
 
 func TestEventFrameHasCorrectStructure(t *testing.T) {
 	frame, err := EncodeEvent(EventFrame{
-		Name:  "chat.progress",
-		Seq:   1,
-		Event: json.RawMessage(`{"content":"working..."}`),
+		EventName: "chat.progress",
+		Seq:       1,
+		Payload:   json.RawMessage(`{"content":"working..."}`),
 	})
 	if err != nil {
 		t.Fatalf("EncodeEvent: %v", err)
@@ -267,8 +267,8 @@ func TestEventFrameHasCorrectStructure(t *testing.T) {
 	if wf.Type != FrameEvent {
 		t.Fatalf("event frame type = %q, want %q", wf.Type, FrameEvent)
 	}
-	if wf.Name != "chat.progress" {
-		t.Fatalf("event frame name = %q, want %q", wf.Name, "chat.progress")
+	if wf.Event != "chat.progress" {
+		t.Fatalf("event frame name = %q, want %q", wf.Event, "chat.progress")
 	}
 	if wf.Seq == 0 {
 		t.Fatalf("event frame seq = 0, want nonzero")

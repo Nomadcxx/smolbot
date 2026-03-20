@@ -525,7 +525,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		return nil, err
 	}
 
-	skills, err := skill.NewRegistry(paths.Workspace())
+	skills, err := skill.NewRegistry(paths)
 	if err != nil {
 		return nil, err
 	}

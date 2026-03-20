@@ -92,13 +92,20 @@ func parseSkill(raw, path, source string) (*Skill, error) {
 }
 
 func splitFrontmatter(raw string) (string, string, error) {
+	// Normalize line endings to handle Windows-style line endings
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	
 	if !strings.HasPrefix(raw, "---\n") {
-		return "", "", fmt.Errorf("missing YAML frontmatter")
+		return "", "", fmt.Errorf("missing YAML frontmatter: file must start with '---'")
 	}
 	rest := strings.TrimPrefix(raw, "---\n")
 	idx := strings.Index(rest, "\n---\n")
 	if idx == -1 {
-		return "", "", fmt.Errorf("unterminated YAML frontmatter")
+		// Check if file ends with just "\n---" (no trailing newline)
+		if strings.HasSuffix(rest, "\n---") {
+			return strings.TrimSuffix(rest, "\n---"), "", nil
+		}
+		return "", "", fmt.Errorf("unterminated YAML frontmatter: missing closing '---'")
 	}
 	return rest[:idx], rest[idx+5:], nil
 }

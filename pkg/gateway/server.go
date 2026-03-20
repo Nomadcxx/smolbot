@@ -55,9 +55,10 @@ type Server struct {
 }
 
 type clientState struct {
-	conn *websocket.Conn
-	mu   sync.Mutex
-	seq  int64
+	conn        *websocket.Conn
+	mu          sync.Mutex
+	seq         int64
+	isLegacy    bool
 }
 
 type runState struct {
@@ -152,6 +153,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		if frame.Kind != FrameRequest {
 			_ = s.writeError(state, "", "bad_request", "expected request frame")
 			continue
+		}
+		if frame.IsLegacy {
+			state.isLegacy = true
 		}
 
 		resp, err := s.handleRequest(r.Context(), state, frame.Request)
@@ -311,6 +315,13 @@ func (s *Server) writeResponse(client *clientState, id string, payload any) erro
 	if err != nil {
 		return err
 	}
+	if client.isLegacy {
+		frame, err := EncodeLegacyResponse(ResponseFrame{ID: id, Result: result, OK: true})
+		if err != nil {
+			return err
+		}
+		return client.write(frame)
+	}
 	frame, err := EncodeResponse(ResponseFrame{ID: id, Result: result})
 	if err != nil {
 		return err
@@ -328,6 +339,19 @@ func (s *Server) writeError(client *clientState, id, code, message string) error
 	})
 	if err != nil {
 		return err
+	}
+	if client.isLegacy {
+		legacyFrame, err := EncodeLegacyResponse(ResponseFrame{
+			ID: id,
+			Error: &ErrorFrame{
+				Code:    code,
+				Message: message,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		return client.write(legacyFrame)
 	}
 	return client.write(frame)
 }
@@ -566,9 +590,9 @@ func (s *Server) writeEvent(client *clientState, name string, payload any) error
 		return err
 	}
 	frame, err := EncodeEvent(EventFrame{
-		Name:  name,
-		Seq:   client.nextSeq(),
-		Event: data,
+		EventName: name,
+		Seq:       client.nextSeq(),
+		Payload:   data,
 	})
 	if err != nil {
 		return err
