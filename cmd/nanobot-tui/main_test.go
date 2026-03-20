@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestDirectBootstrapParsesDefaultFlags(t *testing.T) {
-	cfg, err := parseConfig(nil)
+	_, cfg, err := parseConfig(nil)
 	if err != nil {
 		t.Fatalf("parseConfig returned error: %v", err)
 	}
