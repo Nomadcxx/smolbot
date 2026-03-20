@@ -102,15 +102,11 @@ func EncodeLegacyResponse(frame ResponseFrame) ([]byte, error) {
 }
 
 func EncodeEvent(frame EventFrame) ([]byte, error) {
-	data, err := json.Marshal(frame.Payload)
-	if err != nil {
-		return nil, err
-	}
 	return json.Marshal(wireFrame{
-		Type:  FrameEvent,
-		Event: frame.EventName,
-		Name:  string(data),
-		Seq:   frame.Seq,
+		Type:    FrameEvent,
+		Event:   frame.EventName,
+		Payload: frame.Payload,
+		Seq:     frame.Seq,
 	})
 }
 
@@ -147,7 +143,7 @@ func DecodeFrame(data []byte) (*DecodedFrame, error) {
 		return &DecodedFrame{Kind: FrameEvent, Event: EventFrame{
 			EventName: wire.Event,
 			Seq:       wire.Seq,
-			Payload:   json.RawMessage(wire.Name),
+			Payload:   wire.Payload,
 		}}, nil
 	default:
 		return nil, fmt.Errorf("unknown frame type %q", wire.Type)
