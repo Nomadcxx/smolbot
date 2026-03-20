@@ -808,6 +808,7 @@ func ensureRuntimePaths(paths *config.Paths) error {
 		paths.Workspace(),
 		paths.MemoryDir(),
 		filepath.Dir(paths.SessionsDB()),
+		paths.SkillsDir(),
 	} {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return err

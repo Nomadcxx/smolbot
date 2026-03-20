@@ -59,7 +59,9 @@ func LoadDir(root string) ([]*Skill, error) {
 		skillPath := filepath.Join(root, entry.Name(), "SKILL.md")
 		skill, err := LoadFile(skillPath)
 		if err != nil {
-			return nil, err
+			// Log warning but continue loading other skills
+			fmt.Fprintf(os.Stderr, "Warning: failed to load skill %q: %v\n", entry.Name(), err)
+			continue
 		}
 		skills = append(skills, skill)
 	}
