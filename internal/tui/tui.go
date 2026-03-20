@@ -1,0 +1,661 @@
+package tui
+
+import (
+	"encoding/json"
+	"strings"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
+	"github.com/Nomadcxx/nanobot-go/internal/tui/client"
+	"github.com/Nomadcxx/nanobot-go/internal/tui/components/chat"
+	dialogcmp "github.com/Nomadcxx/nanobot-go/internal/tui/components/dialog"
+	"github.com/Nomadcxx/nanobot-go/internal/tui/components/footer"
+	"github.com/Nomadcxx/nanobot-go/internal/tui/components/header"
+	"github.com/Nomadcxx/nanobot-go/internal/tui/components/status"
+	"github.com/Nomadcxx/nanobot-go/internal/tui/theme"
+	_ "github.com/Nomadcxx/nanobot-go/internal/tui/theme/themes"
+)
+
+type ConnectedMsg struct{ Hello *client.HelloPayload }
+type CtrlCMsg struct{}
+type DisconnectedMsg struct{}
+type EventMsg struct{ Event client.Event }
+type ChatStartedMsg struct{ RunID string }
+type ChatDoneMsg struct{ Content string }
+type ChatErrorMsg struct{ Message string }
+type ChatProgressMsg struct{ Content string }
+type ThinkingDoneMsg struct{ Content string }
+type HistoryLoadedMsg struct{ Messages []client.HistoryMessage }
+type SessionsLoadedMsg struct{ Sessions []client.SessionInfo }
+type SessionResetDoneMsg struct{ Key string }
+type ModelsLoadedMsg struct {
+	Models  []client.ModelInfo
+	Current string
+}
+type ModelSetMsg struct{ ID string }
+type ModelCurrentMsg struct {
+	Current string
+}
+type StatusLoadedMsg struct {
+	Status client.StatusPayload
+}
+
+type Dialog interface {
+	Update(tea.Msg) (Dialog, tea.Cmd)
+	View() string
+}
+
+type gatewayClient interface {
+	Connect() (*client.HelloPayload, error)
+	Close()
+	SetOnEvent(func(client.Event))
+	SetOnClose(func())
+	ChatSend(session, message string) (string, error)
+	ChatAbort(session, runID string) error
+	ChatHistory(session string, limit int) ([]client.HistoryMessage, error)
+	SessionsList() ([]client.SessionInfo, error)
+	SessionsReset(key string) error
+	ModelsList() ([]client.ModelInfo, string, error)
+	ModelsSet(id string) error
+	Status() (client.StatusPayload, error)
+}
+
+type Model struct {
+	width, height int
+	app           *App
+	client        gatewayClient
+	header        header.Model
+	messages      chat.MessagesModel
+	editor        chat.EditorModel
+	status        status.Model
+	footer        footer.Model
+	dialog        Dialog
+	eventCh       chan tea.Msg
+	connected     bool
+	reconnectWait time.Duration
+	streaming     bool
+	currentRunID  string
+	runtime       RuntimeStatus
+}
+
+func New(cfg Config) Model {
+	a := NewApp(cfg)
+	_ = theme.Set(a.Theme)
+	if theme.Current() == nil {
+		_ = theme.Set("nord")
+	}
+
+	eventCh := make(chan tea.Msg, 64)
+	c := client.New(a.WSURL())
+
+	return Model{
+		app:      a,
+		client:   c,
+		header:   header.New(),
+		messages: chat.NewMessages(),
+		editor:   chat.NewEditor(),
+		status:   status.New(),
+		footer:   footer.New(),
+		eventCh:  eventCh,
+	}
+}
+
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(m.editor.Init(), m.connectCmd(), m.waitForEventCmd())
+}
+
+func FilterProgramMsg(_ tea.Model, msg tea.Msg) tea.Msg {
+	if _, ok := msg.(tea.InterruptMsg); ok {
+		return CtrlCMsg{}
+	}
+	return msg
+}
+
+func (m Model) connectCmd() tea.Cmd {
+	return func() tea.Msg {
+		m.client.SetOnEvent(func(evt client.Event) {
+			m.eventCh <- EventMsg{Event: evt}
+		})
+		m.client.SetOnClose(func() {
+			m.eventCh <- DisconnectedMsg{}
+		})
+		hello, err := m.client.Connect()
+		if err != nil {
+			return DisconnectedMsg{}
+		}
+		return ConnectedMsg{Hello: hello}
+	}
+}
+
+func (m Model) waitForEventCmd() tea.Cmd {
+	return func() tea.Msg {
+		return <-m.eventCh
+	}
+}
+
+func (m Model) loadHistoryCmd() tea.Cmd {
+	return func() tea.Msg {
+		msgs, err := m.client.ChatHistory(m.app.Session, 100)
+		if err != nil {
+			return nil
+		}
+		return HistoryLoadedMsg{Messages: msgs}
+	}
+}
+
+func (m Model) sendChatCmd(message string) tea.Cmd {
+	return func() tea.Msg {
+		runID, err := m.client.ChatSend(m.app.Session, message)
+		if err != nil {
+			return ChatErrorMsg{Message: err.Error()}
+		}
+		return ChatStartedMsg{RunID: runID}
+	}
+}
+
+func (m Model) reconnectCmd(delay time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		return m.connectCmd()()
+	}
+}
+
+func (m Model) saveStateCmd() tea.Cmd {
+	return func() tea.Msg {
+		_ = SaveState(State{
+			Theme:       m.app.Theme,
+			LastSession: m.app.Session,
+			LastModel:   m.app.Model,
+		})
+		if m.client != nil {
+			m.client.Close()
+		}
+		return tea.QuitMsg{}
+	}
+}
+
+func (m Model) persistStateCmd() tea.Cmd {
+	return func() tea.Msg {
+		_ = SaveState(State{
+			Theme:       m.app.Theme,
+			LastSession: m.app.Session,
+			LastModel:   m.app.Model,
+		})
+		return nil
+	}
+}
+
+func (m Model) syncModelCmd() tea.Cmd {
+	return func() tea.Msg {
+		_, current, err := m.client.ModelsList()
+		if err != nil {
+			return nil
+		}
+		return ModelCurrentMsg{Current: current}
+	}
+}
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		headerH := m.header.Height()
+		editorH := m.editor.Height()
+		statusH := 1
+		footerH := m.footer.Height()
+		chatH := m.height - headerH - editorH - statusH - footerH
+		if chatH < 1 {
+			chatH = 1
+		}
+		m.header.SetWidth(m.width)
+		m.messages.SetSize(m.width, chatH)
+		m.editor.SetWidth(m.width)
+		m.status.SetWidth(m.width)
+		m.footer.SetWidth(m.width)
+		m.syncMetadataView()
+		return m, nil
+	case ConnectedMsg:
+		m.connected = true
+		m.reconnectWait = 0
+		m.status.SetConnected(true)
+		m.status.SetReconnecting(false)
+		return m, tea.Batch(m.loadHistoryCmd(), m.syncModelCmd())
+	case CtrlCMsg:
+		return m.handleCtrlC()
+	case ChatStartedMsg:
+		m.currentRunID = msg.RunID
+		return m, nil
+	case ChatDoneMsg:
+		m.streaming = false
+		m.currentRunID = ""
+		m.status.SetStreaming(false)
+		m.messages.AppendAssistant(msg.Content)
+		return m, nil
+	case ChatProgressMsg:
+		m.messages.SetProgress(msg.Content)
+		return m, nil
+	case ThinkingDoneMsg:
+		m.messages.SetThinking(msg.Content)
+		return m, nil
+	case ChatErrorMsg:
+		m.streaming = false
+		m.currentRunID = ""
+		m.status.SetStreaming(false)
+		m.messages.AppendError(msg.Message)
+		return m, nil
+	case HistoryLoadedMsg:
+		history := make([]chat.ChatMessage, 0, len(msg.Messages))
+		for _, hm := range msg.Messages {
+			if hm.Role == "user" {
+				history = append(history, chat.ChatMessage{Role: "user", Content: hm.Content})
+			} else if hm.Role == "assistant" {
+				history = append(history, chat.ChatMessage{Role: "assistant", Content: hm.Content})
+			}
+		}
+		m.messages.ReplaceHistory(history)
+		return m, nil
+	case ModelCurrentMsg:
+		if msg.Current != "" {
+			m.app.Model = msg.Current
+			m.footer.SetModel(msg.Current)
+		}
+		return m, nil
+	case StatusLoadedMsg:
+		m.runtime = RuntimeStatus{
+			Model:            msg.Status.Model,
+			Provider:         msg.Status.Provider,
+			UptimeSeconds:    msg.Status.UptimeSeconds,
+			Channels:         append([]string(nil), msg.Status.Channels...),
+			ConnectedClients: msg.Status.ConnectedClients,
+		}
+		if msg.Status.Model != "" {
+			m.app.Model = msg.Status.Model
+		}
+		m.syncMetadataView()
+		return m, nil
+	case SessionsLoadedMsg:
+		m.dialog = sessionDialog{dialogcmp.NewSessions(msg.Sessions, m.app.Session)}
+		return m, nil
+	case SessionResetDoneMsg:
+		m.app.Session = msg.Key
+		m.messages = chat.NewMessages()
+		m.syncMetadataView()
+		return m, m.persistStateCmd()
+	case ModelsLoadedMsg:
+		m.dialog = modelsDialog{dialogcmp.NewModels(msg.Models, msg.Current)}
+		return m, nil
+	case ModelSetMsg:
+		m.app.Model = msg.ID
+		m.syncMetadataView()
+		return m, m.persistStateCmd()
+	case dialogcmp.SessionChosenMsg:
+		m.app.Session = msg.Key
+		m.messages = chat.NewMessages()
+		m.dialog = nil
+		m.syncMetadataView()
+		return m, tea.Batch(m.loadHistoryCmd(), m.persistStateCmd())
+	case dialogcmp.SessionNewMsg:
+		m.app.Session = "tui:" + time.Now().Format("20060102-150405")
+		m.messages = chat.NewMessages()
+		m.dialog = nil
+		m.syncMetadataView()
+		return m, m.persistStateCmd()
+	case dialogcmp.SessionResetMsg:
+		m.dialog = nil
+		return m, func() tea.Msg {
+			if err := m.client.SessionsReset(msg.Key); err != nil {
+				return ChatErrorMsg{Message: err.Error()}
+			}
+			return SessionResetDoneMsg{Key: msg.Key}
+		}
+	case dialogcmp.ModelChosenMsg:
+		m.dialog = nil
+		return m, func() tea.Msg {
+			if err := m.client.ModelsSet(msg.ID); err != nil {
+				return ChatErrorMsg{Message: err.Error()}
+			}
+			return ModelSetMsg{ID: msg.ID}
+		}
+	case dialogcmp.CommandChosenMsg:
+		m.dialog = nil
+		m.editor.SetValue("")
+		return m.handleSlashCommand(msg.Command)
+	case dialogcmp.CloseDialogMsg:
+		m.dialog = nil
+		return m, nil
+	case DisconnectedMsg:
+		m.connected = false
+		m.streaming = false
+		m.currentRunID = ""
+		m.status.SetConnected(false)
+		m.status.SetStreaming(false)
+		m.status.SetReconnecting(true)
+		if m.reconnectWait == 0 {
+			m.reconnectWait = time.Second
+		} else if m.reconnectWait < 8*time.Second {
+			m.reconnectWait *= 2
+		}
+		return m, tea.Batch(m.reconnectCmd(m.reconnectWait), m.waitForEventCmd())
+	case EventMsg:
+		cmds = append(cmds, m.waitForEventCmd())
+		var mapped tea.Msg
+		switch msg.Event.Event {
+		case "chat.done":
+			var p client.ChatDonePayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			mapped = ChatDoneMsg{Content: p.Content}
+		case "chat.progress":
+			var p client.ProgressPayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			mapped = ChatProgressMsg{Content: p.Content}
+		case "chat.error":
+			var p client.ChatErrorPayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			mapped = ChatErrorMsg{Message: p.Message}
+		case "chat.thinking.done":
+			var p client.ThinkingDonePayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			mapped = ThinkingDoneMsg{Content: p.Content}
+		case "chat.tool.start":
+			var p client.ToolStartPayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			m.messages.StartTool(p.Name, p.Input)
+		case "chat.tool.done":
+			var p client.ToolDonePayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			status := "done"
+			if p.Error != "" {
+				status = "error"
+			}
+			m.messages.FinishTool(p.Name, status, p.Output)
+		}
+		if mapped != nil {
+			nextModel, cmd := m.Update(mapped)
+			next := nextModel.(Model)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return next, tea.Batch(cmds...)
+		}
+		return m, tea.Batch(cmds...)
+	case tea.KeyMsg:
+		if m.dialog != nil {
+			if _, ok := m.dialog.(*slashCommandsDialog); ok {
+				if handlesSlashMenuKey(msg.String()) {
+					next, cmd := m.dialog.Update(msg)
+					m.dialog = next
+					if cmd != nil {
+						return m.Update(cmd())
+					}
+					return m, nil
+				}
+				if msg.String() == "ctrl+c" {
+					return m.handleCtrlC()
+				}
+			} else {
+				next, cmd := m.dialog.Update(msg)
+				m.dialog = next
+				if cmd != nil {
+					return m.Update(cmd())
+				}
+				return m, nil
+			}
+		}
+		switch msg.String() {
+		case "ctrl+c":
+			return m.handleCtrlC()
+		case "pgup", "pgdown", "home", "end", "esc", "ctrl+l":
+			m.messages.HandleKey(msg.String())
+			return m, nil
+		}
+	}
+	var editorCmd tea.Cmd
+	m.editor, editorCmd = m.editor.Update(msg)
+	if editorCmd != nil {
+		cmds = append(cmds, editorCmd)
+	}
+	if submitted := m.editor.Submitted(); submitted != "" {
+		if strings.HasPrefix(submitted, "/") {
+			return m.handleSlashCommand(submitted)
+		}
+		m.messages.AppendUser(submitted)
+		m.streaming = true
+		m.status.SetStreaming(true)
+		cmds = append(cmds, m.sendChatCmd(submitted))
+	}
+	m.syncCommandMenu()
+
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleCtrlC() (tea.Model, tea.Cmd) {
+	if m.streaming {
+		_ = m.client.ChatAbort(m.app.Session, m.currentRunID)
+		m.streaming = false
+		m.currentRunID = ""
+		m.status.SetStreaming(false)
+		return m, nil
+	}
+	return m, m.saveStateCmd()
+}
+
+func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return m, nil
+	}
+	cmd := parts[0]
+	args := ""
+	if len(parts) > 1 {
+		args = strings.Join(parts[1:], " ")
+	}
+	switch cmd {
+	case "/session":
+		if args == "new" {
+			m.app.Session = "tui:" + time.Now().Format("20060102-150405")
+			m.messages = chat.NewMessages()
+			m.syncMetadataView()
+			return m, m.persistStateCmd()
+		}
+		if args == "reset" {
+			session := m.app.Session
+			return m, func() tea.Msg {
+				if err := m.client.SessionsReset(session); err != nil {
+					return ChatErrorMsg{Message: err.Error()}
+				}
+				return SessionResetDoneMsg{Key: session}
+			}
+		}
+		return m, func() tea.Msg {
+			sessions, err := m.client.SessionsList()
+			if err != nil {
+				return ChatErrorMsg{Message: err.Error()}
+			}
+			return SessionsLoadedMsg{Sessions: sessions}
+		}
+	case "/model":
+		if args != "" {
+			return m, func() tea.Msg {
+				if err := m.client.ModelsSet(args); err != nil {
+					return ChatErrorMsg{Message: err.Error()}
+				}
+				return ModelSetMsg{ID: args}
+			}
+		}
+		return m, func() tea.Msg {
+			models, current, err := m.client.ModelsList()
+			if err != nil {
+				return ChatErrorMsg{Message: err.Error()}
+			}
+			return ModelsLoadedMsg{Models: models, Current: current}
+		}
+	case "/clear":
+		m.messages = chat.NewMessages()
+	case "/help":
+		m.messages.AppendAssistant("Commands: /session, /session new, /session reset, /model, /model <name>, /theme <name>, /clear, /status, /help, /quit")
+	case "/quit":
+		return m, m.saveStateCmd()
+	case "/theme":
+		if args == "" {
+			m.dialog = commandsDialog{dialogcmp.NewCommands(m.themeChoices())}
+			return m, nil
+		}
+		if theme.Set(args) {
+			m.app.Theme = args
+			m.header = header.New()
+			return m, m.persistStateCmd()
+		}
+	case "/status":
+		return m, func() tea.Msg {
+			payload, err := m.client.Status()
+			if err != nil {
+				return ChatErrorMsg{Message: err.Error()}
+			}
+			return StatusLoadedMsg{Status: payload}
+		}
+	default:
+		m.messages.AppendError("Unknown command: " + cmd)
+	}
+	return m, nil
+}
+
+func (m Model) View() tea.View {
+	t := theme.Current()
+	if t == nil {
+		return tea.NewView("Loading...")
+	}
+
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		m.header.View(),
+		m.messages.View(),
+		m.editor.View(),
+		m.status.View(),
+		m.footer.View(),
+	)
+	if m.width > 0 && m.height > 0 {
+		canvas := lipgloss.NewCanvas(m.width, m.height)
+		canvas.Compose(lipgloss.NewLayer(content))
+		if m.dialog != nil {
+			dialogView := m.dialog.View()
+			canvas.Compose(lipgloss.NewLayer(dialogView).
+				X(max(0, (m.width-lipgloss.Width(dialogView))/2)).
+				Y(max(0, (m.height-lipgloss.Height(dialogView))/2)))
+		}
+		content = canvas.Render()
+	}
+	view := tea.NewView(content)
+	view.AltScreen = true
+	return view
+}
+
+func (m *Model) syncMetadataView() {
+	model := m.runtime.Model
+	if model == "" {
+		model = m.app.Model
+	}
+	m.footer.SetModel(model)
+	m.footer.SetProvider(m.runtime.Provider)
+	m.footer.SetSession(m.app.Session)
+	m.footer.SetUptimeSeconds(m.runtime.UptimeSeconds)
+	m.footer.SetConnectedClients(m.runtime.ConnectedClients)
+	m.footer.SetChannels(m.runtime.Channels)
+}
+
+type sessionDialog struct{ dialogcmp.SessionsModel }
+
+func (d sessionDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
+	next, cmd := d.SessionsModel.Update(msg)
+	return sessionDialog{next}, cmd
+}
+
+type modelsDialog struct{ dialogcmp.ModelsModel }
+
+func (d modelsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
+	next, cmd := d.ModelsModel.Update(msg)
+	return modelsDialog{next}, cmd
+}
+
+type commandsDialog struct{ dialogcmp.CommandsModel }
+
+func (d commandsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
+	next, cmd := d.CommandsModel.Update(msg)
+	return commandsDialog{next}, cmd
+}
+
+func (d commandsDialog) View() string { return d.CommandsModel.View() }
+
+type slashCommandsDialog struct{ dialogcmp.CommandsModel }
+
+func (d *slashCommandsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
+	next, cmd := d.CommandsModel.Update(msg)
+	return &slashCommandsDialog{next}, cmd
+}
+
+func (d *slashCommandsDialog) View() string { return d.CommandsModel.View() }
+
+func (d *slashCommandsDialog) SetFilter(filter string) {
+	d.CommandsModel.SetFilter(filter)
+}
+
+func (m Model) commandChoices() []string {
+	commands := []string{
+		"/session",
+		"/session new",
+		"/session reset",
+		"/model",
+		"/clear",
+		"/status",
+		"/help",
+		"/quit",
+	}
+	return append(commands, m.themeChoices()...)
+}
+
+func (m Model) themeChoices() []string {
+	names := theme.List()
+	choices := make([]string, 0, len(names))
+	for _, name := range names {
+		choices = append(choices, "/theme "+name)
+	}
+	return choices
+}
+
+func (m *Model) syncCommandMenu() {
+	if m.dialog != nil {
+		if current, ok := m.dialog.(*slashCommandsDialog); ok {
+			value := strings.TrimSpace(m.editor.Value())
+			if !strings.HasPrefix(value, "/") {
+				m.dialog = nil
+				return
+			}
+			current.SetFilter(strings.TrimSpace(strings.TrimPrefix(value, "/")))
+			m.dialog = current
+		}
+		return
+	}
+	value := strings.TrimSpace(m.editor.Value())
+	if !strings.HasPrefix(value, "/") {
+		return
+	}
+	filter := strings.TrimSpace(strings.TrimPrefix(value, "/"))
+	m.dialog = &slashCommandsDialog{dialogcmp.NewCommands(m.commandChoices())}
+	if current, ok := m.dialog.(*slashCommandsDialog); ok {
+		current.SetFilter(filter)
+	}
+}
+
+func handlesSlashMenuKey(key string) bool {
+	switch key {
+	case "up", "down", "ctrl+p", "ctrl+n", "tab", "enter", "esc":
+		return true
+	default:
+		return false
+	}
+}

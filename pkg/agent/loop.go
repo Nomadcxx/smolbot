@@ -26,14 +26,16 @@ type memoryRunner interface {
 }
 
 type LoopDeps struct {
-	Provider  provider.Provider
-	Tools     *tool.Registry
-	Sessions  *session.Store
-	Config    *config.Config
-	Skills    *skill.Registry
-	Tokenizer *tokenizer.Tokenizer
-	Memory    memoryRunner
-	Workspace string
+	Provider      provider.Provider
+	Tools         *tool.Registry
+	Sessions      *session.Store
+	Config        *config.Config
+	Skills        *skill.Registry
+	Tokenizer     *tokenizer.Tokenizer
+	Memory        memoryRunner
+	Workspace     string
+	MessageRouter tool.MessageRouter
+	Spawner       tool.Spawner
 }
 
 type AgentLoop struct {
@@ -46,6 +48,9 @@ type AgentLoop struct {
 	tokenizer *tokenizer.Tokenizer
 	workspace string
 
+	messageRouter tool.MessageRouter
+	spawner       tool.Spawner
+
 	mu         sync.Mutex
 	activeTask map[string]context.CancelFunc
 	bgTasks    sync.WaitGroup
@@ -53,16 +58,32 @@ type AgentLoop struct {
 
 func NewAgentLoop(deps LoopDeps) *AgentLoop {
 	return &AgentLoop{
-		provider:   deps.Provider,
-		tools:      deps.Tools,
-		sessions:   deps.Sessions,
-		config:     deps.Config,
-		skills:     deps.Skills,
-		memory:     deps.Memory,
-		tokenizer:  deps.Tokenizer,
-		workspace:  deps.Workspace,
-		activeTask: make(map[string]context.CancelFunc),
+		provider:      deps.Provider,
+		tools:         deps.Tools,
+		sessions:      deps.Sessions,
+		config:        deps.Config,
+		skills:        deps.Skills,
+		memory:        deps.Memory,
+		tokenizer:     deps.Tokenizer,
+		workspace:     deps.Workspace,
+		messageRouter: deps.MessageRouter,
+		spawner:       deps.Spawner,
+		activeTask:    make(map[string]context.CancelFunc),
 	}
+}
+
+func (a *AgentLoop) EffectiveModel() string {
+	if a == nil || a.config == nil {
+		return ""
+	}
+	return a.config.Agents.Defaults.Model
+}
+
+func (a *AgentLoop) SetActiveModel(model string) {
+	if a == nil || a.config == nil {
+		return
+	}
+	a.config.Agents.Defaults.Model = model
 }
 
 func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCallback) (string, error) {
@@ -122,7 +143,7 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 			return "", err
 		}
 
-		resp, err := a.consumeStream(stream, cb)
+		resp, err := a.consumeStream(stream, cb, suppressFinalResponse)
 		if err != nil {
 			return "", err
 		}
@@ -146,15 +167,19 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 				emit(cb, Event{Type: EventToolStart, Content: toolCall.Function.Name})
 
 				result, err := a.tools.Execute(runCtx, toolCall.Function.Name, json.RawMessage(toolCall.Function.Arguments), tool.ToolContext{
-					SessionKey: req.SessionKey,
-					Channel:    req.Channel,
-					ChatID:     req.ChatID,
+					SessionKey:    req.SessionKey,
+					Channel:       req.Channel,
+					ChatID:        req.ChatID,
+					Workspace:     a.workspace,
+					Spawner:       a.spawner,
+					MessageRouter: a.messageRouter,
+					IsCronContext: req.IsCronContext,
 				})
 				if err != nil {
 					return "", err
 				}
 
-				content := truncateString(result.Content, 16000)
+				content := truncateString(firstNonEmptyString(result.Output, result.Content), 16000)
 				toolMsg := provider.Message{
 					Role:       "tool",
 					Content:    content,
@@ -237,6 +262,10 @@ func (a *AgentLoop) handleSlashCommand(ctx context.Context, req Request) (string
 	}
 }
 
+func (a *AgentLoop) CancelSession(sessionKey string) {
+	a.cancelSession(sessionKey)
+}
+
 func (a *AgentLoop) beginSession(parent context.Context, sessionKey string) (context.Context, context.CancelFunc, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -287,7 +316,7 @@ func (a *AgentLoop) buildUserMessage(req Request) provider.Message {
 	return provider.Message{Role: "user", Content: blocks}
 }
 
-func (a *AgentLoop) consumeStream(stream *provider.Stream, cb EventCallback) (*provider.Response, error) {
+func (a *AgentLoop) consumeStream(stream *provider.Stream, cb EventCallback, suppressOutput bool) (*provider.Response, error) {
 	defer stream.Close()
 
 	resp := &provider.Response{}
@@ -317,11 +346,15 @@ func (a *AgentLoop) consumeStream(stream *provider.Stream, cb EventCallback) (*p
 		}
 		if delta.Content != "" {
 			resp.Content += delta.Content
-			emit(cb, Event{Type: EventProgress, Content: delta.Content})
+			if !suppressOutput {
+				emit(cb, Event{Type: EventProgress, Content: delta.Content})
+			}
 		}
 		if delta.ReasoningContent != "" {
 			resp.ReasoningContent += delta.ReasoningContent
-			emit(cb, Event{Type: EventThinking, Content: delta.ReasoningContent})
+			if !suppressOutput {
+				emit(cb, Event{Type: EventThinking, Content: delta.ReasoningContent})
+			}
 		}
 		for _, toolCall := range delta.ToolCalls {
 			existing, ok := toolCalls[toolCall.Index]
@@ -393,9 +426,11 @@ func normalizeUserContentForSave(content any) string {
 }
 
 func sameTargetDelivery(req Request, metadata map[string]any) bool {
-	return metadata != nil &&
-		metadata["channel"] == req.Channel &&
-		metadata["chat_id"] == req.ChatID
+	if metadata == nil {
+		return false
+	}
+	return metadata["channel"] == req.Channel &&
+		metadata["chatID"] == req.ChatID
 }
 
 func stripThinkBlocks(content string) string {
@@ -421,16 +456,36 @@ func truncateString(value string, limit int) string {
 }
 
 func detectMime(data []byte) string {
-	if len(data) >= 8 && string(data[:8]) == "\x89PNG\r\n\x1a\n" {
-		return "image/png"
+	if len(data) < 4 {
+		return "application/octet-stream"
 	}
-	return "application/octet-stream"
+	switch {
+	case len(data) >= 8 && string(data[:8]) == "\x89PNG\r\n\x1a\n":
+		return "image/png"
+	case data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF:
+		return "image/jpeg"
+	case string(data[:6]) == "GIF87a" || string(data[:6]) == "GIF89a":
+		return "image/gif"
+	case string(data[:4]) == "RIFF" && len(data) >= 12 && string(data[8:12]) == "WEBP":
+		return "image/webp"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 func emit(cb EventCallback, event Event) {
 	if cb != nil {
 		cb(event)
 	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 var timeNow = time.Now

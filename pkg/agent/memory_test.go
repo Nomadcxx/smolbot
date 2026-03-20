@@ -163,14 +163,69 @@ func TestMaybeConsolidateRepeatsUpToThresholdOrFiveRounds(t *testing.T) {
 	}
 }
 
-type fakeMemoryProvider struct {
-	responses []*provider.Response
-	err       error
-	calls     int
+func TestConsolidateBatchFallsBackToAutoOnForcedToolChoiceRejection(t *testing.T) {
+	workspace := prepareMemoryWorkspace(t)
+	store := newMemoryStore(t)
+	defer store.Close()
+
+	long := strings.Repeat("context ", 40)
+	if err := store.SaveMessages("s1", []provider.Message{
+		{Role: "user", Content: long},
+		{Role: "assistant", Content: long},
+	}); err != nil {
+		t.Fatalf("SaveMessages: %v", err)
+	}
+
+	refusalErr := errors.New("provider rejected forced tool_choice")
+	fake := &fakeMemoryProvider{
+		responses: []*provider.Response{
+			{Content: "I cannot force save_memory tool", FinishReason: "stop"},
+			{Content: "", ToolCalls: []provider.ToolCall{{
+				ID:       "call1",
+				Function: provider.FunctionCall{Name: "save_memory", Arguments: `{"history_entry":"h","memory_update":"m"}`},
+			}}, FinishReason: "tool_calls"},
+		},
+		refusalErrors: []error{refusalErr, nil},
+	}
+	consolidator := NewMemoryConsolidator(fake, store, tokenizer.New(), workspace, 10)
+
+	if err := consolidator.MaybeConsolidate(context.Background(), "s1"); err != nil {
+		t.Fatalf("MaybeConsolidate: %v", err)
+	}
+
+	if fake.calls < 2 {
+		t.Fatalf("expected at least 2 calls (first rejected forced, second with auto), got %d", fake.calls)
+	}
+
+	firstReq := fake.requests[0]
+	if firstReq.ToolChoice != "save_memory" {
+		t.Fatalf("first request ToolChoice = %v, want save_memory", firstReq.ToolChoice)
+	}
+
+	autoReq := fake.requests[1]
+	if autoReq.ToolChoice != "auto" {
+		t.Fatalf("second request ToolChoice = %v, want auto (fallback)", autoReq.ToolChoice)
+	}
 }
 
-func (f *fakeMemoryProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provider.Response, error) {
+type fakeMemoryProvider struct {
+	responses      []*provider.Response
+	err            error
+	calls          int
+	lastReq        provider.ChatRequest
+	requests       []provider.ChatRequest
+	refusalErrors  []error
+	refusalIndex   int
+}
+
+func (f *fakeMemoryProvider) Chat(_ context.Context, req provider.ChatRequest) (*provider.Response, error) {
 	f.calls++
+	f.lastReq = req
+	f.requests = append(f.requests, req)
+	if f.refusalIndex < len(f.refusalErrors) && f.refusalErrors[f.refusalIndex] != nil {
+		f.refusalIndex++
+		return nil, f.refusalErrors[f.refusalIndex-1]
+	}
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -187,6 +242,12 @@ func (f *fakeMemoryProvider) ChatStream(context.Context, provider.ChatRequest) (
 }
 
 func (f *fakeMemoryProvider) Name() string { return "openai" }
+
+func (f *fakeMemoryProvider) lastRequest() provider.ChatRequest {
+	return f.lastReq
+}
+
+var _ provider.Provider = (*fakeMemoryProvider)(nil)
 
 func saveMemoryResponse(historyEntry, memoryUpdate string) *provider.Response {
 	return &provider.Response{

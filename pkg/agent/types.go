@@ -1,11 +1,12 @@
 package agent
 
 type Request struct {
-	Content    string
-	SessionKey string
-	Channel    string
-	ChatID     string
-	Media      []MediaAttachment
+	Content       string
+	SessionKey    string
+	Channel       string
+	ChatID        string
+	Media         []MediaAttachment
+	IsCronContext bool
 }
 
 type MediaAttachment struct {

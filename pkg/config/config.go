@@ -39,8 +39,23 @@ type ProviderConfig struct {
 }
 
 type ChannelsConfig struct {
-	SendProgress  bool `json:"sendProgress"`
-	SendToolHints bool `json:"sendToolHints"`
+	SendProgress  bool                  `json:"sendProgress"`
+	SendToolHints bool                  `json:"sendToolHints"`
+	Signal        SignalChannelConfig   `json:"signal"`
+	WhatsApp      WhatsAppChannelConfig `json:"whatsapp"`
+}
+
+type SignalChannelConfig struct {
+	Enabled bool   `json:"enabled"`
+	Account string `json:"account,omitempty"`
+	CLIPath string `json:"cliPath,omitempty"`
+	DataDir string `json:"dataDir,omitempty"`
+}
+
+type WhatsAppChannelConfig struct {
+	Enabled    bool   `json:"enabled"`
+	DeviceName string `json:"deviceName,omitempty"`
+	StorePath  string `json:"storePath,omitempty"`
 }
 
 type GatewayConfig struct {
@@ -103,6 +118,14 @@ func DefaultConfig() Config {
 		Providers: make(map[string]ProviderConfig),
 		Channels: ChannelsConfig{
 			SendProgress: true,
+			Signal: SignalChannelConfig{
+				CLIPath: "signal-cli",
+				DataDir: filepath.Join(home, ".nanobot", "signal"),
+			},
+			WhatsApp: WhatsAppChannelConfig{
+				DeviceName: "nanobot-go",
+				StorePath:  filepath.Join(home, ".nanobot", "whatsapp.db"),
+			},
 		},
 		Gateway: GatewayConfig{
 			Host: "127.0.0.1",

@@ -22,6 +22,21 @@ func TestConfigRoundTrip(t *testing.T) {
 			"anthropic": {"apiKey": "sk-ant-xxx"},
 			"openrouter": {"apiKey": "sk-or-xxx", "apiBase": "https://openrouter.ai/api/v1"}
 		},
+		"channels": {
+			"sendProgress": true,
+			"sendToolHints": false,
+			"signal": {
+				"enabled": true,
+				"account": "+61400000000",
+				"cliPath": "/usr/local/bin/signal-cli",
+				"dataDir": "/tmp/nanobot-signal"
+			},
+			"whatsapp": {
+				"enabled": true,
+				"deviceName": "nanobot-go",
+				"storePath": "/tmp/nanobot-whatsapp.db"
+			}
+		},
 		"gateway": {
 			"host": "127.0.0.1",
 			"port": 18790
@@ -56,6 +71,12 @@ func TestConfigRoundTrip(t *testing.T) {
 	if cfg.Gateway.Port != 18790 {
 		t.Errorf("port = %d, want 18790", cfg.Gateway.Port)
 	}
+	if !cfg.Channels.Signal.Enabled || cfg.Channels.Signal.Account != "+61400000000" {
+		t.Errorf("signal config = %+v", cfg.Channels.Signal)
+	}
+	if !cfg.Channels.WhatsApp.Enabled || cfg.Channels.WhatsApp.DeviceName != "nanobot-go" {
+		t.Errorf("whatsapp config = %+v", cfg.Channels.WhatsApp)
+	}
 	if !cfg.Tools.RestrictToWorkspace {
 		t.Error("restrictToWorkspace should be true")
 	}
@@ -81,6 +102,12 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if !cfg.Channels.SendProgress {
 		t.Error("default sendProgress should be true")
+	}
+	if cfg.Channels.Signal.CLIPath == "" || cfg.Channels.Signal.DataDir == "" {
+		t.Fatalf("signal defaults = %+v, want non-empty paths", cfg.Channels.Signal)
+	}
+	if cfg.Channels.WhatsApp.DeviceName == "" || cfg.Channels.WhatsApp.StorePath == "" {
+		t.Fatalf("whatsapp defaults = %+v, want non-empty settings", cfg.Channels.WhatsApp)
 	}
 }
 

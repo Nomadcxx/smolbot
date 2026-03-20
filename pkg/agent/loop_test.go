@@ -203,7 +203,7 @@ func TestAgentLoopSanitizesOutboundMessagesAndPersistsNormalizedTurn(t *testing.
 	}
 }
 
-func TestAgentLoopToolFlowSuppressesFinalResponseForSameTargetMessage(t *testing.T) {
+func TestAgentLoopMessageSuppressesFinalResponseForSameTarget(t *testing.T) {
 	fakeProvider := &fakeStreamProvider{
 		streams: []fakeStreamScript{
 			{
@@ -214,7 +214,7 @@ func TestAgentLoopToolFlowSuppressesFinalResponseForSameTargetMessage(t *testing
 							Index: 0,
 							Function: provider.FunctionCall{
 								Name:      "message",
-								Arguments: `{"content":"hello"}`,
+								Arguments: `{"channel":"gateway","chat_id":"ws-client-1","content":"hello"}`,
 							},
 						}},
 						FinishReason: stringPtr("tool_calls"),
@@ -223,25 +223,15 @@ func TestAgentLoopToolFlowSuppressesFinalResponseForSameTargetMessage(t *testing
 			},
 			{
 				deltas: []*provider.StreamDelta{
-					{Content: "final reply"},
+					{Content: "final "},
+					{Content: "reply"},
 					{FinishReason: stringPtr("stop")},
 				},
 			},
 		},
 	}
 
-	messageTool := &fakeTool{
-		name: "message",
-		result: &tool.Result{
-			Content: strings.Repeat("x", 17000),
-			Metadata: map[string]any{
-				"channel": "gateway",
-				"chat_id": "ws-client-1",
-			},
-		},
-	}
-
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, messageTool)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, tool.NewMessageTool())
 	defer store.Close()
 
 	var events []Event
@@ -275,6 +265,11 @@ func TestAgentLoopToolFlowSuppressesFinalResponseForSameTargetMessage(t *testing
 	if delivered, _ := toolDone.Data["deliveredToRequestTarget"].(bool); !delivered {
 		t.Fatalf("tool.done missing deliveredToRequestTarget metadata: %+v", toolDone.Data)
 	}
+	for _, ev := range events {
+		if ev.Type == EventProgress || ev.Type == EventThinking || ev.Type == EventDone {
+			t.Fatalf("unexpected assistant event leaked through suppression: %+v", ev)
+		}
+	}
 
 	history, err := store.GetHistory("s1", 500)
 	if err != nil {
@@ -287,8 +282,8 @@ func TestAgentLoopToolFlowSuppressesFinalResponseForSameTargetMessage(t *testing
 			break
 		}
 	}
-	if len(toolMsg.StringContent()) != 16000 {
-		t.Fatalf("tool result len = %d, want 16000", len(toolMsg.StringContent()))
+	if toolMsg.StringContent() != "message sent" {
+		t.Fatalf("tool result = %q, want message sent", toolMsg.StringContent())
 	}
 }
 
@@ -335,6 +330,78 @@ func TestAgentLoopSkipsPersistenceOnProviderErrorAndRejectsBusySession(t *testin
 	}
 	if count != 0 {
 		t.Fatalf("error turn should not persist, count = %d", count)
+	}
+}
+
+func TestAgentLoopPassesRoutingDepsAndUsesToolOutput(t *testing.T) {
+	fakeProvider := &fakeStreamProvider{
+		streams: []fakeStreamScript{
+			{
+				deltas: []*provider.StreamDelta{
+					{
+						ToolCalls: []provider.ToolCall{{
+							ID:    "call1",
+							Index: 0,
+							Function: provider.FunctionCall{
+								Name:      "capture",
+								Arguments: `{}`,
+							},
+						}},
+						FinishReason: stringPtr("tool_calls"),
+					},
+				},
+			},
+			{
+				deltas: []*provider.StreamDelta{
+					{Content: "done"},
+					{FinishReason: stringPtr("stop")},
+				},
+			},
+		},
+	}
+
+	captureTool := &capturingTool{
+		name:   "capture",
+		result: &tool.Result{Output: "tool output"},
+	}
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, captureTool)
+	defer store.Close()
+
+	_, err := loop.ProcessDirect(context.Background(), Request{
+		Content:    "run tool",
+		SessionKey: "s1",
+		Channel:    "gateway",
+		ChatID:     "chat-1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ProcessDirect: %v", err)
+	}
+
+	if captureTool.lastContext.MessageRouter == nil {
+		t.Fatal("expected message router in tool context")
+	}
+	if captureTool.lastContext.Spawner == nil {
+		t.Fatal("expected spawner in tool context")
+	}
+	if captureTool.lastContext.Workspace == "" {
+		t.Fatal("expected workspace in tool context")
+	}
+
+	history, err := store.GetHistory("s1", 100)
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	foundTool := false
+	for _, msg := range history {
+		if msg.Role == "tool" {
+			foundTool = true
+			if msg.StringContent() != "tool output" {
+				t.Fatalf("tool message content = %q, want tool output", msg.StringContent())
+			}
+		}
+	}
+	if !foundTool {
+		t.Fatal("expected tool message in history")
 	}
 }
 
@@ -412,6 +479,32 @@ func (f *fakeTool) Execute(context.Context, json.RawMessage, tool.ToolContext) (
 	return f.result, nil
 }
 
+type capturingTool struct {
+	name        string
+	result      *tool.Result
+	lastContext tool.ToolContext
+}
+
+func (f *capturingTool) Name() string        { return f.name }
+func (f *capturingTool) Description() string { return f.name + " tool" }
+func (f *capturingTool) Parameters() map[string]any {
+	return map[string]any{"type": "object"}
+}
+func (f *capturingTool) Execute(_ context.Context, _ json.RawMessage, tctx tool.ToolContext) (*tool.Result, error) {
+	f.lastContext = tctx
+	return f.result, nil
+}
+
+type fakeMessageRouter struct{}
+
+func (fakeMessageRouter) Route(context.Context, string, string, string) error { return nil }
+
+type fakeSpawner struct{}
+
+func (fakeSpawner) ProcessDirect(context.Context, tool.SpawnRequest) (string, error) {
+	return "spawned", nil
+}
+
 type fakeLoopMemory struct {
 	calls int
 }
@@ -447,14 +540,16 @@ func newTestAgentLoop(t *testing.T, p provider.Provider, tools ...tool.Tool) (*A
 
 	fakeMemory := &fakeLoopMemory{}
 	loop := NewAgentLoop(LoopDeps{
-		Provider:  p,
-		Tools:     toolRegistry,
-		Sessions:  store,
-		Config:    &cfg,
-		Skills:    reg,
-		Tokenizer: tokenizer.New(),
-		Memory:    fakeMemory,
-		Workspace: workspace,
+		Provider:      p,
+		Tools:         toolRegistry,
+		Sessions:      store,
+		Config:        &cfg,
+		Skills:        reg,
+		Tokenizer:     tokenizer.New(),
+		Memory:        fakeMemory,
+		Workspace:     workspace,
+		MessageRouter: fakeMessageRouter{},
+		Spawner:       fakeSpawner{},
 	})
 	return loop, store, fakeMemory
 }

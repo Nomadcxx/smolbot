@@ -92,15 +92,26 @@ func (m *MemoryConsolidator) consolidateBatch(ctx context.Context, sessionKey st
 		history = append(history, record.Message)
 	}
 
+	toolChoice := "save_memory"
 	resp, err := m.provider.Chat(ctx, provider.ChatRequest{
 		Model:      "save-memory",
 		Messages:   history,
 		Tools:      []provider.ToolDef{saveMemoryTool()},
-		ToolChoice: "save_memory",
+		ToolChoice: toolChoice,
 		MaxTokens:  1024,
 	})
 	if err != nil {
-		return err
+		toolChoice = "auto"
+		resp, err = m.provider.Chat(ctx, provider.ChatRequest{
+			Model:      "save-memory",
+			Messages:   history,
+			Tools:      []provider.ToolDef{saveMemoryTool()},
+			ToolChoice: toolChoice,
+			MaxTokens:  1024,
+		})
+		if err != nil {
+			return err
+		}
 	}
 	if len(resp.ToolCalls) == 0 {
 		return fmt.Errorf("save_memory tool call missing")
