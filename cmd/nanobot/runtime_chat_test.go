@@ -65,7 +65,7 @@ func TestGatewayChatRoundTrip(t *testing.T) {
 	}
 
 	done := readRuntimeEvent(t, conn, "chat.done")
-	if !strings.Contains(string(done.Event.Event), `"content":"hello from runtime"`) {
+	if !strings.Contains(string(done.Event.Payload), `"content":"hello from runtime"`) {
 		t.Fatalf("unexpected chat.done event %#v", done)
 	}
 
@@ -197,7 +197,7 @@ func readRuntimeEvent(t *testing.T, conn *websocket.Conn, name string) *gateway.
 	_ = conn.SetReadDeadline(deadline)
 	for {
 		frame := readRuntimeFrame(t, conn)
-		if frame.Kind == gateway.FrameEvent && frame.Event.Name == name {
+		if frame.Kind == gateway.FrameEvent && frame.Event.EventName == name {
 			return frame
 		}
 	}

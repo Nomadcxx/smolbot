@@ -227,7 +227,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 				"content": messageText(msg),
 			})
 		}
-		return items, nil
+		return map[string]any{"messages": items}, nil
 	case "chat.send":
 		params := chatSendParams{}
 		if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -271,7 +271,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 				"updatedAt": item.UpdatedAt.Format(time.RFC3339),
 			})
 		}
-		return items, nil
+		return map[string]any{"sessions": items}, nil
 	case "sessions.reset":
 		params := struct {
 			Session string `json:"session"`
@@ -288,15 +288,18 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		if err != nil {
 			return nil, fmt.Errorf("get available models: %w", err)
 		}
-		result := make([]map[string]any, len(models))
+		modelList := make([]map[string]any, len(models))
 		for i, m := range models {
-			result[i] = map[string]any{
+			modelList[i] = map[string]any{
 				"id":       m.ID,
 				"name":     m.Name,
 				"provider": m.Provider,
 			}
 		}
-		return result, nil
+		return map[string]any{
+			"models":  modelList,
+			"current": s.currentModel(),
+		}, nil
 	case "models.set":
 		params := struct {
 			Model string `json:"model"`

@@ -164,7 +164,9 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 
 			for _, toolCall := range resp.ToolCalls {
 				emit(cb, Event{Type: EventToolHint, Content: toolCall.Function.Name})
-				emit(cb, Event{Type: EventToolStart, Content: toolCall.Function.Name})
+				emit(cb, Event{Type: EventToolStart, Content: toolCall.Function.Name, Data: map[string]any{
+					"input": toolCall.Function.Arguments,
+				}})
 
 				result, err := a.tools.Execute(runCtx, toolCall.Function.Name, json.RawMessage(toolCall.Function.Arguments), tool.ToolContext{
 					SessionKey:    req.SessionKey,
