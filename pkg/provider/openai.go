@@ -38,10 +38,15 @@ func NewOpenAIProvider(name, apiKey, baseURL string, extraHeaders map[string]str
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
 	}
+	baseURL = strings.TrimRight(baseURL, "/")
+	// Ollama and other OpenAI-compatible local servers require /v1 path prefix
+	if name == "ollama" && !strings.HasSuffix(baseURL, "/v1") {
+		baseURL = baseURL + "/v1"
+	}
 	return &OpenAIProvider{
 		name:         name,
 		apiKey:       apiKey,
-		baseURL:      strings.TrimRight(baseURL, "/"),
+		baseURL:      baseURL,
 		extraHeaders: extraHeaders,
 		client:       &http.Client{Timeout: 300 * time.Second},
 		sleep: func(ctx context.Context, seconds int) error {
