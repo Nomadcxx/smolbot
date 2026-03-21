@@ -29,7 +29,7 @@ func NewBuiltinRegistry() (*Registry, error) {
 }
 
 // NewRegistry creates a registry with builtin, user, and workspace skills.
-// User skills (~/.nanobot-go/skills/) override builtin.
+// User skills (~/.smolbot/skills/) override builtin.
 // Workspace skills override user skills.
 func NewRegistry(paths *config.Paths) (*Registry, error) {
 	// Load builtin skills
@@ -40,7 +40,7 @@ func NewRegistry(paths *config.Paths) (*Registry, error) {
 
 	reg := &Registry{skills: builtin}
 
-	// Load user skills from ~/.nanobot-go/skills/
+	// Load user skills from ~/.smolbot/skills/
 	userSkillsDir := paths.SkillsDir()
 	if _, err := fs.Stat(nanobotgo.EmbeddedAssets, userSkillsDir); err == nil {
 		userSkills, err := LoadDir(userSkillsDir)

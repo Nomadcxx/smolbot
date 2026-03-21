@@ -5,8 +5,8 @@
 Create a new skill in your user skills directory:
 
 ```bash
-mkdir -p ~/.nanobot-go/skills/my-skill
-cat > ~/.nanobot-go/skills/my-skill/SKILL.md << 'EOF'
+mkdir -p ~/.smolbot/skills/my-skill
+cat > ~/.smolbot/skills/my-skill/SKILL.md << 'EOF'
 ---
 name: my-skill
 description: Use when performing specific task X in domain Y
@@ -100,7 +100,7 @@ my-skill/
 Skills are loaded from three locations. Later sources override earlier ones:
 
 1. **Builtin** (`embed:`) - Built into nanobot binary
-2. **User** (`~/.nanobot-go/skills/`) - Your personal skills
+2. **User** (`~/.smolbot/skills/`) - Your personal skills
 3. **Workspace** (`<workspace>/skills/`) - Project-specific skills
 
 Example: If you have `docker` skill in all three locations, the workspace version wins.
@@ -171,7 +171,7 @@ my-skill/assets/
 
 ## Testing Your Skill
 
-1. **Create the skill** in `~/.nanobot-go/skills/<skill-name>/`
+1. **Create the skill** in `~/.smolbot/skills/<skill-name>/`
 2. **Restart nanobot** or run `nanobot chat` fresh session
 3. **Check it's available**: Look for it in `<system-skills>` output
 4. **Test loading**: Verify `read_file(skills/<skill-name>/SKILL.md)` works
@@ -257,7 +257,7 @@ Use when:
 
 ### Skill not appearing in `<system-skills>`
 
-- Check directory path: `~/.nanobot-go/skills/<name>/SKILL.md`
+- Check directory path: `~/.smolbot/skills/<name>/SKILL.md`
 - Verify YAML frontmatter is valid (use `---` delimiters)
 - Ensure required fields: `name` and `description`
 

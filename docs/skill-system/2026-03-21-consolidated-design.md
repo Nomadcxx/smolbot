@@ -135,7 +135,7 @@ skills/
 ```
 Priority (high to low):
 
-1. ~/.nanobot-go/skills/          # User-managed skills
+1. ~/.smolbot/skills/          # User-managed skills
 2. <workspace>/skills/            # Project-specific skills
 3. (embedded) skills/             # Built-in skills
 
@@ -276,7 +276,7 @@ Read the skill file: `read_file(skills/{skill-name}/SKILL.md)`
    - Add "1% rule" to agent instructions
 
 3. **User Skills Directory**
-   - Add `~/.nanobot-go/skills/` to discovery
+   - Add `~/.smolbot/skills/` to discovery
    - Create directory on first run
    - Document skill creation
 
@@ -326,7 +326,7 @@ Read the skill file: `read_file(skills/{skill-name}/SKILL.md)`
 
 ### Decision 2: Three-Level Discovery
 
-**Choice:** `~/.nanobot-go/skills/` → `<workspace>/skills/` → embedded
+**Choice:** `~/.smolbot/skills/` → `<workspace>/skills/` → embedded
 
 **Rationale:**
 - User-managed skills are most important (persistence across projects)
@@ -378,7 +378,7 @@ Read the skill file: `read_file(skills/{skill-name}/SKILL.md)`
 
 ## Example: Weather Skill
 
-**File:** `~/.nanobot-go/skills/weather/SKILL.md`
+**File:** `~/.smolbot/skills/weather/SKILL.md`
 
 ```markdown
 ---

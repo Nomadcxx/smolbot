@@ -153,7 +153,7 @@ func (a *Adapter) Login(ctx context.Context) error {
 }
 
 func (a *Adapter) LoginWithUpdates(ctx context.Context, report func(channel.Status) error) error {
-	out, err := a.runner.Run(ctx, a.cliPath(), a.baseArgs("link", "-n", "nanobot-go")...)
+	out, err := a.runner.Run(ctx, a.cliPath(), a.baseArgs("link", "-n", "smolbot")...)
 	if err != nil {
 		return fmt.Errorf("signal login: %w", err)
 	}

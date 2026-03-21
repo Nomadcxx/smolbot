@@ -333,7 +333,7 @@ func TestBuildRuntimeConstructsConfiguredWhatsAppChannel(t *testing.T) {
 
 	fakeWhatsApp := &runtimeLoginStatusChannel{name: "whatsapp", status: channel.Status{State: "connected"}}
 	newWhatsAppChannel = func(cfg config.WhatsAppChannelConfig) (channel.Channel, error) {
-		if cfg.DeviceName != "nanobot-go-test" {
+		if cfg.DeviceName != "smolbot-test" {
 			t.Fatalf("unexpected whatsapp config %#v", cfg)
 		}
 		return fakeWhatsApp, nil
@@ -346,7 +346,7 @@ func TestBuildRuntimeConstructsConfiguredWhatsAppChannel(t *testing.T) {
 	cfg.Gateway.Host = "127.0.0.1"
 	cfg.Gateway.Port = port
 	cfg.Channels.WhatsApp.Enabled = true
-	cfg.Channels.WhatsApp.DeviceName = "nanobot-go-test"
+	cfg.Channels.WhatsApp.DeviceName = "smolbot-test"
 
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	if err := writeConfigFile(cfgPath, &cfg); err != nil {
@@ -378,7 +378,7 @@ func TestRunChannelLoginUsesConfiguredWhatsAppChannelWhenDisabled(t *testing.T) 
 
 	fakeWhatsApp := &runtimeLoginStatusChannel{name: "whatsapp"}
 	newWhatsAppChannel = func(cfg config.WhatsAppChannelConfig) (channel.Channel, error) {
-		if cfg.DeviceName != "nanobot-go-test" {
+		if cfg.DeviceName != "smolbot-test" {
 			t.Fatalf("unexpected whatsapp config %#v", cfg)
 		}
 		return fakeWhatsApp, nil
@@ -391,7 +391,7 @@ func TestRunChannelLoginUsesConfiguredWhatsAppChannelWhenDisabled(t *testing.T) 
 	cfg.Gateway.Host = "127.0.0.1"
 	cfg.Gateway.Port = port
 	cfg.Channels.WhatsApp.Enabled = false
-	cfg.Channels.WhatsApp.DeviceName = "nanobot-go-test"
+	cfg.Channels.WhatsApp.DeviceName = "smolbot-test"
 
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	if err := writeConfigFile(cfgPath, &cfg); err != nil {

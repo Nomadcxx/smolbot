@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	workspace := os.Getenv("HOME") + "/.nanobot-go/workspace"
+	workspace := os.Getenv("HOME") + "/.smolbot/workspace"
 	paths := config.DefaultPaths()
 
 	reg, err := skill.NewRegistry(paths)

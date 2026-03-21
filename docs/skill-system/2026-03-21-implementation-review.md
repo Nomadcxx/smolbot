@@ -160,7 +160,7 @@ type Skill struct {
 
 ### CRITICAL-5: No User Skills Directory Exists
 
-**Problem:** Plan assumes `~/.nanobot-go/skills/` exists and is wired up.
+**Problem:** Plan assumes `~/.smolbot/skills/` exists and is wired up.
 
 **Current state:**
 - No `SkillsDir()` method in config.Paths
@@ -193,7 +193,7 @@ func TestAgentLoadsSkillOnDemand(t *testing.T) {
     reg, err := skill.NewRegistry(paths)  // Which paths?
 ```
 
-**Issue:** If `NewRegistry` loads builtin skills from embed.FS, that's fine. But if it tries to load from real `~/.nanobot-go/skills/`, test is not isolated.
+**Issue:** If `NewRegistry` loads builtin skills from embed.FS, that's fine. But if it tries to load from real `~/.smolbot/skills/`, test is not isolated.
 
 **Fix:** Ensure test only tests the specific behavior, not full registry. Or use dependency injection for paths.
 
@@ -301,7 +301,7 @@ return nil, fmt.Errorf("unterminated YAML frontmatter in %s: %w", path, err)
 
 **Options:**
 1. `read_file(skills/{name}/references/commands.md)` - relative to workspace?
-2. `read_file(~/.nanobot-go/skills/{name}/references/commands.md)` - absolute?
+2. `read_file(~/.smolbot/skills/{name}/references/commands.md)` - absolute?
 3. Some other path?
 
 **Plan doesn't specify:** Clear path resolution strategy.

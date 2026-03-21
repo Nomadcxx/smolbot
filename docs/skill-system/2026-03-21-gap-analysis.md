@@ -1,7 +1,7 @@
 # Skill System Gap Analysis
 
 **Date:** 2026-03-21
-**Project:** nanobot-go
+**Project:** smolbot
 **Comparisons:** Python nanobot, OpenClaw
 
 ---
@@ -12,7 +12,7 @@ Our Go implementation has a functional but minimal skill system. While it succes
 
 ---
 
-## Current State (nanobot-go)
+## Current State (smolbot)
 
 ### What's Implemented
 
@@ -240,7 +240,7 @@ Six-level precedence:
 
 ### Recommendation
 Add **managed skills** level:
-- `~/.config/nanobot-go/skills/` for user-installed skills
+- `~/.config/smolbot/skills/` for user-installed skills
 - Similar to ~/.nanobot's skill management
 
 ### Implementation Complexity
@@ -322,4 +322,4 @@ This matches the sophistication of OpenClaw while maintaining the simplicity tha
 
 - OpenClaw skill system: `~/openclaw/src/agents/skills/`
 - Python nanobot skills: `~/.cache/uv/archive-*/nanobot/skills/`
-- Our implementation: `~/nanobot-go/pkg/skill/`
+- Our implementation: `~/smolbot/pkg/skill/`

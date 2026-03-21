@@ -33,7 +33,7 @@ func TestConfigRoundTrip(t *testing.T) {
 			},
 			"whatsapp": {
 				"enabled": true,
-				"deviceName": "nanobot-go",
+				"deviceName": "smolbot",
 				"storePath": "/tmp/nanobot-whatsapp.db"
 			}
 		},
@@ -74,7 +74,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	if !cfg.Channels.Signal.Enabled || cfg.Channels.Signal.Account != "+61400000000" {
 		t.Errorf("signal config = %+v", cfg.Channels.Signal)
 	}
-	if !cfg.Channels.WhatsApp.Enabled || cfg.Channels.WhatsApp.DeviceName != "nanobot-go" {
+	if !cfg.Channels.WhatsApp.Enabled || cfg.Channels.WhatsApp.DeviceName != "smolbot" {
 		t.Errorf("whatsapp config = %+v", cfg.Channels.WhatsApp)
 	}
 	if !cfg.Tools.RestrictToWorkspace {
