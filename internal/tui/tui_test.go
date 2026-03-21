@@ -3,21 +3,27 @@ package tui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
 	"github.com/Nomadcxx/smolbot/internal/app"
 	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 )
 
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
 type fakeClient struct {
 	sessions []client.SessionInfo
 	models   []client.ModelInfo
 	current  string
-	status   string
+	status   client.StatusPayload
+	statuses map[string]client.StatusPayload
 	chatRun  string
 	aborts   []abortCall
 	modelErr error
@@ -53,15 +59,30 @@ func (f *fakeClient) SessionsReset(key string) error {
 func (f *fakeClient) ModelsList() ([]client.ModelInfo, string, error) {
 	return f.models, f.current, nil
 }
-func (f *fakeClient) ModelsSet(id string) error {
+func (f *fakeClient) ModelsSet(id string) (string, error) {
 	if f.modelErr != nil {
-		return f.modelErr
+		return "", f.modelErr
+	}
+	if f.current != "" {
+		return f.current, nil
 	}
 	f.current = id
-	return nil
+	return f.current, nil
 }
-func (f *fakeClient) Status() (json.RawMessage, error) {
-	return json.RawMessage(f.status), nil
+func (f *fakeClient) Status(session string) (client.StatusPayload, error) {
+	if f.statuses != nil {
+		if payload, ok := f.statuses[session]; ok {
+			return payload, nil
+		}
+	}
+	if f.status.Session == "" {
+		f.status.Session = session
+	}
+	return f.status, nil
+}
+
+func plain(text string) string {
+	return ansiPattern.ReplaceAllString(text, "")
 }
 
 func TestHandleSlashCommandSessionNewClearsMessages(t *testing.T) {
@@ -159,7 +180,7 @@ func TestHandleSlashCommandModelOpensDialog(t *testing.T) {
 
 func TestHandleSlashCommandStatusReturnsChatDoneMsg(t *testing.T) {
 	model := New(app.Config{})
-	model.client = &fakeClient{status: `{"model":"test"}`}
+	model.client = &fakeClient{status: client.StatusPayload{Model: "test"}}
 
 	_, cmd := model.handleSlashCommand("/status")
 	if cmd == nil {
@@ -167,12 +188,12 @@ func TestHandleSlashCommandStatusReturnsChatDoneMsg(t *testing.T) {
 	}
 
 	msg := cmd()
-	done, ok := msg.(ChatDoneMsg)
+	done, ok := msg.(StatusLoadedMsg)
 	if !ok {
-		t.Fatalf("expected ChatDoneMsg, got %T", msg)
+		t.Fatalf("expected StatusLoadedMsg, got %T", msg)
 	}
-	if !strings.Contains(done.Content, `"model":"test"`) {
-		t.Fatalf("unexpected status payload: %q", done.Content)
+	if done.Payload.Model != "test" || !done.Echo {
+		t.Fatalf("unexpected status payload: %#v", done)
 	}
 }
 
@@ -197,15 +218,88 @@ func TestSessionResetWaitsForGatewaySuccess(t *testing.T) {
 
 func TestStatusResultIsRenderedIntoChat(t *testing.T) {
 	model := New(app.Config{})
-	model.client = &fakeClient{status: `{"model":"test"}`}
+	model.client = &fakeClient{status: client.StatusPayload{Model: "test"}}
 
 	_, cmd := model.handleSlashCommand("/status")
 	msg := cmd()
 	updated, _ := model.Update(msg)
 	got := updated.(Model)
 
-	if !strings.Contains(got.messages.View(), `"model":"test"`) {
+	view := plain(got.messages.View())
+	if !strings.Contains(view, "status: model") || !strings.Contains(view, "test") {
 		t.Fatalf("expected status payload in chat, got %q", got.messages.View())
+	}
+}
+
+func TestStatusLoadedUpdatesFooterUsage(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.footer.SetWidth(80)
+
+	updated, _ := model.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/qwen3:8b",
+			Session: "tui:main",
+			Usage: client.UsageInfo{
+				TotalTokens:   68000,
+				ContextWindow: 200000,
+			},
+		},
+	})
+	got := updated.(Model)
+
+	view := plain(got.footer.View())
+	if !strings.Contains(view, "model ollama/qwen3:8b") {
+		t.Fatalf("expected footer model update, got %q", view)
+	}
+	if !strings.Contains(view, "34% (68K/200K)") {
+		t.Fatalf("expected footer usage update, got %q", view)
+	}
+}
+
+func TestSyncStatusUsesCurrentSession(t *testing.T) {
+	model := New(app.Config{})
+	model.app.Session = "tui:alt"
+	model.client = &fakeClient{
+		statuses: map[string]client.StatusPayload{
+			"tui:alt": {
+				Model:   "ollama/qwen3:8b",
+				Session: "tui:alt",
+				Usage: client.UsageInfo{
+					TotalTokens:   42000,
+					ContextWindow: 200000,
+				},
+			},
+		},
+	}
+	model.width = 80
+	model.footer.SetWidth(80)
+
+	msg := model.syncStatusCmd(false)()
+	updated, _ := model.Update(msg)
+	got := updated.(Model)
+
+	view := plain(got.footer.View())
+	if !strings.Contains(view, "session tui:alt") {
+		t.Fatalf("expected footer to keep current session label, got %q", view)
+	}
+	if !strings.Contains(view, "21% (42K/200K)") {
+		t.Fatalf("expected footer to use current session usage, got %q", view)
+	}
+}
+
+func TestModelSetUsesNormalizedGatewayCurrent(t *testing.T) {
+	model := New(app.Config{})
+	model.client = &fakeClient{current: "ollama/qwen3:8b"}
+
+	updated, cmd := model.handleSlashCommand("/model ollama_chat/qwen3:8b")
+	got := updated.(Model)
+	msg := cmd()
+	updated, _ = got.Update(msg)
+	got = updated.(Model)
+
+	if got.app.Model != "ollama/qwen3:8b" {
+		t.Fatalf("expected normalized gateway model id, got %q", got.app.Model)
 	}
 }
 
@@ -291,7 +385,7 @@ func TestInterruptMsgIsMappedToCtrlCMessage(t *testing.T) {
 	}
 }
 
-func TestSlashKeyGoesToEditor(t *testing.T) {
+func TestSlashDoesNotOpenMenu(t *testing.T) {
 	model := New(app.Config{})
 	model.width = 80
 	model.height = 24
@@ -299,83 +393,207 @@ func TestSlashKeyGoesToEditor(t *testing.T) {
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
 	got := updated.(Model)
 
-	if got.dialog != nil {
-		t.Fatal("expected slash to remain in editor, not open dialog")
-	}
 	if got.editor.Value() != "/" {
 		t.Fatalf("expected slash to be inserted into editor, got %q", got.editor.Value())
 	}
-	if !strings.Contains(got.View().Content, "Commands") {
-		t.Fatalf("expected slash dropdown to be visible, got %q", got.View().Content)
+	if got.dialog != nil {
+		t.Fatalf("expected slash to stay in editor without opening menu, got %T", got.dialog)
 	}
 }
 
-func TestSlashDropdownFiltersFromEditorValue(t *testing.T) {
+func TestF1OpensCenteredMenu(t *testing.T) {
+	model := New(app.Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	got := updated.(Model)
+
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF1}))
+	got = updated.(Model)
+
+	if got.dialog == nil {
+		t.Fatal("expected f1 to open menu overlay")
+	}
+	if !strings.Contains(plain(got.View().Content), "//// MENU ////") {
+		t.Fatalf("expected centered menu overlay, got %q", plain(got.View().Content))
+	}
+}
+
+func TestF1MenuRendersCenteredAwayFromTopLeft(t *testing.T) {
+	model := New(app.Config{})
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	got := updated.(Model)
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF1}))
+	got = updated.(Model)
+
+	lines := strings.Split(plain(got.View().Content), "\n")
+	borderRow := -1
+	borderCol := -1
+	for i, line := range lines {
+		if strings.Contains(line, "╭") && strings.Contains(line, "╮") {
+			borderRow = i
+			borderCol = strings.Index(line, "╭")
+			break
+		}
+	}
+	if borderRow < 2 {
+		t.Fatalf("expected menu popup to be vertically centered, got row %d in view %q", borderRow, plain(got.View().Content))
+	}
+	if borderCol < 8 {
+		t.Fatalf("expected menu popup to be horizontally centered, got col %d in view %q", borderCol, plain(got.View().Content))
+	}
+}
+
+func TestF1MenuNavigatesToThemesSubmenu(t *testing.T) {
 	model := New(app.Config{})
 	model.width = 80
 	model.height = 24
 
-	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF1}))
 	got := updated.(Model)
-	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 's', Text: "s"}))
-	got = updated.(Model)
-	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 't', Text: "t"}))
-	got = updated.(Model)
-
-	view := got.View().Content
-	if !strings.Contains(view, "/status") {
-		t.Fatalf("expected filtered slash dropdown to include /status, got %q", view)
-	}
-	if strings.Contains(view, "/model") {
-		t.Fatalf("expected filtered slash dropdown to exclude unrelated commands, got %q", view)
-	}
-}
-
-func TestSlashDropdownDoesNotExtendLayoutHeight(t *testing.T) {
-	model := New(app.Config{})
-	model.width = 80
-	model.height = 12
-
-	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
-	got := updated.(Model)
-
-	lines := strings.Count(got.View().Content, "\n") + 1
-	if lines > model.height {
-		t.Fatalf("expected slash dropdown to render as overlay within height %d, got %d lines", model.height, lines)
-	}
-}
-
-func TestSlashDropdownEnterExecutesCurrentCommand(t *testing.T) {
-	model := New(app.Config{})
-	model.width = 80
-	model.height = 24
-	model.client = &fakeClient{status: `{"model":"test"}`}
-
-	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
-	got := updated.(Model)
-	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 's', Text: "s"}))
-	got = updated.(Model)
-	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 't', Text: "t"}))
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	got = updated.(Model)
 
 	updated, cmd := got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	got = updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected enter on slash dropdown to execute the current command")
+	if cmd != nil {
+		updated, _ = got.Update(cmd())
+		got = updated.(Model)
 	}
 
-	msg := cmd()
-	updated, _ = got.Update(msg)
+	if !strings.Contains(plain(got.View().Content), "Themes") {
+		t.Fatalf("expected themes submenu after selection, got %q", plain(got.View().Content))
+	}
+}
+
+func TestF1MenuDoesNotExtendLayoutHeight(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 12
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF1}))
+	got := updated.(Model)
+
+	lines := strings.Count(got.View().Content, "\n") + 1
+	if lines > model.height {
+		t.Fatalf("expected menu overlay to render within height %d, got %d lines", model.height, lines)
+	}
+}
+
+func TestMenuOverlayKeepsTranscriptFrameVisible(t *testing.T) {
+	model := New(app.Config{})
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	got := updated.(Model)
+	got.messages.AppendUser("hello")
+	got.messages.AppendAssistant("world")
+
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF1}))
 	got = updated.(Model)
 
-	if got.editor.Value() != "" {
-		t.Fatalf("expected editor to clear after command selection, got %q", got.editor.Value())
+	view := plain(got.View().Content)
+	if !strings.Contains(view, "//// MENU ////") {
+		t.Fatalf("expected menu overlay in view, got %q", view)
 	}
-	if got.showCommands {
-		t.Fatal("expected slash dropdown to close after command selection")
+	if strings.Count(view, "╭") < 3 || strings.Count(view, "╰") < 2 {
+		t.Fatalf("expected transcript frame to remain visible under menu overlay, got %q", view)
 	}
-	if !strings.Contains(got.messages.View(), `"model":"test"`) {
-		t.Fatalf("expected selected /status command result in chat, got %q", got.messages.View())
+	if !strings.Contains(view, "USER") || !strings.Contains(view, "ASSISTANT") {
+		t.Fatalf("expected transcript content to remain visible around overlay, got %q", view)
+	}
+}
+
+func TestTranscriptFrameAddsSpacerBelowHeader(t *testing.T) {
+	model := New(app.Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	got := updated.(Model)
+	got.messages.AppendUser("hello")
+
+	lines := strings.Split(plain(got.View().Content), "\n")
+	headerRow := -1
+	frameRow := -1
+	for i, line := range lines {
+		if headerRow == -1 && strings.Contains(line, "▄▄▄▄▄▄") {
+			headerRow = i
+		}
+		if frameRow == -1 && strings.Contains(line, "╭") && strings.Contains(line, "╮") {
+			frameRow = i
+		}
+	}
+	if headerRow == -1 || frameRow == -1 {
+		t.Fatalf("expected both header art and transcript frame in view %q", plain(got.View().Content))
+	}
+	if frameRow-headerRow < 2 {
+		t.Fatalf("expected spacer row between header and transcript frame, header row=%d frame row=%d view=%q", headerRow, frameRow, plain(got.View().Content))
+	}
+}
+
+func TestTranscriptAreaHasOwnBorder(t *testing.T) {
+	model := New(app.Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	got := updated.(Model)
+	got.messages.AppendUser("hello")
+	got.messages.AppendAssistant("world")
+
+	view := plain(got.View().Content)
+	if strings.Count(view, "╭") < 2 {
+		t.Fatalf("expected separate transcript and editor borders, got %q", view)
+	}
+	if !strings.Contains(view, "● ") {
+		t.Fatalf("expected status row outside transcript frame, got %q", view)
+	}
+}
+
+func TestMenuCloseRestoresEditorFlow(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Mod: tea.ModCtrl}))
+	got := updated.(Model)
+	updated, cmd := got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	got = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected escape to close menu")
+	}
+	updated, _ = got.Update(cmd())
+	got = updated.(Model)
+	if got.dialog != nil {
+		t.Fatal("expected menu to close after escape")
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"}))
+	got = updated.(Model)
+	if got.editor.Value() != "x" {
+		t.Fatalf("expected editor flow after closing menu, got %q", got.editor.Value())
+	}
+}
+
+func TestOverlayCloseRestoresEditorFlow(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+
+	updated, _ := model.handleSlashCommand("/theme")
+	got := updated.(Model)
+	if got.dialog == nil {
+		t.Fatal("expected theme chooser dialog")
+	}
+
+	updated, cmd := got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	got = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected escape to close the overlay")
+	}
+	updated, _ = got.Update(cmd())
+	got = updated.(Model)
+	if got.dialog != nil {
+		t.Fatal("expected overlay to close after escape")
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Text: "x"}))
+	got = updated.(Model)
+	if got.editor.Value() != "x" {
+		t.Fatalf("expected editor flow to resume after overlay close, got %q", got.editor.Value())
 	}
 }
 
@@ -390,13 +608,342 @@ func TestThemeCommandWithoutArgsOpensThemeChooser(t *testing.T) {
 	}
 }
 
-func TestViewDoesNotForceTerminalBackground(t *testing.T) {
+func TestThemeChooserDoesNotExtendLayoutHeight(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 12
+
+	updated, _ := model.handleSlashCommand("/theme")
+	got := updated.(Model)
+	if got.dialog == nil {
+		t.Fatal("expected theme chooser dialog")
+	}
+
+	lines := strings.Count(got.View().Content, "\n") + 1
+	if lines > model.height {
+		t.Fatalf("expected theme chooser to render within height %d, got %d lines", model.height, lines)
+	}
+	view := plain(got.View().Content)
+	if !strings.Contains(view, "Themes") {
+		t.Fatalf("expected theme chooser title to remain visible, got %q", view)
+	}
+	if !strings.Contains(view, "Theme: ") {
+		t.Fatalf("expected at least one theme choice to remain visible, got %q", view)
+	}
+}
+
+func TestSessionDialogShowsCurrentMarker(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	model.client = &fakeClient{
+		sessions: []client.SessionInfo{
+			{Key: "tui:main", Preview: "Current conversation"},
+			{Key: "tui:alt", Preview: "Alternative thread"},
+		},
+	}
+	model.app.Session = "tui:main"
+
+	_, cmd := model.handleSlashCommand("/session")
+	updated, _ := model.Update(cmd())
+	got := updated.(Model)
+	view := plain(got.View().Content)
+	if !strings.Contains(view, "tui:main") || !strings.Contains(view, "current") {
+		t.Fatalf("expected current session marker in dialog, got %q", view)
+	}
+	if !strings.Contains(view, "Current conversation") {
+		t.Fatalf("expected session preview in dialog, got %q", view)
+	}
+}
+
+func TestSessionDialogShowsOverflowCues(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	model.client = &fakeClient{
+		sessions: []client.SessionInfo{
+			{Key: "tui:00", Preview: "preview 00"},
+			{Key: "tui:01", Preview: "preview 01"},
+			{Key: "tui:02", Preview: "preview 02"},
+			{Key: "tui:03", Preview: "preview 03"},
+			{Key: "tui:04", Preview: "preview 04"},
+			{Key: "tui:05", Preview: "preview 05"},
+			{Key: "tui:06", Preview: "preview 06"},
+			{Key: "tui:07", Preview: "preview 07"},
+			{Key: "tui:08", Preview: "preview 08"},
+			{Key: "tui:09", Preview: "preview 09"},
+		},
+	}
+
+	_, cmd := model.handleSlashCommand("/session")
+	updated, _ := model.Update(cmd())
+	got := updated.(Model)
+	if !strings.Contains(plain(got.View().Content), "▼ more below") {
+		t.Fatalf("expected session overflow cue below initial window, got %q", plain(got.View().Content))
+	}
+	for i := 0; i < 5; i++ {
+		updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
+		got = updated.(Model)
+	}
+	view := plain(got.View().Content)
+	if !strings.Contains(view, "▲ more above") || !strings.Contains(view, "▼ more below") {
+		t.Fatalf("expected session overflow cues in dialog, got %q", view)
+	}
+}
+
+func TestModelDialogShowsCurrentModel(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	model.client = &fakeClient{
+		models: []client.ModelInfo{
+			{ID: "gpt-5", Name: "GPT-5", Provider: "openai"},
+			{ID: "claude-opus", Name: "Claude Opus", Provider: "anthropic"},
+		},
+		current: "gpt-5",
+	}
+
+	_, cmd := model.handleSlashCommand("/model")
+	updated, _ := model.Update(cmd())
+	got := updated.(Model)
+	view := plain(got.View().Content)
+	if !strings.Contains(view, "GPT-5") || !strings.Contains(view, "gpt-5") {
+		t.Fatalf("expected model dialog to show model label and id, got %q", view)
+	}
+	if !strings.Contains(view, "openai") || !strings.Contains(view, "current") {
+		t.Fatalf("expected model dialog to show provider and current marker, got %q", view)
+	}
+}
+
+func TestSelectorsShareOverlayBehavior(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 20
+	model.client = &fakeClient{
+		sessions: []client.SessionInfo{{Key: "tui:main"}, {Key: "tui:alt"}},
+		models:   []client.ModelInfo{{ID: "fast", Name: "Fast"}, {ID: "smart", Name: "Smart"}},
+		current:  "fast",
+	}
+
+	checkOverlay := func(input, title string) {
+		t.Helper()
+
+		updated, cmd := model.handleSlashCommand(input)
+		got := updated.(Model)
+		if cmd != nil {
+			updated, _ = got.Update(cmd())
+			got = updated.(Model)
+		}
+		if got.dialog == nil {
+			t.Fatalf("expected overlay for %s", input)
+		}
+
+		view := plain(got.View().Content)
+		if !strings.Contains(view, title) {
+			t.Fatalf("expected %s title in overlay, got %q", title, view)
+		}
+		if !strings.Contains(view, "Esc close") {
+			t.Fatalf("expected close help treatment in overlay, got %q", view)
+		}
+		lines := strings.Count(view, "\n") + 1
+		if lines > got.height {
+			t.Fatalf("expected overlay to remain within viewport height %d, got %d", got.height, lines)
+		}
+
+		updated, closeCmd := got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+		got = updated.(Model)
+		if closeCmd == nil {
+			t.Fatalf("expected esc to close overlay for %s", input)
+		}
+		updated, _ = got.Update(closeCmd())
+		got = updated.(Model)
+		if got.dialog != nil {
+			t.Fatalf("expected overlay to close for %s", input)
+		}
+	}
+
+	checkOverlay("/theme", "Themes")
+	checkOverlay("/session", "Sessions")
+	checkOverlay("/model", "Models")
+}
+
+func TestCompactLayoutOnShortTerminals(t *testing.T) {
+	model := New(app.Config{})
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 8})
+	got := updated.(Model)
+	view := plain(got.View().Content)
+
+	if strings.Contains(view, "▄▄▄▄▄▄") {
+		t.Fatalf("expected compact header treatment on short terminal, got %q", view)
+	}
+	if !strings.Contains(strings.ToLower(view), "nanobot") {
+		t.Fatalf("expected compact layout to keep app identity visible, got %q", view)
+	}
+	if lines := strings.Count(view, "\n") + 1; lines > 8 {
+		t.Fatalf("expected compact layout to stay within height 8, got %d lines", lines)
+	}
+}
+
+func TestHeaderArtIsCenteredAcrossViewport(t *testing.T) {
+	model := New(app.Config{})
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	got := updated.(Model)
+
+	lines := strings.Split(plain(got.View().Content), "\n")
+	artLine := ""
+	for _, line := range lines {
+		if strings.Contains(line, "▄▄▄▄▄▄") {
+			artLine = line
+			break
+		}
+	}
+	if artLine == "" {
+		t.Fatalf("expected ascii header line in view %q", plain(got.View().Content))
+	}
+	if col := strings.Index(artLine, "▄▄▄▄▄▄"); col < 6 {
+		t.Fatalf("expected centered header art, got col %d in %q", col, artLine)
+	}
+}
+
+func TestTranscriptKeepsMinimumUsableHeight(t *testing.T) {
+	model := New(app.Config{})
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 8})
+	got := updated.(Model)
+	chatLines := strings.Count(plain(got.messages.View()), "\n") + 1
+
+	if chatLines < 3 {
+		t.Fatalf("expected transcript area to keep at least 3 lines in compact mode, got %d", chatLines)
+	}
+}
+
+func TestFrameHierarchyLayout(t *testing.T) {
+	model := New(app.Config{})
+	model.app.Model = "gpt-5"
+	model.app.Session = "tui:main"
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	got := updated.(Model)
+	got.status.SetConnected(true)
+
+	view := plain(got.View().Content)
+	if !strings.Contains(view, "connected") {
+		t.Fatalf("expected activity row in layout, got %q", view)
+	}
+	if !strings.Contains(view, "model gpt-5") || !strings.Contains(view, "session tui:main") {
+		t.Fatalf("expected footer metadata in layout, got %q", view)
+	}
+	lines := strings.Split(view, "\n")
+	editorRow := -1
+	footerRow := -1
+	for i, line := range lines {
+		if editorRow == -1 && strings.Contains(line, "Send a message") {
+			editorRow = i
+		}
+		if footerRow == -1 && strings.Contains(line, "model gpt-5") {
+			footerRow = i
+		}
+	}
+	if editorRow == -1 || footerRow == -1 || footerRow <= editorRow {
+		t.Fatalf("expected footer metadata below the editor, editor=%d footer=%d view=%q", editorRow, footerRow, view)
+	}
+	if lines := strings.Count(view, "\n") + 1; lines > 16 {
+		t.Fatalf("expected frame hierarchy to fit viewport height, got %d lines", lines)
+	}
+}
+
+func TestEditorUsesThemeSurface(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 16
+	view := model.editor.View()
+
+	if !strings.Contains(view, "48;2;0;0;0") {
+		t.Fatalf("expected editor to consume black theme surface, got %q", view)
+	}
+}
+
+func TestDialogsUsePanelSurface(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+
+	updated, _ := model.handleSlashCommand("/theme")
+	got := updated.(Model)
+	view := got.View().Content
+
+	if !strings.Contains(view, "48;2;0;0;0") {
+		t.Fatalf("expected dialogs to render on black panel surface, got %q", view)
+	}
+}
+
+func TestVisualSurfaceIntegration(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	model.messages.SetSize(80, 8)
+	model.messages.AppendUser("hello from user")
+	model.messages.AppendAssistant("hello from assistant")
+
+	updated, _ := model.handleSlashCommand("/theme")
+	got := updated.(Model)
+	view := got.View()
+	plainView := plain(view.Content)
+	transcriptView := plain(got.messages.View())
+
+	want := fmt.Sprintf("%#v", theme.Current().Background)
+	if got := fmt.Sprintf("%#v", view.BackgroundColor); got != want {
+		t.Fatalf("expected black root background, got %s want %s", got, want)
+	}
+	if strings.Count(view.Content, "48;2;0;0;0") < 2 {
+		t.Fatalf("expected black surfaces to appear across editor/dialog stack, got %q", view.Content)
+	}
+	if !strings.Contains(transcriptView, "USER") || !strings.Contains(transcriptView, "ASSISTANT") {
+		t.Fatalf("expected transcript semantics to remain intact under overlay, got %q", transcriptView)
+	}
+	if !strings.Contains(plainView, "Themes") {
+		t.Fatalf("expected overlay to coexist with transcript content, got %q", plainView)
+	}
+}
+
+func TestOverlayUsesPanelSurface(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+	raw := "Commands"
+	panel := overlayPanelView(raw)
+	if lipgloss.Width(panel) <= lipgloss.Width(raw) {
+		t.Fatalf("expected overlay panel to widen content, raw=%d panel=%d", lipgloss.Width(raw), lipgloss.Width(panel))
+	}
+	if lipgloss.Height(panel) <= lipgloss.Height(raw) {
+		t.Fatalf("expected overlay panel to add vertical padding, raw=%d panel=%d", lipgloss.Height(raw), lipgloss.Height(panel))
+	}
+	if !strings.Contains(panel, "Commands") {
+		t.Fatalf("expected overlay panel to preserve content, got %q", panel)
+	}
+}
+
+func TestOverlayAddsScrimWithoutForcingRootBackground(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+	scrim := overlayScrimView(8, 3)
+	if lipgloss.Width(scrim) != 8 || lipgloss.Height(scrim) != 3 {
+		t.Fatalf("expected scrim to respect requested size, got %dx%d", lipgloss.Width(scrim), lipgloss.Height(scrim))
+	}
+	if !strings.Contains(scrim, "░") {
+		t.Fatalf("expected scrim to contain visible shaded cells, got %q", scrim)
+	}
+
 	model := New(app.Config{})
 	model.width = 80
 	model.height = 24
 	view := model.View()
-	if view.BackgroundColor != nil {
-		t.Fatalf("expected root view background to be transparent/default, got %#v", view.BackgroundColor)
+	want := fmt.Sprintf("%#v", theme.Current().Background)
+	if got := fmt.Sprintf("%#v", view.BackgroundColor); got != want {
+		t.Fatalf("expected black terminal background, got %s want %s", got, want)
 	}
 }
 

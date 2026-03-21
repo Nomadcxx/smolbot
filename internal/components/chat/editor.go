@@ -14,6 +14,7 @@ type EditorModel struct {
 	submitted string
 	history   []string
 	histIdx   int
+	compact   bool
 }
 
 func NewEditor() EditorModel {
@@ -37,8 +38,23 @@ func (m *EditorModel) SetWidth(w int) {
 	}
 }
 
+func (m *EditorModel) SetCompact(v bool) {
+	if m.compact == v {
+		return
+	}
+	m.compact = v
+	if v {
+		m.textarea.SetHeight(1)
+		return
+	}
+	m.textarea.SetHeight(3)
+}
+
 func (m EditorModel) Height() int {
-	return m.textarea.Height() + 2
+	if m.compact {
+		return 1
+	}
+	return m.textarea.Height() + 3
 }
 
 func (m *EditorModel) Submitted() string {
@@ -116,11 +132,61 @@ func (m EditorModel) View() string {
 	if t == nil {
 		return m.textarea.View()
 	}
+	if m.compact {
+		line := lipgloss.NewStyle().
+			Foreground(t.BorderFocus).
+			Bold(true).
+			Render("› ")
+		line += m.textarea.View()
+		return lipgloss.NewStyle().
+			Width(m.width).
+			Background(t.Element).
+			Foreground(t.Text).
+			Render(line)
+	}
 	border := lipgloss.NewStyle().
+		Background(t.Element).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus)
 	if m.width > 2 {
 		border = border.Width(m.width - 2)
 	}
-	return border.Render(m.textarea.View())
+	body := lipgloss.NewStyle().
+		Background(t.Element).
+		Foreground(t.Text).
+		Render(m.textarea.View())
+	input := border.Render(body)
+	hint := renderQuickStartHint(m.width)
+	if hint == "" {
+		return input
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, input, hint)
+}
+
+func renderQuickStartHint(width int) string {
+	t := theme.Current()
+	if t == nil || width <= 0 {
+		return ""
+	}
+	base := lipgloss.NewStyle().
+		Foreground(t.Text).
+		Background(t.Panel).
+		Bold(true).
+		Render
+	muted := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Background(t.Panel).
+		Render
+
+	hint := base("f1") + muted(" menu   ")
+	hint += base("/model") + muted(" models   ")
+	hint += base("/theme") + muted(" themes   ")
+	hint += base("ctrl+c") + muted(" abort/quit")
+
+	return lipgloss.NewStyle().
+		Width(width).
+		Background(t.Panel).
+		Foreground(t.TextMuted).
+		Padding(0, 1).
+		Render(hint)
 }

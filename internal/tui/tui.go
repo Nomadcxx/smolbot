@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -27,6 +28,10 @@ type ChatErrorMsg struct{ Message string }
 type ChatProgressMsg struct{ Content string }
 type ThinkingDoneMsg struct{ Content string }
 type HistoryLoadedMsg struct{ Messages []client.HistoryMessage }
+type StatusLoadedMsg struct {
+	Payload client.StatusPayload
+	Echo    bool
+}
 type SessionsLoadedMsg struct{ Sessions []client.SessionInfo }
 type SessionResetDoneMsg struct{ Key string }
 type ModelsLoadedMsg struct {
@@ -54,8 +59,8 @@ type gatewayClient interface {
 	SessionsList() ([]client.SessionInfo, error)
 	SessionsReset(key string) error
 	ModelsList() ([]client.ModelInfo, string, error)
-	ModelsSet(id string) error
-	Status() (json.RawMessage, error)
+	ModelsSet(id string) (string, error)
+	Status(session string) (client.StatusPayload, error)
 }
 
 type Model struct {
@@ -66,9 +71,8 @@ type Model struct {
 	messages      chat.MessagesModel
 	editor        chat.EditorModel
 	status        status.Model
+	footer        status.FooterModel
 	dialog        Dialog
-	commandMenu   dialogcmp.CommandsModel
-	showCommands  bool
 	eventCh       chan tea.Msg
 	connected     bool
 	reconnectWait time.Duration
@@ -93,6 +97,7 @@ func New(cfg app.Config) Model {
 		messages: chat.NewMessages(),
 		editor:   chat.NewEditor(),
 		status:   status.New(a),
+		footer:   status.NewFooter(a),
 		eventCh:  eventCh,
 	}
 }
@@ -194,6 +199,16 @@ func (m Model) syncModelCmd() tea.Cmd {
 	}
 }
 
+func (m Model) syncStatusCmd(echo bool) tea.Cmd {
+	return func() tea.Msg {
+		payload, err := m.client.Status(m.app.Session)
+		if err != nil {
+			return ChatErrorMsg{Message: err.Error()}
+		}
+		return StatusLoadedMsg{Payload: payload, Echo: echo}
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -201,24 +216,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		compact := m.height <= 16
+		m.header.SetCompact(compact)
+		m.editor.SetCompact(compact)
 		headerH := m.header.Height()
 		editorH := m.editor.Height()
 		statusH := 1
-		chatH := m.height - headerH - editorH - statusH
-		if chatH < 1 {
-			chatH = 1
+		footerH := 1
+		spacerH := 1
+		frameH := m.height - headerH - spacerH - editorH - statusH - footerH
+		if frameH < 5 {
+			frameH = 5
+		}
+		chatH := frameH - 2
+		if chatH < 3 {
+			chatH = 3
 		}
 		m.header.SetWidth(m.width)
-		m.messages.SetSize(m.width, chatH)
+		m.messages.SetSize(max(1, m.width-2), chatH)
 		m.editor.SetWidth(m.width)
 		m.status.SetWidth(m.width)
+		m.footer.SetWidth(m.width)
 		return m, nil
 	case ConnectedMsg:
 		m.connected = true
 		m.reconnectWait = 0
 		m.status.SetConnected(true)
 		m.status.SetReconnecting(false)
-		return m, tea.Batch(m.loadHistoryCmd(), m.syncModelCmd())
+		return m, tea.Batch(m.loadHistoryCmd(), m.syncModelCmd(), m.syncStatusCmd(false))
 	case CtrlCMsg:
 		return m.handleCtrlC()
 	case ChatStartedMsg:
@@ -229,7 +254,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentRunID = ""
 		m.status.SetStreaming(false)
 		m.messages.AppendAssistant(msg.Content)
-		return m, nil
+		return m, m.syncStatusCmd(false)
 	case ChatProgressMsg:
 		m.messages.SetProgress(msg.Content)
 		return m, nil
@@ -253,6 +278,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.messages.ReplaceHistory(history)
 		return m, nil
+	case StatusLoadedMsg:
+		if msg.Payload.Model != "" {
+			m.app.Model = msg.Payload.Model
+		}
+		m.footer.SetUsage(msg.Payload.Usage)
+		if msg.Echo {
+			m.messages.AppendAssistant(formatStatusSummary(msg.Payload))
+		}
+		return m, nil
 	case ModelCurrentMsg:
 		if msg.Current != "" {
 			m.app.Model = msg.Current
@@ -264,23 +298,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SessionResetDoneMsg:
 		m.app.Session = msg.Key
 		m.messages = chat.NewMessages()
-		return m, m.persistStateCmd()
+		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
 	case ModelsLoadedMsg:
 		m.dialog = modelsDialog{dialogcmp.NewModels(msg.Models, msg.Current)}
 		return m, nil
 	case ModelSetMsg:
 		m.app.Model = msg.ID
-		return m, m.persistStateCmd()
+		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
 	case dialogcmp.SessionChosenMsg:
 		m.app.Session = msg.Key
 		m.messages = chat.NewMessages()
 		m.dialog = nil
-		return m, tea.Batch(m.loadHistoryCmd(), m.persistStateCmd())
+		return m, tea.Batch(m.loadHistoryCmd(), m.persistStateCmd(), m.syncStatusCmd(false))
 	case dialogcmp.SessionNewMsg:
 		m.app.Session = "tui:" + time.Now().Format("20060102-150405")
 		m.messages = chat.NewMessages()
 		m.dialog = nil
-		return m, m.persistStateCmd()
+		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
 	case dialogcmp.SessionResetMsg:
 		m.dialog = nil
 		return m, func() tea.Msg {
@@ -292,21 +326,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dialogcmp.ModelChosenMsg:
 		m.dialog = nil
 		return m, func() tea.Msg {
-			if err := m.client.ModelsSet(msg.ID); err != nil {
+			current, err := m.client.ModelsSet(msg.ID)
+			if err != nil {
 				return ChatErrorMsg{Message: err.Error()}
 			}
-			return ModelSetMsg{ID: msg.ID}
+			return ModelSetMsg{ID: current}
 		}
 	case dialogcmp.CommandChosenMsg:
 		m.dialog = nil
-		if m.showCommands {
-			m.showCommands = false
-			m.editor.SetValue("")
+		m.editor.SetValue("")
+		if isMenuCloseCommand(msg.Command) {
+			return m, nil
 		}
 		return m.handleSlashCommand(msg.Command)
 	case dialogcmp.CloseDialogMsg:
 		m.dialog = nil
-		m.showCommands = false
 		return m, nil
 	case DisconnectedMsg:
 		m.connected = false
@@ -315,6 +349,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status.SetConnected(false)
 		m.status.SetStreaming(false)
 		m.status.SetReconnecting(true)
+		m.footer.SetUsage(client.UsageInfo{})
 		if m.reconnectWait == 0 {
 			m.reconnectWait = time.Second
 		} else if m.reconnectWait < 8*time.Second {
@@ -369,17 +404,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dialog = next
 			return m, cmd
 		}
-		if m.showCommands && handlesSlashMenuKey(msg.String()) {
-			next, cmd := m.commandMenu.Update(msg)
-			m.commandMenu = next
-			if cmd != nil {
-				return m.Update(cmd())
-			}
-			return m, nil
-		}
 		switch msg.String() {
 		case "ctrl+c":
 			return m.handleCtrlC()
+		case "f1", "ctrl+m":
+			m.dialog = newMenuDialog()
+			return m, nil
 		case "pgup", "pgdown", "home", "end", "esc", "ctrl+l":
 			m.messages.HandleKey(msg.String())
 			return m, nil
@@ -392,7 +422,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if submitted := m.editor.Submitted(); submitted != "" {
 		if strings.HasPrefix(submitted, "/") {
-			m.showCommands = false
+			m.dialog = nil
 			return m.handleSlashCommand(submitted)
 		}
 		m.messages.AppendUser(submitted)
@@ -400,8 +430,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status.SetStreaming(true)
 		cmds = append(cmds, m.sendChatCmd(submitted))
 	}
-	m.syncCommandMenu()
-
 	return m, tea.Batch(cmds...)
 }
 
@@ -452,10 +480,11 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "/model":
 		if args != "" {
 			return m, func() tea.Msg {
-				if err := m.client.ModelsSet(args); err != nil {
+				current, err := m.client.ModelsSet(args)
+				if err != nil {
 					return ChatErrorMsg{Message: err.Error()}
 				}
-				return ModelSetMsg{ID: args}
+				return ModelSetMsg{ID: current}
 			}
 		}
 		return m, func() tea.Msg {
@@ -473,7 +502,7 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		return m, m.saveStateCmd()
 	case "/theme":
 		if args == "" {
-			m.dialog = commandsDialog{dialogcmp.NewCommands(m.themeChoices())}
+			m.dialog = newThemesMenuDialog()
 			return m, nil
 		}
 		if theme.Set(args) {
@@ -482,13 +511,7 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			return m, m.persistStateCmd()
 		}
 	case "/status":
-		return m, func() tea.Msg {
-			raw, err := m.client.Status()
-			if err != nil {
-				return ChatErrorMsg{Message: err.Error()}
-			}
-			return ChatDoneMsg{Content: string(raw)}
-		}
+		return m, m.syncStatusCmd(true)
 	default:
 		m.messages.AppendError("Unknown command: " + cmd)
 	}
@@ -504,27 +527,29 @@ func (m Model) View() tea.View {
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		m.header.View(),
-		m.messages.View(),
-		m.editor.View(),
+		transcriptSpacer(m.width),
+		transcriptFrameView(m.messages.View(), m.width),
 		m.status.View(),
+		m.editor.View(),
+		m.footer.View(),
 	)
 	if m.width > 0 && m.height > 0 {
 		canvas := lipgloss.NewCanvas(m.width, m.height)
-		canvas.Compose(lipgloss.NewLayer(content))
+		layers := []*lipgloss.Layer{
+			lipgloss.NewLayer(content).X(0).Y(0),
+		}
 		if m.dialog != nil {
 			dialogView := m.dialog.View()
-			canvas.Compose(lipgloss.NewLayer(dialogView).
+			layers = append(layers, lipgloss.NewLayer(dialogView).
 				X(max(0, (m.width-lipgloss.Width(dialogView))/2)).
 				Y(max(0, (m.height-lipgloss.Height(dialogView))/2)))
-		} else if m.showCommands {
-			menuView := m.commandMenu.View()
-			x, y := m.commandMenuPosition(menuView)
-			canvas.Compose(lipgloss.NewLayer(menuView).X(x).Y(y))
 		}
+		canvas.Compose(lipgloss.NewCompositor(layers...))
 		content = canvas.Render()
 	}
 	view := tea.NewView(content)
 	view.AltScreen = true
+	view.BackgroundColor = t.Background
 	return view
 }
 
@@ -542,69 +567,136 @@ func (d modelsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	return modelsDialog{next}, cmd
 }
 
-type commandsDialog struct{ dialogcmp.CommandsModel }
+type commandsDialog struct {
+	dialogcmp.CommandsModel
+}
 
 func (d commandsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	next, cmd := d.CommandsModel.Update(msg)
-	return commandsDialog{next}, cmd
+	return commandsDialog{CommandsModel: next}, cmd
 }
 
-func (m Model) commandChoices() []string {
-	commands := []string{
-		"/session",
-		"/session new",
-		"/session reset",
-		"/model",
-		"/clear",
-		"/status",
-		"/help",
-		"/quit",
+func formatStatusSummary(payload client.StatusPayload) string {
+	parts := make([]string, 0, 4)
+	if payload.Model != "" {
+		parts = append(parts, "model "+payload.Model)
 	}
-	return append(commands, m.themeChoices()...)
+	if payload.Session != "" {
+		parts = append(parts, "session "+payload.Session)
+	}
+	if usage := formatUsageSummary(payload.Usage); usage != "" {
+		parts = append(parts, "usage "+usage)
+	}
+	if len(payload.Channels) > 0 {
+		channels := make([]string, 0, len(payload.Channels))
+		for _, channel := range payload.Channels {
+			channels = append(channels, channel.Name+"="+channel.Status)
+		}
+		parts = append(parts, "channels "+strings.Join(channels, ", "))
+	}
+	if len(parts) == 0 {
+		return "status ok"
+	}
+	return "status: " + strings.Join(parts, " | ")
 }
 
-func (m Model) themeChoices() []string {
-	names := theme.List()
-	choices := make([]string, 0, len(names))
-	for _, name := range names {
-		choices = append(choices, "/theme "+name)
+func formatUsageSummary(usage client.UsageInfo) string {
+	if usage.ContextWindow <= 0 || usage.TotalTokens <= 0 {
+		return ""
 	}
-	return choices
+	percentage := int((float64(usage.TotalTokens)/float64(usage.ContextWindow))*100 + 0.5)
+	return fmt.Sprintf("%d%% (%s/%s)", percentage, formatUsageTokens(usage.TotalTokens), formatUsageTokens(usage.ContextWindow))
 }
 
-func (m *Model) syncCommandMenu() {
-	if m.dialog != nil {
-		m.showCommands = false
-		return
-	}
-	value := strings.TrimSpace(m.editor.Value())
-	if !strings.HasPrefix(value, "/") {
-		m.showCommands = false
-		return
-	}
-	filter := strings.TrimSpace(strings.TrimPrefix(value, "/"))
-	if !m.showCommands {
-		m.commandMenu = dialogcmp.NewCommands(m.commandChoices())
-	}
-	m.commandMenu.SetFilter(filter)
-	m.showCommands = true
-}
-
-func (m Model) commandMenuPosition(menuView string) (int, int) {
-	editorView := m.editor.View()
-	editorHeight := lipgloss.Height(editorView)
-	editorWidth := lipgloss.Width(editorView)
-	statusHeight := lipgloss.Height(m.status.View())
-	x := max(0, (m.width-editorWidth)/2)
-	y := m.height - statusHeight - editorHeight - lipgloss.Height(menuView)
-	return x, max(m.header.Height(), y)
-}
-
-func handlesSlashMenuKey(key string) bool {
-	switch key {
-	case "up", "down", "ctrl+p", "ctrl+n", "tab", "enter", "esc":
-		return true
+func formatUsageTokens(value int) string {
+	switch {
+	case value >= 1_000_000:
+		text := fmt.Sprintf("%.1fM", float64(value)/1_000_000)
+		return strings.Replace(text, ".0M", "M", 1)
+	case value >= 1_000:
+		text := fmt.Sprintf("%.1fK", float64(value)/1_000)
+		return strings.Replace(text, ".0K", "K", 1)
 	default:
-		return false
+		return fmt.Sprintf("%d", value)
 	}
+}
+
+func overlayPanelView(content string) string {
+	t := theme.Current()
+	if t == nil {
+		return content
+	}
+	return lipgloss.NewStyle().
+		Background(t.Panel).
+		Foreground(t.Text).
+		Padding(1, 2).
+		Render(content)
+}
+
+func overlayScrimView(width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	rows := make([]string, 0, height)
+	for i := 0; i < height; i++ {
+		rows = append(rows, overlayScrimLine(width))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func overlayView(content string, maxWidth, maxHeight int) string {
+	panel := overlayPanelView(content)
+	width := min(maxWidth, lipgloss.Width(panel)+6)
+	height := min(maxHeight, lipgloss.Height(panel)+2)
+	if width <= 0 || height <= 0 {
+		return panel
+	}
+	panelLines := strings.Split(panel, "\n")
+	topPad := max(0, (height-len(panelLines))/2)
+	bottomPad := max(0, height-len(panelLines)-topPad)
+	leftPad := max(0, (width-lipgloss.Width(panel))/2)
+	rightPad := max(0, width-lipgloss.Width(panel)-leftPad)
+	rows := make([]string, 0, height)
+	for i := 0; i < topPad; i++ {
+		rows = append(rows, overlayScrimLine(width))
+	}
+	for _, line := range panelLines {
+		rows = append(rows, overlayScrimLine(leftPad)+line+overlayScrimLine(rightPad))
+	}
+	for i := 0; i < bottomPad; i++ {
+		rows = append(rows, overlayScrimLine(width))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func overlayScrimLine(width int) string {
+	t := theme.Current()
+	if t == nil || width <= 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Render(strings.Repeat("░", width))
+}
+
+func transcriptSpacer(width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return strings.Repeat(" ", width)
+}
+
+func transcriptFrameView(content string, width int) string {
+	t := theme.Current()
+	if t == nil {
+		return content
+	}
+	style := lipgloss.NewStyle().
+		Background(t.Panel).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Border)
+	if width > 2 {
+		style = style.Width(width - 2)
+	}
+	return style.Render(content)
 }

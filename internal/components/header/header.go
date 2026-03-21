@@ -1,7 +1,6 @@
 package header
 
 import (
-	"image/color"
 	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
@@ -10,9 +9,10 @@ import (
 )
 
 type Model struct {
-	width  int
-	cached string
-	theme  string
+	width   int
+	cached  string
+	theme   string
+	compact bool
 }
 
 func New() Model {
@@ -24,7 +24,18 @@ func (m *Model) SetWidth(w int) {
 	m.cached = ""
 }
 
+func (m *Model) SetCompact(v bool) {
+	if m.compact == v {
+		return
+	}
+	m.compact = v
+	m.cached = ""
+}
+
 func (m Model) Height() int {
+	if m.compact {
+		return 1
+	}
 	return strings.Count(strings.TrimRight(assets.Header, "\n"), "\n") + 1
 }
 
@@ -38,17 +49,32 @@ func (m *Model) View() string {
 	}
 
 	m.theme = t.Name
+	if m.compact {
+		if m.width > 0 {
+			line := lipgloss.NewStyle().
+				Width(m.width).
+				Align(lipgloss.Center).
+				Foreground(t.Primary).
+				Bold(true).
+				Render("nanobot tui")
+			m.cached = line
+			return m.cached
+		}
+		line := lipgloss.NewStyle().
+			Foreground(t.Primary).
+			Bold(true).
+			Render("nanobot tui")
+		m.cached = line
+		return m.cached
+	}
 	lines := strings.Split(strings.TrimRight(assets.Header, "\n"), "\n")
-	colors := []color.Color{t.Primary, t.Secondary, t.Accent}
 	var out strings.Builder
 	for i, line := range lines {
-		styled := lipgloss.NewStyle().Foreground(colors[i%len(colors)]).Render(line)
+		style := lipgloss.NewStyle().Foreground(t.Primary)
 		if m.width > 0 {
-			pad := (m.width - lipgloss.Width(line)) / 2
-			if pad > 0 {
-				styled = strings.Repeat(" ", pad) + styled
-			}
+			style = style.Width(m.width).Align(lipgloss.Center)
 		}
+		styled := style.Render(line)
 		out.WriteString(styled)
 		if i < len(lines)-1 {
 			out.WriteByte('\n')

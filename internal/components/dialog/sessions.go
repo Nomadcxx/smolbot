@@ -41,12 +41,12 @@ func (m SessionsModel) Update(msg tea.Msg) (SessionsModel, tea.Cmd) {
 		switch key.String() {
 		case "esc":
 			return m, func() tea.Msg { return CloseDialogMsg{} }
-		case "up", "k":
+		case "up", "k", "ctrl+p":
 			if m.cursor > 0 {
 				m.cursor--
 			}
 			return m, nil
-		case "down", "j":
+		case "down", "j", "ctrl+n":
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
 			}
@@ -94,34 +94,50 @@ func (m SessionsModel) View() string {
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Filter: " + m.filter),
 		"",
 	}
-	for i, session := range m.filtered {
+
+	start, end := visibleBounds(len(m.filtered), m.cursor)
+	if start > 0 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▲ more above"))
+	}
+	for i := start; i < end; i++ {
+		session := m.filtered[i]
 		prefix := "  "
 		if i == m.cursor {
 			prefix = "› "
 		}
 		label := session.Key
 		if session.Key == m.current {
-			label += " (current)"
+			label += lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render(" current")
 		}
-		lines = append(lines, prefix+label)
+		row := prefix + label
+		if i == m.cursor {
+			row = lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render(row)
+		}
+		lines = append(lines, row)
+		if session.Preview != "" {
+			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("    "+session.Preview))
+		}
 	}
 	if len(m.filtered) == 0 {
-		lines = append(lines, "  No sessions")
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("No sessions"))
 	}
-	lines = append(lines, "", "Enter=switch  n=new  d=reset  Esc=close")
+	if end < len(m.filtered) {
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▼ more below"))
+	}
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("Up/Down j/k • Enter switch • n new • d reset • Esc close"))
 	return lipgloss.NewStyle().
+		Background(t.Panel).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(48).
+		Width(64).
 		Render(strings.Join(lines, "\n"))
 }
 
 func (m *SessionsModel) applyFilter() {
 	m.filtered = m.filtered[:0]
-	needle := strings.ToLower(m.filter)
 	for _, session := range m.sessions {
-		if needle == "" || strings.Contains(strings.ToLower(session.Key), needle) {
+		if matchesQuery(m.filter, session.Key, session.Preview, session.UpdatedAt) {
 			m.filtered = append(m.filtered, session)
 		}
 	}

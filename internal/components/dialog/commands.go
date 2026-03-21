@@ -19,6 +19,24 @@ type CommandsModel struct {
 	cursor   int
 }
 
+var commandDescriptions = map[string]string{
+	"/session":       "switch sessions",
+	"/session new":   "start a fresh session",
+	"/session reset": "reset the current session transcript",
+	"/model":         "choose the active model",
+	"/clear":         "clear the visible transcript",
+	"/status":        "show gateway status",
+	"/help":          "list available slash commands",
+	"/quit":          "quit nanobot tui",
+}
+
+var commandAliases = map[string][]string{
+	"/session new":   {"new session"},
+	"/session reset": {"wipe", "restart"},
+	"/clear":         {"cls"},
+	"/quit":          {"exit"},
+}
+
 func NewCommands(commands []string) CommandsModel {
 	m := CommandsModel{commands: commands}
 	m.applyFilter()
@@ -73,18 +91,50 @@ func (m CommandsModel) View() string {
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Filter: " + m.filter),
 		"",
 	}
-	for i, command := range m.filtered {
+	if len(m.filtered) == 0 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("No matches"))
+		lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("↑↓ j/k • Enter/Tab run • Esc close"))
+		return lipgloss.NewStyle().
+			Background(t.Panel).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.BorderFocus).
+			Padding(1, 2).
+			Width(64).
+			Render(strings.Join(lines, "\n"))
+	}
+
+	start, end := visibleBounds(len(m.filtered), m.cursor)
+	if start > 0 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▲ more above"))
+	}
+	for i := start; i < end; i++ {
+		command := m.filtered[i]
 		prefix := "  "
 		if i == m.cursor {
 			prefix = "› "
 		}
-		lines = append(lines, prefix+command)
+		desc := commandDescription(command)
+		if desc == "" {
+			lines = append(lines, prefix+command)
+			continue
+		}
+		row := prefix + lipgloss.NewStyle().Foreground(t.Text).Render(command)
+		row += lipgloss.NewStyle().Foreground(t.TextMuted).Render("  " + desc)
+		if i == m.cursor {
+			row = lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render(row)
+		}
+		lines = append(lines, row)
 	}
+	if end < len(m.filtered) {
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▼ more below"))
+	}
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("↑↓ j/k • Enter/Tab run • Esc close"))
 	return lipgloss.NewStyle().
+		Background(t.Panel).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(48).
+		Width(64).
 		Render(strings.Join(lines, "\n"))
 }
 
@@ -103,15 +153,39 @@ func (m CommandsModel) Current() string {
 	return m.filtered[m.cursor]
 }
 
+func (m CommandsModel) Filter() string {
+	return m.filter
+}
+
 func (m *CommandsModel) applyFilter() {
 	m.filtered = m.filtered[:0]
-	needle := strings.ToLower(m.filter)
+	labelMatches := make([]string, 0, len(m.commands))
+	metaMatches := make([]string, 0, len(m.commands))
 	for _, command := range m.commands {
-		if needle == "" || strings.Contains(strings.ToLower(command), needle) {
-			m.filtered = append(m.filtered, command)
+		if matchesQuery(m.filter, command) {
+			labelMatches = append(labelMatches, command)
+			continue
 		}
+		if matchesQuery(m.filter, commandDescription(command), strings.Join(commandAliases[command], " ")) {
+			metaMatches = append(metaMatches, command)
+		}
+	}
+	if len(labelMatches) > 0 || strings.TrimSpace(m.filter) == "" {
+		m.filtered = append(m.filtered, labelMatches...)
+	} else {
+		m.filtered = append(m.filtered, metaMatches...)
 	}
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
+}
+
+func commandDescription(command string) string {
+	if desc, ok := commandDescriptions[command]; ok {
+		return desc
+	}
+	if strings.HasPrefix(command, "/theme ") {
+		return "switch theme"
+	}
+	return ""
 }
