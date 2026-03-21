@@ -1,4 +1,4 @@
-module github.com/Nomadcxx/nanobot-go
+module github.com/Nomadcxx/smolbot
 
 go 1.26.1
 
