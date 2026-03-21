@@ -307,6 +307,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return nil, fmt.Errorf("parse models.set params: %w", err)
 		}
+		previous := s.currentModel()
 		if s.config != nil {
 			s.config.Agents.Defaults.Model = params.Model
 		}
@@ -315,7 +316,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 				return nil, err
 			}
 		}
-		return map[string]any{"ok": true}, nil
+		return map[string]any{"previous": previous}, nil
 	default:
 		return nil, fmt.Errorf("unknown method %q", req.Method)
 	}
