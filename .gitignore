@@ -2,3 +2,4 @@ gateway.test
 nanobot
 ./nanobot-tui
 nanobot.test
+.worktrees/
