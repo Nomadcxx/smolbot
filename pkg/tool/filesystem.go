@@ -119,9 +119,13 @@ func (t *ListDirTool) Parameters() map[string]any {
 }
 
 func (t *ReadFileTool) Execute(_ context.Context, raw json.RawMessage, tctx ToolContext) (*Result, error) {
-	args := readFileArgs{}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	var rawArgs map[string]any
+	if err := json.Unmarshal(raw, &rawArgs); err != nil {
 		return nil, fmt.Errorf("parse read_file args: %w", err)
+	}
+	args, err := CoerceArgs[readFileArgs](rawArgs)
+	if err != nil {
+		return nil, fmt.Errorf("coerce read_file args: %w", err)
 	}
 	path, err := validateFilesystemPath(args.Path, tctx.Workspace, t.restrictToWorkspace, args.ExtraAllowedDirs)
 	if err != nil {
@@ -158,9 +162,13 @@ func (t *ReadFileTool) Execute(_ context.Context, raw json.RawMessage, tctx Tool
 }
 
 func (t *WriteFileTool) Execute(_ context.Context, raw json.RawMessage, tctx ToolContext) (*Result, error) {
-	args := writeFileArgs{}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	var rawArgs map[string]any
+	if err := json.Unmarshal(raw, &rawArgs); err != nil {
 		return nil, fmt.Errorf("parse write_file args: %w", err)
+	}
+	args, err := CoerceArgs[writeFileArgs](rawArgs)
+	if err != nil {
+		return nil, fmt.Errorf("coerce write_file args: %w", err)
 	}
 	path, err := validateFilesystemPath(args.Path, tctx.Workspace, t.restrictToWorkspace, nil)
 	if err != nil {
@@ -176,9 +184,13 @@ func (t *WriteFileTool) Execute(_ context.Context, raw json.RawMessage, tctx Too
 }
 
 func (t *EditFileTool) Execute(_ context.Context, raw json.RawMessage, tctx ToolContext) (*Result, error) {
-	args := editFileArgs{}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	var rawArgs map[string]any
+	if err := json.Unmarshal(raw, &rawArgs); err != nil {
 		return nil, fmt.Errorf("parse edit_file args: %w", err)
+	}
+	args, err := CoerceArgs[editFileArgs](rawArgs)
+	if err != nil {
+		return nil, fmt.Errorf("coerce edit_file args: %w", err)
 	}
 	path, err := validateFilesystemPath(args.Path, tctx.Workspace, t.restrictToWorkspace, nil)
 	if err != nil {
@@ -212,9 +224,13 @@ func (t *EditFileTool) Execute(_ context.Context, raw json.RawMessage, tctx Tool
 }
 
 func (t *ListDirTool) Execute(_ context.Context, raw json.RawMessage, tctx ToolContext) (*Result, error) {
-	args := listDirArgs{}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	var rawArgs map[string]any
+	if err := json.Unmarshal(raw, &rawArgs); err != nil {
 		return nil, fmt.Errorf("parse list_dir args: %w", err)
+	}
+	args, err := CoerceArgs[listDirArgs](rawArgs)
+	if err != nil {
+		return nil, fmt.Errorf("coerce list_dir args: %w", err)
 	}
 	path, err := validateFilesystemPath(args.Path, tctx.Workspace, t.restrictToWorkspace, nil)
 	if err != nil {

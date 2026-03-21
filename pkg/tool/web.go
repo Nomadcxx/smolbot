@@ -114,9 +114,13 @@ func (t *WebFetchTool) Parameters() map[string]any {
 }
 
 func (t *WebSearchTool) Execute(ctx context.Context, raw json.RawMessage, _ ToolContext) (*Result, error) {
-	args := webSearchArgs{}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	var rawArgs map[string]any
+	if err := json.Unmarshal(raw, &rawArgs); err != nil {
 		return nil, fmt.Errorf("parse web_search args: %w", err)
+	}
+	args, err := CoerceArgs[webSearchArgs](rawArgs)
+	if err != nil {
+		return nil, fmt.Errorf("coerce web_search args: %w", err)
 	}
 	query := strings.TrimSpace(args.Query)
 	if query == "" {
@@ -158,9 +162,13 @@ func (t *WebSearchTool) Execute(ctx context.Context, raw json.RawMessage, _ Tool
 }
 
 func (t *WebFetchTool) Execute(ctx context.Context, raw json.RawMessage, _ ToolContext) (*Result, error) {
-	args := webFetchArgs{}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	var rawArgs map[string]any
+	if err := json.Unmarshal(raw, &rawArgs); err != nil {
 		return nil, fmt.Errorf("parse web_fetch args: %w", err)
+	}
+	args, err := CoerceArgs[webFetchArgs](rawArgs)
+	if err != nil {
+		return nil, fmt.Errorf("coerce web_fetch args: %w", err)
 	}
 	targetURL := strings.TrimSpace(args.URL)
 	if targetURL == "" {

@@ -63,9 +63,13 @@ func (t *ExecTool) Parameters() map[string]any {
 }
 
 func (t *ExecTool) Execute(ctx context.Context, args json.RawMessage, tctx ToolContext) (*Result, error) {
-	parsed := execArgs{}
-	if err := json.Unmarshal(args, &parsed); err != nil {
+	var rawArgs map[string]any
+	if err := json.Unmarshal(args, &rawArgs); err != nil {
 		return nil, fmt.Errorf("parse exec args: %w", err)
+	}
+	parsed, err := CoerceArgs[execArgs](rawArgs)
+	if err != nil {
+		return nil, fmt.Errorf("coerce exec args: %w", err)
 	}
 	command := strings.TrimSpace(parsed.Command)
 	if command == "" {
