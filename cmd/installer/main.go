@@ -263,11 +263,13 @@ func (m model) handleConfigurationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.providerIndex == 0 && m.ollamaModelIndex > 0 {
 			m.ollamaModelIndex--
+			m.selectedModel = m.ollamaModels[m.ollamaModelIndex]
 		}
 		return m, nil
 	case "down", "j":
 		if m.providerIndex == 0 && m.ollamaModelIndex < len(m.ollamaModels)-1 {
 			m.ollamaModelIndex++
+			m.selectedModel = m.ollamaModels[m.ollamaModelIndex]
 		}
 		return m, nil
 	case "enter":
