@@ -1,11 +1,11 @@
 #!/bin/bash
-# nanobot-go one-line installer
+# smolbot one-line installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/Nomadcxx/smolbot/main/install.sh | bash
 
 set -e
 
 echo "SMOLBOT"
-echo "nanobot-go installer"
+echo "smolbot installer"
 echo ""
 
 # Check prerequisites

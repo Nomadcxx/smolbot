@@ -125,7 +125,7 @@ func TestWebTools(t *testing.T) {
 		defer proxy.Close()
 
 		tool := NewWebFetchTool(config.WebToolConfig{
-			UserAgent: "nanobot-test-agent",
+			UserAgent: "smolbot-test-agent",
 			Proxy:     proxy.URL,
 		}, WebDependencies{
 			PreflightValidator: func(string) error { return nil },
@@ -137,7 +137,7 @@ func TestWebTools(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
-		if got := sawUA.Load(); got != "nanobot-test-agent" {
+		if got := sawUA.Load(); got != "smolbot-test-agent" {
 			t.Fatalf("expected proxy to observe custom user agent, got %v", got)
 		}
 		if got := sawURL.Load(); got != "http://example.com/proxy-check" {

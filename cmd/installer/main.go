@@ -28,8 +28,8 @@ func newModel() model {
 	exists, version, daemonRunning, configExists, _ := detectExistingInstall()
 
 	// Default paths
-	workspacePath := filepath.Join(os.Getenv("HOME"), ".nanobot", "workspace")
-	configPath := filepath.Join(os.Getenv("HOME"), ".nanobot", "config.json")
+	workspacePath := filepath.Join(os.Getenv("HOME"), ".smolbot", "workspace")
+	configPath := filepath.Join(os.Getenv("HOME"), ".smolbot", "config.json")
 
 	// Check prerequisites
 	hasGo := false

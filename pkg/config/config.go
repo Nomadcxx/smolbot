@@ -108,7 +108,7 @@ func DefaultConfig() Config {
 	return Config{
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
-				Workspace:           filepath.Join(home, ".nanobot", "workspace"),
+				Workspace:           filepath.Join(home, ".smolbot", "workspace"),
 				MaxTokens:           8192,
 				ContextWindowTokens: 200000,
 				Temperature:         0.7,
@@ -120,11 +120,11 @@ func DefaultConfig() Config {
 			SendProgress: true,
 			Signal: SignalChannelConfig{
 				CLIPath: "signal-cli",
-				DataDir: filepath.Join(home, ".nanobot", "signal"),
+				DataDir: filepath.Join(home, ".smolbot", "signal"),
 			},
 			WhatsApp: WhatsAppChannelConfig{
-				DeviceName: "nanobot-go",
-				StorePath:  filepath.Join(home, ".nanobot", "whatsapp.db"),
+				DeviceName: "smolbot",
+				StorePath:  filepath.Join(home, ".smolbot", "whatsapp.db"),
 			},
 		},
 		Gateway: GatewayConfig{

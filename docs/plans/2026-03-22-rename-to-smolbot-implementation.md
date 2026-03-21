@@ -1,10 +1,10 @@
-# Rename nanobot-go to smolbot - Implementation Plan
+# Rename smolbot to smolbot - Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Rename the entire project from "nanobot-go" to "smolbot", including module name, binaries, config paths, service names, and all references.
+**Goal:** Rename the entire project from "smolbot" to "smolbot", including module name, binaries, config paths, service names, and all references.
 
-**Architecture:** Rename Go module, update all import paths, rename cmd directories, update binary names, change config directory from ~/.nanobot to ~/.smolbot, update service name to smolbot.service, and update all branding/references.
+**Architecture:** Rename Go module, update all import paths, rename cmd directories, update binary names, change config directory from ~/.smolbot to ~/.smolbot, update service name to smolbot.service, and update all branding/references.
 
 **Tech Stack:** Go 1.26, systemd, WebSocket gateway, TUI
 
@@ -14,7 +14,7 @@
 
 - [ ] Backup any unsaved work
 - [ ] Ensure git is clean (commit or stash changes)
-- [ ] Verify working directory is /home/nomadx/nanobot-go
+- [ ] Verify working directory is /home/nomadx/smolbot
 
 ---
 
@@ -26,7 +26,7 @@
 **Step 1: Change module name**
 
 ```bash
-sed -i 's|module github.com/Nomadcxx/nanobot-go|module github.com/Nomadcxx/smolbot|' go.mod
+sed -i 's|module github.com/Nomadcxx/smolbot|module github.com/Nomadcxx/smolbot|' go.mod
 ```
 
 **Step 2: Verify change**
@@ -53,13 +53,13 @@ git commit -m "chore: rename module to smolbot"
 **Step 1: Update imports across all Go files**
 
 ```bash
-find . -name "*.go" -type f -exec sed -i 's|github.com/Nomadcxx/nanobot-go|github.com/Nomadcxx/smolbot|g' {} +
+find . -name "*.go" -type f -exec sed -i 's|github.com/Nomadcxx/smolbot|github.com/Nomadcxx/smolbot|g' {} +
 ```
 
 **Step 2: Verify no old imports remain**
 
 ```bash
-grep -r "github.com/Nomadcxx/nanobot-go" --include="*.go" . || echo "No old imports found"
+grep -r "github.com/Nomadcxx/smolbot" --include="*.go" . || echo "No old imports found"
 ```
 
 **Step 3: Commit**
@@ -74,15 +74,15 @@ git commit -m "chore: update all import paths"
 ## Task 3: Rename cmd Directories
 
 **Files:**
-- Rename: `cmd/nanobot/` → `cmd/smolbot/`
-- Rename: `cmd/nanobot-tui/` → `cmd/smolbot-tui/`
+- Rename: `cmd/smolbot/` → `cmd/smolbot/`
+- Rename: `cmd/smolbot-tui/` → `cmd/smolbot-tui/`
 
 **Step 1: Rename directories**
 
 ```bash
-cd /home/nomadx/nanobot-go
-mv cmd/nanobot cmd/smolbot
-mv cmd/nanobot-tui cmd/smolbot-tui
+cd /home/nomadx/smolbot
+mv cmd/smolbot cmd/smolbot
+mv cmd/smolbot-tui cmd/smolbot-tui
 ```
 
 **Step 2: Verify renames**
@@ -107,31 +107,31 @@ git commit -m "chore: rename cmd directories"
 - Modify: `cmd/installer/tasks.go:40,42,46,58,60,64,84,107`
 - Modify: `cmd/installer/utils.go:100`
 - Modify: `cmd/installer/views.go:420,424,451,452`
-- Modify: `cmd/smolbot/root.go:18,19` (was nanobot/root.go)
-- Modify: `cmd/smolbot/run.go:14` (was nanobot/run.go)
+- Modify: `cmd/smolbot/root.go:18,19` (was smolbot/root.go)
+- Modify: `cmd/smolbot/run.go:14` (was smolbot/run.go)
 
 **Step 1: Update binary names in installer**
 
 ```bash
-sed -i 's/"nanobot"/"smolbot"/g' cmd/installer/tasks.go
-sed -i 's/"nanobot-tui"/"smolbot-tui"/g' cmd/installer/tasks.go
-sed -i 's/\.local", "bin", "nanobot"/".local", "bin", "smolbot"/' cmd/installer/utils.go
+sed -i 's/"smolbot"/"smolbot"/g' cmd/installer/tasks.go
+sed -i 's/"smolbot-tui"/"smolbot-tui"/g' cmd/installer/tasks.go
+sed -i 's/\.local", "bin", "smolbot"/".local", "bin", "smolbot"/' cmd/installer/utils.go
 ```
 
 **Step 2: Update CLI command names**
 
 ```bash
-sed -i 's/Use: "nanobot"/Use: "smolbot"/' cmd/smolbot/root.go
-sed -i 's/Short: "nanobot daemon/Short: "smolbot daemon/' cmd/smolbot/root.go
-sed -i 's/Short: "Start the nanobot daemon"/Short: "Start the smolbot daemon"/' cmd/smolbot/run.go
+sed -i 's/Use: "smolbot"/Use: "smolbot"/' cmd/smolbot/root.go
+sed -i 's/Short: "smolbot daemon/Short: "smolbot daemon/' cmd/smolbot/root.go
+sed -i 's/Short: "Start the smolbot daemon"/Short: "Start the smolbot daemon"/' cmd/smolbot/run.go
 ```
 
 **Step 3: Update quick start guide**
 
 ```bash
-sed -i 's/nanobot-tui/smolbot-tui/g' cmd/installer/views.go
-sed -i 's/nanobot run/smolbot run/g' cmd/installer/views.go
-sed -i 's/~\/.local\/bin\/nanobot/~\/.local\/bin\/smolbot/g' cmd/installer/views.go
+sed -i 's/smolbot-tui/smolbot-tui/g' cmd/installer/views.go
+sed -i 's/smolbot run/smolbot run/g' cmd/installer/views.go
+sed -i 's/~\/.local\/bin\/smolbot/~\/.local\/bin\/smolbot/g' cmd/installer/views.go
 ```
 
 **Step 4: Commit**
@@ -156,30 +156,30 @@ git commit -m "chore: update binary names"
 **Step 1: Update default config directory**
 
 ```bash
-sed -i 's/\.nanobot/.smolbot/g' pkg/config/paths.go
-sed -i 's/\.nanobot/.smolbot/g' pkg/config/config.go
+sed -i 's/\.smolbot/.smolbot/g' pkg/config/paths.go
+sed -i 's/\.smolbot/.smolbot/g' pkg/config/config.go
 ```
 
 **Step 2: Update installer paths**
 
 ```bash
-sed -i 's/\.nanobot/.smolbot/g' cmd/installer/main.go
-sed -i 's/Creating ~\/.nanobot/Creating ~\/.smolbot/' cmd/installer/tasks.go
-sed -i 's/Removing ~\/.nanobot/Removing ~\/.smolbot/' cmd/installer/tasks.go
+sed -i 's/\.smolbot/.smolbot/g' cmd/installer/main.go
+sed -i 's/Creating ~\/.smolbot/Creating ~\/.smolbot/' cmd/installer/tasks.go
+sed -i 's/Removing ~\/.smolbot/Removing ~\/.smolbot/' cmd/installer/tasks.go
 ```
 
 **Step 3: Update remaining paths (but keep legacy migration)**
 
 ```bash
-# Keep nanobot-go for legacy migration in utils.go
-sed -i 's/\.nanobot-go/.smolbot-go/' cmd/installer/utils.go
+# Keep smolbot for legacy migration in utils.go
+sed -i 's/\.smolbot/.smolbot-go/' cmd/installer/utils.go
 ```
 
 **Step 4: Update views**
 
 ```bash
-sed -i 's/nano ~\/.nanobot/nano ~\/.smolbot/' cmd/installer/views.go
-sed -i 's/~\/.nanobot/~\/.smolbot/g' cmd/installer/views.go
+sed -i 's/nano ~\/.smolbot/nano ~\/.smolbot/' cmd/installer/views.go
+sed -i 's/~\/.smolbot/~\/.smolbot/g' cmd/installer/views.go
 ```
 
 **Step 5: Commit**
@@ -201,16 +201,16 @@ git commit -m "chore: update config paths"
 **Step 1: Update systemd service references**
 
 ```bash
-sed -i 's/nanobot-go.service/smolbot.service/g' cmd/installer/tasks.go
-sed -i 's/Description=nanobot-go/Description=smolbot/' cmd/installer/tasks.go
-sed -i 's/nanobot-go"/smolbot"/g' cmd/installer/tasks.go
-sed -i 's/nanobot-go"/smolbot"/g' cmd/installer/utils.go
+sed -i 's/smolbot.service/smolbot.service/g' cmd/installer/tasks.go
+sed -i 's/Description=smolbot/Description=smolbot/' cmd/installer/tasks.go
+sed -i 's/smolbot"/smolbot"/g' cmd/installer/tasks.go
+sed -i 's/smolbot"/smolbot"/g' cmd/installer/utils.go
 ```
 
 **Step 2: Update views**
 
 ```bash
-sed -i 's/nanobot-go/smolbot/g' cmd/installer/views.go
+sed -i 's/smolbot/smolbot/g' cmd/installer/views.go
 ```
 
 **Step 3: Commit**
@@ -267,10 +267,10 @@ git commit -m "chore: update ASCII art"
 **Step 1: Update identity strings**
 
 ```bash
-sed -i 's/You are nanobot/You are smolbot/' pkg/agent/context.go
-sed -i 's/You are nanobot/You are smolbot/' templates/SOUL.md
-sed -i 's/You are nanobot/You are smolbot/' templates/AGENTS.md
-sed -i 's/You are nanobot/You are smolbot/' cmd/smolbot/runtime.go
+sed -i 's/You are smolbot/You are smolbot/' pkg/agent/context.go
+sed -i 's/You are smolbot/You are smolbot/' templates/SOUL.md
+sed -i 's/You are smolbot/You are smolbot/' templates/AGENTS.md
+sed -i 's/You are smolbot/You are smolbot/' cmd/smolbot/runtime.go
 ```
 
 **Step 2: Commit**
@@ -293,10 +293,10 @@ git commit -m "chore: update agent identity"
 **Step 1: Update TUI paths and client ID**
 
 ```bash
-sed -i 's/nanobot-tui/smolbot-tui/' internal/app/state.go
-sed -i 's/nanobot-tui/smolbot-tui/' internal/client/client.go
-sed -i 's/nanobot-tui/smolbot-tui/' internal/client/protocol_test.go
-sed -i 's/"nanobot"/"smolbot"/' internal/components/chat/messages.go
+sed -i 's/smolbot-tui/smolbot-tui/' internal/app/state.go
+sed -i 's/smolbot-tui/smolbot-tui/' internal/client/client.go
+sed -i 's/smolbot-tui/smolbot-tui/' internal/client/protocol_test.go
+sed -i 's/"smolbot"/"smolbot"/' internal/components/chat/messages.go
 ```
 
 **Step 2: Commit**
@@ -318,9 +318,9 @@ git commit -m "chore: update TUI references"
 **Step 1: Update server identification**
 
 ```bash
-sed -i 's/"server": "nanobot-go"/"server": "smolbot"/' pkg/gateway/server.go
-sed -i 's/DeviceName: "nanobot-go"/DeviceName: "smolbot"/' pkg/config/config.go
-sed -i 's/"deviceName": "nanobot-go"/"deviceName": "smolbot"/' cmd/installer/tasks.go
+sed -i 's/"server": "smolbot"/"server": "smolbot"/' pkg/gateway/server.go
+sed -i 's/DeviceName: "smolbot"/DeviceName: "smolbot"/' pkg/config/config.go
+sed -i 's/"deviceName": "smolbot"/"deviceName": "smolbot"/' cmd/installer/tasks.go
 ```
 
 **Step 2: Commit**
@@ -343,15 +343,15 @@ git commit -m "chore: update server and device names"
 **Step 1: Update command references**
 
 ```bash
-sed -i 's/nanobot channels login/smolbot channels login/' pkg/channel/whatsapp/adapter.go
-sed -i 's/-n nanobot-go/-n smolbot/' pkg/channel/signal/adapter.go
+sed -i 's/smolbot channels login/smolbot channels login/' pkg/channel/whatsapp/adapter.go
+sed -i 's/-n smolbot/-n smolbot/' pkg/channel/signal/adapter.go
 ```
 
 **Step 2: Update test files**
 
 ```bash
-sed -i 's/nanobot-go/smolbot/g' pkg/channel/whatsapp/adapter_test.go
-sed -i 's/nanobot-go/smolbot/g' pkg/channel/signal/adapter_test.go
+sed -i 's/smolbot/smolbot/g' pkg/channel/whatsapp/adapter_test.go
+sed -i 's/smolbot/smolbot/g' pkg/channel/signal/adapter_test.go
 ```
 
 **Step 3: Commit**
@@ -371,7 +371,7 @@ git commit -m "chore: update channel error messages"
 **Step 1: Update package name**
 
 ```bash
-sed -i 's/package nanobotgo/package smolbot/' embed.go
+sed -i 's/package smolbotgo/package smolbot/' embed.go
 ```
 
 **Step 2: Commit**
@@ -397,12 +397,12 @@ git commit -m "chore: update package declaration"
 **Step 1: Update test paths and names**
 
 ```bash
-sed -i 's/\.nanobot/.smolbot/g' pkg/config/config_test.go
-sed -i 's/nanobot-go/smolbot/g' pkg/channel/whatsapp/adapter_test.go
-sed -i 's/nanobot-go/smolbot/g' pkg/channel/signal/adapter_test.go
-sed -i 's/"server":"nanobot-go"/"server":"smolbot"/' pkg/gateway/server_test.go
-sed -i 's/nanobot-test-agent/smolbot-test-agent/' pkg/tool/web_test.go
-sed -i 's/nanobot/smolbot/' pkg/tool/filesystem_test.go
+sed -i 's/\.smolbot/.smolbot/g' pkg/config/config_test.go
+sed -i 's/smolbot/smolbot/g' pkg/channel/whatsapp/adapter_test.go
+sed -i 's/smolbot/smolbot/g' pkg/channel/signal/adapter_test.go
+sed -i 's/"server":"smolbot"/"server":"smolbot"/' pkg/gateway/server_test.go
+sed -i 's/smolbot-test-agent/smolbot-test-agent/' pkg/tool/web_test.go
+sed -i 's/smolbot/smolbot/' pkg/tool/filesystem_test.go
 ```
 
 **Step 2: Commit**
@@ -423,15 +423,15 @@ git commit -m "chore: update test files"
 **Step 1: Update install script**
 
 ```bash
-sed -i 's/nanobot-go/smolbot/g' install.sh
-sed -i 's/nanobot/smolbot/g' install.sh
+sed -i 's/smolbot/smolbot/g' install.sh
+sed -i 's/smolbot/smolbot/g' install.sh
 ```
 
 **Step 2: Update .gitignore**
 
 ```bash
-sed -i 's/^nanobot$/smolbot/' .gitignore
-sed -i 's/\.\/nanobot-tui/.\/smolbot-tui/' .gitignore
+sed -i 's/^smolbot$/smolbot/' .gitignore
+sed -i 's/\.\/smolbot-tui/.\/smolbot-tui/' .gitignore
 ```
 
 **Step 3: Commit**
@@ -454,18 +454,18 @@ git commit -m "chore: update scripts and gitignore"
 **Step 1: Update main documentation**
 
 ```bash
-sed -i 's/nanobot-go/smolbot/g' README.md
-sed -i 's/nanobot/smolbot/g' README.md
-sed -i 's/~\/.nanobot/~\/.smolbot/g' README.md
+sed -i 's/smolbot/smolbot/g' README.md
+sed -i 's/smolbot/smolbot/g' README.md
+sed -i 's/~\/.smolbot/~\/.smolbot/g' README.md
 ```
 
 **Step 2: Update plan documents (batch)**
 
 ```bash
 for f in docs/plans/*.md; do
-  sed -i 's/nanobot-go/smolbot/g' "$f"
-  sed -i 's/nanobot/smolbot/g' "$f"
-  sed -i 's/~\/.nanobot/~\/.smolbot/g' "$f"
+  sed -i 's/smolbot/smolbot/g' "$f"
+  sed -i 's/smolbot/smolbot/g' "$f"
+  sed -i 's/~\/.smolbot/~\/.smolbot/g' "$f"
 done
 ```
 
@@ -474,8 +474,8 @@ done
 ```bash
 for f in docs/skills/*.md docs/skill-system/*.md; do
   if [ -f "$f" ]; then
-    sed -i 's/nanobot-go/smolbot/g' "$f"
-    sed -i 's/nanobot/smolbot/g' "$f"
+    sed -i 's/smolbot/smolbot/g' "$f"
+    sed -i 's/smolbot/smolbot/g' "$f"
   fi
 done
 ```
@@ -500,7 +500,7 @@ git commit -m "docs: update documentation"
 sed -i 's/You are a helpful AI coding assistant/You are smolbot, a practical coding assistant/' cmd/installer/tasks.go
 ```
 
-**Step 2: Update HEARTBEAT.md generation (if it mentions nanobot)**
+**Step 2: Update HEARTBEAT.md generation (if it mentions smolbot)**
 
 ```bash
 # Check if HEARTBEAT content needs update
@@ -521,7 +521,7 @@ git commit -m "chore: update workspace templates"
 **Step 1: Clean and build**
 
 ```bash
-cd /home/nomadx/nanobot-go
+cd /home/nomadx/smolbot
 go clean -cache
 go build -o /tmp/smolbot-test ./cmd/smolbot
 ```
@@ -617,6 +617,6 @@ git commit -m "chore: update workspace templates"
 
 1. Update GitHub repository name after code changes
 2. Notify users about breaking change
-3. Legacy ~/.nanobot-go directory kept for migration
+3. Legacy ~/.smolbot directory kept for migration
 4. Users need to manually migrate or reinstall
 5. TUI state will reset (new location)

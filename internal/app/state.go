@@ -17,7 +17,7 @@ func statePath() string {
 	if err != nil {
 		return filepath.Join(".", "state.json")
 	}
-	return filepath.Join(dir, "nanobot-tui", "state.json")
+	return filepath.Join(dir, "smolbot-tui", "state.json")
 }
 
 func LoadState() State {

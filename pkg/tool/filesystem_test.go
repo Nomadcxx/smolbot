@@ -114,7 +114,7 @@ func TestFilesystemTools(t *testing.T) {
 		raw, _ := json.Marshal(map[string]any{
 			"path":       path,
 			"old_string": "world",
-			"new_string": "nanobot",
+			"new_string": "smolbot",
 		})
 		result, err := editor.Execute(context.Background(), raw, tctx)
 		if err != nil {
@@ -124,7 +124,7 @@ func TestFilesystemTools(t *testing.T) {
 			t.Fatalf("unexpected edit error: %q", result.Error)
 		}
 		data, _ := os.ReadFile(path)
-		if string(data) != "hello nanobot" {
+		if string(data) != "hello smolbot" {
 			t.Fatalf("unexpected edit content %q", string(data))
 		}
 	})

@@ -1,4 +1,4 @@
-# nanobot-go Installer Specification
+# smolbot Installer Specification
 
 **Date:** 2026-03-21  
 **Status:** Revised  
@@ -8,13 +8,13 @@
 
 ## 1. Overview
 
-**Purpose:** Build a TUI-based installer for nanobot-go that guides users through setup without requiring root privileges.
+**Purpose:** Build a TUI-based installer for smolbot that guides users through setup without requiring root privileges.
 
 **Key Principles:**
 - User-local installation only (no root, no system-wide)
 - Binaries to `~/.local/bin`
-- Config to `~/.nanobot/`
-- Workspace to `~/.nanobot/workspace/`
+- Config to `~/.smolbot/`
+- Workspace to `~/.smolbot/workspace/`
 - Systemd **user** service (not system service)
 
 ---
@@ -39,10 +39,10 @@ Stage 2: Bubble Tea TUI Installer
 | Component | Location | Permissions |
 |-----------|----------|-------------|
 | Binaries | `~/.local/bin/` | 0755 (executable by user) |
-| Config | `~/.nanobot/config.json` | 0644 (user readable) |
-| Workspace | `~/.nanobot/workspace/` | 0755 |
-| Sessions DB | `~/.nanobot/sessions.db` | 0644 |
-| Skills | `~/.nanobot/skills/` | 0755 |
+| Config | `~/.smolbot/config.json` | 0644 (user readable) |
+| Workspace | `~/.smolbot/workspace/` | 0755 |
+| Sessions DB | `~/.smolbot/sessions.db` | 0644 |
+| Skills | `~/.smolbot/skills/` | 0755 |
 | Systemd | `~/.config/systemd/user/` | 0755 |
 
 **No root required** - everything under user's home directory.
@@ -52,12 +52,12 @@ Stage 2: Bubble Tea TUI Installer
 ## 3. Installer Steps
 
 ### Step 1: Welcome
-- Detect existing installation (config exists at `~/.nanobot/config.json`)
+- Detect existing installation (config exists at `~/.smolbot/config.json`)
 - Options:
   - **Fresh Install** - New installation
   - **Update** - Upgrade existing installation (preserve config)
   - **Reconfigure** - Modify existing config
-  - **Uninstall** - Remove nanobot-go
+  - **Uninstall** - Remove smolbot
 
 ### Step 2: Provider Selection
 - Auto-detect available providers:
@@ -94,16 +94,16 @@ Signal and WhatsApp configuration - can be skipped.
 - Check if `signal-cli` is installed
 - If not: Show installation instructions
 - Offer to link device (requires QR code interaction)
-- Store: `~/.nanobot/signal/`
+- Store: `~/.smolbot/signal/`
 
 **WhatsApp:**
 - Check if whatsmeow-compatible setup possible
 - Show instructions for WhatsApp linking
-- Store: `~/.nanobot/whatsapp.db`
+- Store: `~/.smolbot/whatsapp.db`
 
 ### Step 6: Service Setup
 - Offer to create systemd user service
-- Service file: `~/.config/systemd/user/nanobot-go.service`
+- Service file: `~/.config/systemd/user/smolbot.service`
 - Options:
   - Enable on install: Yes/No
   - Start now: Yes/No
@@ -111,7 +111,7 @@ Signal and WhatsApp configuration - can be skipped.
 
 ### Step 7: Installation
 Tasks:
-1. Create directories (`~/.nanobot/`, `~/.local/bin/`)
+1. Create directories (`~/.smolbot/`, `~/.local/bin/`)
 2. Build binaries (if building from source) OR copy pre-built
 3. Write config file
 4. Create systemd user service
@@ -120,16 +120,16 @@ Tasks:
 ### Step 8: Complete
 - Show success message
 - Show commands to run:
-  - `nanobot run` - Start daemon
-  - `nanobot-tui` - Start TUI client
-  - `nanobot status` - Check status
+  - `smolbot run` - Start daemon
+  - `smolbot-tui` - Start TUI client
+  - `smolbot status` - Check status
 - Show workspace location
 
 ---
 
 ## 4. Configuration File Format
 
-**Location:** `~/.nanobot/config.json`
+**Location:** `~/.smolbot/config.json`
 
 ```json
 {
@@ -137,7 +137,7 @@ Tasks:
     "defaults": {
       "model": "qwen2.5-coder:7b",
       "provider": "ollama",
-      "workspace": "/home/user/.nanobot/workspace",
+      "workspace": "/home/user/.smolbot/workspace",
       "maxTokens": 8192,
       "contextWindowTokens": 128000,
       "temperature": 0.7,
@@ -159,12 +159,12 @@ Tasks:
       "enabled": false,
       "account": "",
       "cliPath": "signal-cli",
-      "dataDir": "/home/user/.nanobot/signal"
+      "dataDir": "/home/user/.smolbot/signal"
     },
     "whatsapp": {
       "enabled": false,
-      "deviceName": "nanobot-go",
-      "storePath": "/home/user/.nanobot/whatsapp.db"
+      "deviceName": "smolbot",
+      "storePath": "/home/user/.smolbot/whatsapp.db"
     }
   },
   "gateway": {
@@ -196,7 +196,7 @@ Tasks:
 
 ## 5. Systemd User Service
 
-**File:** `~/.config/systemd/user/nanobot-go.service`
+**File:** `~/.config/systemd/user/smolbot.service`
 
 ```ini
 [Unit]
@@ -205,7 +205,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/nanobot run --config %h/.nanobot/config.json --workspace %h/.nanobot/workspace --port 18791
+ExecStart=%h/.local/bin/smolbot run --config %h/.smolbot/config.json --workspace %h/.smolbot/workspace --port 18791
 Restart=on-failure
 RestartSec=5s
 Environment=HOME=%h
@@ -217,8 +217,8 @@ WantedBy=default.target
 **Commands:**
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable nanobot-go
-systemctl --user start nanobot-go
+systemctl --user enable smolbot
+systemctl --user start smolbot
 ```
 
 ---
@@ -226,7 +226,7 @@ systemctl --user start nanobot-go
 ## 6. Directory Structure
 
 ```
-~/.nanobot/
+~/.smolbot/
 ├── config.json          # Main config
 ├── sessions.db          # Chat sessions
 ├── workspace/
@@ -237,11 +237,11 @@ systemctl --user start nanobot-go
 └── signal/              # Signal data (if enabled)
 
 ~/.local/bin/
-├── nanobot              # Daemon + CLI
-└── nanobot-tui          # TUI client
+├── smolbot              # Daemon + CLI
+└── smolbot-tui          # TUI client
 
 ~/.config/systemd/user/
-└── nanobot-go.service
+└── smolbot.service
 ```
 
 ---
@@ -251,8 +251,8 @@ systemctl --user start nanobot-go
 When existing installation detected:
 
 1. Check current version from binary
-2. Stop running daemon (`systemctl --user stop nanobot-go` or kill process)
-3. Backup config: `~/.nanobot/config.json → ~/.nanobot/config.json.bak`
+2. Stop running daemon (`systemctl --user stop smolbot` or kill process)
+3. Backup config: `~/.smolbot/config.json → ~/.smolbot/config.json.bak`
 4. Install new binary
 5. Ask: Keep existing config or re-run setup?
 6. Restart service if it was running
@@ -261,12 +261,12 @@ When existing installation detected:
 
 ## 8. Uninstall Flow
 
-1. Stop service: `systemctl --user stop nanobot-go`
-2. Disable service: `systemctl --user disable nanobot-go`
-3. Remove binaries: `rm ~/.local/bin/nanobot ~/.local/bin/nanobot-tui`
+1. Stop service: `systemctl --user stop smolbot`
+2. Disable service: `systemctl --user disable smolbot`
+3. Remove binaries: `rm ~/.local/bin/smolbot ~/.local/bin/smolbot-tui`
 4. Ask: Remove config/workspace?
    - Keep config/workspace
-   - Remove all `~/.nanobot/`
+   - Remove all `~/.smolbot/`
 
 ---
 
@@ -335,8 +335,8 @@ cmd/installer/
 
 - **Bubble Tea patterns:** `/home/nomadx/Documents/jellywatch/cmd/installer/`
 - **sysc-greet patterns:** `/home/nomadx/go/sysc-greet/cmd/installer/main.go`
-- **Existing onboard flow:** `/home/nomadx/nanobot-go/cmd/nanobot/onboard.go`
-- **Config structure:** `/home/nomadx/nanobot-go/pkg/config/config.go`
+- **Existing onboard flow:** `/home/nomadx/smolbot/cmd/smolbot/onboard.go`
+- **Config structure:** `/home/nomadx/smolbot/pkg/config/config.go`
 
 ---
 
@@ -344,12 +344,12 @@ cmd/installer/
 
 ```bash
 #!/bin/bash
-# nanobot-go one-line installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/Nomadcxx/nanobot-go/main/install.sh | bash
+# smolbot one-line installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/Nomadcxx/smolbot/main/install.sh | bash
 
 set -e
 
-echo "nanobot-go installer"
+echo "smolbot installer"
 echo ""
 
 # Check prerequisites
@@ -362,15 +362,15 @@ trap "rm -rf '$TEMP_DIR'" EXIT
 
 cd "$TEMP_DIR"
 
-echo "Cloning nanobot-go..."
-git clone --depth 1 https://github.com/Nomadcxx/nanobot-go.git
-cd nanobot-go
+echo "Cloning smolbot..."
+git clone --depth 1 https://github.com/Nomadcxx/smolbot.git
+cd smolbot
 
 echo "Building installer..."
-go build -o install-nanobot ./cmd/installer/
+go build -o install-smolbot ./cmd/installer/
 
 echo "Starting installer..."
-exec ./install-nanobot
+exec ./install-smolbot
 ```
 
 ---
@@ -380,7 +380,7 @@ exec ./install-nanobot
 ### Phase 1: Foundation
 1. Create `cmd/installer/` directory structure
 2. Write `types.go` - Model, Step enum, Task types
-3. Write `theme.go` - Colors matching nanobot-tui
+3. Write `theme.go` - Colors matching smolbot-tui
 4. Write `utils.go` - Path helpers, config read/write
 
 ### Phase 2: Core Installer

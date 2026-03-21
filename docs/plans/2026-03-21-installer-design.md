@@ -1,4 +1,4 @@
-# nanobot-go Installer Design Document
+# smolbot Installer Design Document
 
 **Date:** 2026-03-21  
 **Status:** Design Complete - REVISED  
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This document specifies the TUI-based installer for nanobot-go, designed for user-local installation with systemd user service integration. The installer follows the proven patterns from sysc-greet and jellywatch while being adapted for nanobot-go's simpler requirements (no root, no *arr integrations, minimal configuration).
+This document specifies the TUI-based installer for smolbot, designed for user-local installation with systemd user service integration. The installer follows the proven patterns from sysc-greet and jellywatch while being adapted for smolbot's simpler requirements (no root, no *arr integrations, minimal configuration).
 
 ---
 
@@ -39,7 +39,7 @@ Stage 2: TUI Installer (cmd/installer/main.go)
 ```
 ┌─────────────────────────────────────────────┐
 │            SMOLBOT ASCII Art              │
-│         Welcome to nanobot-go             │
+│         Welcome to smolbot             │
 └─────────────────────────────────────────────┘
                     ↓
 ┌─────────────────────────────────────────────┐
@@ -59,7 +59,7 @@ Stage 2: TUI Installer (cmd/installer/main.go)
 │  │ ○ [Refresh List]                       │ │
 │  └─────────────────────────────────────────┘ │
 │  ┌─────────────────────────────────────────┐ │
-│  │ Workspace Path: ~/.nanobot-go/          │ │
+│  │ Workspace Path: ~/.smolbot/          │ │
 │  │ [Advanced Options ▼]                   │ │
 │  │   Config path, Port, etc.              │ │
 │  └─────────────────────────────────────────┘ │
@@ -68,8 +68,8 @@ Stage 2: TUI Installer (cmd/installer/main.go)
 ┌─────────────────────────────────────────────┐
 │           Installation Progress             │
 │  [OK] Clone repository                      │
-│  [OK] Build nanobot binary                  │
-│  [OK] Build nanobot-tui binary            │
+│  [OK] Build smolbot binary                  │
+│  [OK] Build smolbot-tui binary            │
 │  [OK] Install to ~/.local/bin/            │
 │  [OK] Create config structure             │
 │  [OK] Setup systemd user service          │
@@ -80,10 +80,10 @@ Stage 2: TUI Installer (cmd/installer/main.go)
 │           Installation Complete!            │
 │                                             │
 │  System Commands:                           │
-│    systemctl --user status nanobot-go     │
-│    systemctl --user stop nanobot-go       │
-│    nanobot --help                         │
-│    nanobot-tui                            │
+│    systemctl --user status smolbot     │
+│    systemctl --user stop smolbot       │
+│    smolbot --help                         │
+│    smolbot-tui                            │
 │                                             │
 │  [Close] [Open TUI Now]                     │
 └─────────────────────────────────────────────┘
@@ -96,20 +96,20 @@ Stage 2: TUI Installer (cmd/installer/main.go)
 ### File Structure
 
 ```
-nanobot-go/
+smolbot/
 ├── install.sh                    # One-line bootstrap script
 ├── cmd/
-│   ├── nanobot/                  # Main daemon + CLI
-│   ├── nanobot-tui/             # Bubble Tea TUI client
+│   ├── smolbot/                  # Main daemon + CLI
+│   ├── smolbot-tui/             # Bubble Tea TUI client
 │   └── installer/               # TUI installer
 │       ├── main.go
 │       ├── types.go             # InstallStep, TaskStatus, etc.
 │       ├── tasks.go             # Installation task functions
 │       ├── views.go             # Bubble Tea views
 │       ├── update.go            # Update mode logic
-│       └── theme.go             # Colors & styles (match nanobot-tui)
+│       └── theme.go             # Colors & styles (match smolbot-tui)
 └── systemd/
-    └── nanobot-go.service       # User service template
+    └── smolbot.service       # User service template
 ```
 
 ### Core Types (from jellywatch pattern)
@@ -211,7 +211,7 @@ type model struct {
 - [Continue] [Exit]
 
 **Design Notes:**
-- Match nanobot-tui theme colors
+- Match smolbot-tui theme colors
 - Use typewriter effect for tagline (from sysc-greet)
 
 ### Step 2: Prerequisites
@@ -280,12 +280,12 @@ Configure Workspace
 
 Workspace path (where sessions/cache stored):
 ┌────────────────────────────────────────┐
-│ ~/.nanobot-go                          │
+│ ~/.smolbot                          │
 └────────────────────────────────────────┘
 
 Config file location:
 ┌────────────────────────────────────────┐
-│ ~/.nanobot-go/config.json            │
+│ ~/.smolbot/config.json            │
 └────────────────────────────────────────┘
 
 [Advanced Options ▼]
@@ -308,24 +308,24 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
         // Upgrade mode
         m.tasks = []installTask{
             {name: "Backup config", description: "Backing up existing config", execute: backupConfig},
-            {name: "Stop service", description: "Stopping nanobot-go", execute: stopService},
-            {name: "Build nanobot", description: "Building daemon binary", execute: buildNanobot},
-            {name: "Build nanobot-tui", description: "Building TUI binary", execute: buildNanobotTUI},
+            {name: "Stop service", description: "Stopping smolbot", execute: stopService},
+            {name: "Build smolbot", description: "Building daemon binary", execute: buildNanobot},
+            {name: "Build smolbot-tui", description: "Building TUI binary", execute: buildNanobotTUI},
             {name: "Install binaries", description: "Installing to ~/.local/bin", execute: installBinaries},
             {name: "Migrate config", description: "Migrating configuration", execute: migrateConfig},
-            {name: "Start service", description: "Starting nanobot-go", execute: startService, optional: true},
+            {name: "Start service", description: "Starting smolbot", execute: startService, optional: true},
         }
     } else {
         // Fresh install
         m.tasks = []installTask{
-            {name: "Clone repository", description: "Cloning nanobot-go", execute: cloneRepository},
-            {name: "Build nanobot", description: "Building daemon binary", execute: buildNanobot},
-            {name: "Build nanobot-tui", description: "Building TUI binary", execute: buildNanobotTUI},
+            {name: "Clone repository", description: "Cloning smolbot", execute: cloneRepository},
+            {name: "Build smolbot", description: "Building daemon binary", execute: buildNanobot},
+            {name: "Build smolbot-tui", description: "Building TUI binary", execute: buildNanobotTUI},
             {name: "Install binaries", description: "Installing to ~/.local/bin", execute: installBinaries},
-            {name: "Create workspace", description: "Creating ~/.nanobot-go", execute: createWorkspace},
+            {name: "Create workspace", description: "Creating ~/.smolbot", execute: createWorkspace},
             {name: "Write config", description: "Writing config.json", execute: writeConfig},
             {name: "Setup systemd", description: "Installing user service", execute: setupSystemd},
-            {name: "Start service", description: "Starting nanobot-go", execute: startService, optional: true},
+            {name: "Start service", description: "Starting smolbot", execute: startService, optional: true},
         }
     }
     
@@ -337,12 +337,12 @@ func (m model) startInstallation() (tea.Model, tea.Cmd) {
 
 **Visual:**
 ```
-Installing nanobot-go v1.0.0
+Installing smolbot v1.0.0
 ────────────────────────────────
 
 [OK]    Clone repository                        2s
-[OK]    Build nanobot                          15s
-[RUN]   Build nanobot-tui                      ⠋  (spinner)
+[OK]    Build smolbot                          15s
+[RUN]   Build smolbot-tui                      ⠋  (spinner)
 [PEND]  Install binaries
 [PEND]  Create workspace
 [PEND]  Write config
@@ -350,8 +350,8 @@ Installing nanobot-go v1.0.0
 [PEND]  Start service
 
 Details:
-  Building nanobot-tui binary...
-  go build -o nanobot-tui ./cmd/nanobot-tui
+  Building smolbot-tui binary...
+  go build -o smolbot-tui ./cmd/smolbot-tui
 
 [View Log] [Cancel]
 ```
@@ -365,21 +365,21 @@ Details:
 Installation Complete! ✓
 ────────────────────────────────
 
-nanobot-go v1.0.0 is installed and running!
+smolbot v1.0.0 is installed and running!
 
 Installation Summary:
-  Binaries: ~/.local/bin/nanobot, ~/.local/bin/nanobot-tui
-  Config: ~/.nanobot-go/config.json
+  Binaries: ~/.local/bin/smolbot, ~/.local/bin/smolbot-tui
+  Config: ~/.smolbot/config.json
   Service: systemd user service enabled
 
 Quick Start:
-  nanobot-tui              # Launch TUI
-  nanobot chat "hello"     # Quick CLI chat
+  smolbot-tui              # Launch TUI
+  smolbot chat "hello"     # Quick CLI chat
   
 Systemd Commands:
-  systemctl --user status nanobot-go
-  systemctl --user stop nanobot-go
-  systemctl --user restart nanobot-go
+  systemctl --user status smolbot
+  systemctl --user stop smolbot
+  systemctl --user restart smolbot
 
 [Close] [Open TUI Now]
 ```
@@ -389,11 +389,11 @@ Systemd Commands:
 Upgrade Complete! ✓
 ────────────────────────────────
 
-Successfully upgraded nanobot-go
+Successfully upgraded smolbot
   From: v0.9.5
   To:   v1.0.0
 
-Backup created: ~/.nanobot-go/config.json.backup.20260321
+Backup created: ~/.smolbot/config.json.backup.20260321
 
 [Close]
 ```
@@ -420,13 +420,13 @@ Backup created: ~/.nanobot-go/config.json.backup.20260321
 
 ```bash
 #!/bin/bash
-# nanobot-go one-line installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/Nomadcxx/nanobot-go/main/install.sh | bash
+# smolbot one-line installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/Nomadcxx/smolbot/main/install.sh | bash
 
 set -e
 
 echo "SMOLBOT"
-echo "nanobot-go installer"
+echo "smolbot installer"
 echo ""
 
 # Check prerequisites
@@ -447,9 +447,9 @@ trap "cd / && rm -rf '$TEMP_DIR'" EXIT
 
 cd "$TEMP_DIR"
 
-echo "Cloning nanobot-go..."
-git clone --depth 1 https://github.com/Nomadcxx/nanobot-go.git
-cd nanobot-go
+echo "Cloning smolbot..."
+git clone --depth 1 https://github.com/Nomadcxx/smolbot.git
+cd smolbot
 
 echo "Building installer..."
 go build -o install-smolbot ./cmd/installer/
@@ -465,7 +465,7 @@ echo "Starting installer..."
 ```go
 // Clone from GitHub
 func cloneRepository(m *model) error {
-    repoURL := "https://github.com/Nomadcxx/nanobot-go.git"
+    repoURL := "https://github.com/Nomadcxx/smolbot.git"
     tempDir := os.TempDir()
     
     cmd := exec.Command("git", "clone", "--depth", "1", repoURL, tempDir)
@@ -480,18 +480,18 @@ func cloneRepository(m *model) error {
 
 // Build both binaries
 func buildBinaries(m *model) error {
-    // Build nanobot (daemon + CLI)
-    cmd := exec.Command("go", "build", "-o", "nanobot", "./cmd/nanobot")
+    // Build smolbot (daemon + CLI)
+    cmd := exec.Command("go", "build", "-o", "smolbot", "./cmd/smolbot")
     cmd.Dir = m.projectDir
     if output, err := cmd.CombinedOutput(); err != nil {
-        return fmt.Errorf("build nanobot failed: %w\n%s", err, output)
+        return fmt.Errorf("build smolbot failed: %w\n%s", err, output)
     }
     
-    // Build nanobot-tui
-    cmd = exec.Command("go", "build", "-o", "nanobot-tui", "./cmd/nanobot-tui")
+    // Build smolbot-tui
+    cmd = exec.Command("go", "build", "-o", "smolbot-tui", "./cmd/smolbot-tui")
     cmd.Dir = m.projectDir
     if output, err := cmd.CombinedOutput(); err != nil {
-        return fmt.Errorf("build nanobot-tui failed: %w\n%s", err, output)
+        return fmt.Errorf("build smolbot-tui failed: %w\n%s", err, output)
     }
     
     return nil
@@ -507,7 +507,7 @@ func installBinaries(m *model) error {
     }
     
     // Copy binaries
-    for _, binary := range []string{"nanobot", "nanobot-tui"} {
+    for _, binary := range []string{"smolbot", "smolbot-tui"} {
         src := filepath.Join(m.projectDir, binary)
         dst := filepath.Join(binDir, binary)
         
@@ -534,12 +534,12 @@ func setupSystemd(m *model) error {
     }
     
     serviceContent := fmt.Sprintf(`[Unit]
-Description=nanobot-go - AI coding assistant
+Description=smolbot - AI coding assistant
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s/.local/bin/nanobot run --config %s --port %d
+ExecStart=%s/.local/bin/smolbot run --config %s --port %d
 Restart=on-failure
 RestartSec=5
 
@@ -547,7 +547,7 @@ RestartSec=5
 WantedBy=default.target
 `, os.Getenv("HOME"), m.configPath, m.port)
     
-    servicePath := filepath.Join(serviceDir, "nanobot-go.service")
+    servicePath := filepath.Join(serviceDir, "smolbot.service")
     if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
         return fmt.Errorf("write service file: %w", err)
     }
@@ -559,7 +559,7 @@ WantedBy=default.target
     }
     
     // Enable service
-    cmd = exec.Command("systemctl", "--user", "enable", "nanobot-go")
+    cmd = exec.Command("systemctl", "--user", "enable", "smolbot")
     if err := cmd.Run(); err != nil {
         return fmt.Errorf("enable service: %w", err)
     }
@@ -736,7 +736,7 @@ func (e CommandError) DetailedError() string {
 
 // Usage in tasks
 func buildBinaries(m *model) error {
-    result := runCommand(m, "go", "build", "-o", "nanobot", "./cmd/nanobot")
+    result := runCommand(m, "go", "build", "-o", "smolbot", "./cmd/smolbot")
     if result.err != nil {
         return CommandError{
             Command:  "go build",
@@ -789,7 +789,7 @@ func detectExistingInstall() (struct {
     }{}
     
     // Check binary
-    binPath := filepath.Join(os.Getenv("HOME"), ".local", "bin", "nanobot")
+    binPath := filepath.Join(os.Getenv("HOME"), ".local", "bin", "smolbot")
     if _, err := os.Stat(binPath); os.IsNotExist(err) {
         return result, nil
     }
@@ -803,13 +803,13 @@ func detectExistingInstall() (struct {
     }
     
     // Check if service is running
-    cmd = exec.Command("systemctl", "--user", "is-active", "nanobot-go")
+    cmd = exec.Command("systemctl", "--user", "is-active", "smolbot")
     if err := cmd.Run(); err == nil {
         result.daemonRunning = true
     }
     
     // Check config
-    configPath := filepath.Join(os.Getenv("HOME"), ".nanobot-go", "config.json")
+    configPath := filepath.Join(os.Getenv("HOME"), ".smolbot", "config.json")
     if _, err := os.Stat(configPath); err == nil {
         result.configExists = true
     }
@@ -831,10 +831,10 @@ type model struct {
 
 ## Theme Integration
 
-The installer should match nanobot-tui's existing theme system:
+The installer should match smolbot-tui's existing theme system:
 
 ```go
-// From nanobot-tui/internal/theme/theme.go
+// From smolbot-tui/internal/theme/theme.go
 var colors = map[string]ThemeColors{
     "catppuccin": {BgBase: "#1e1e2e", Primary: "#cba6f7", Accent: "#f38ba8"},
     "dracula":    {BgBase: "#282a36", Primary: "#bd93f9", Accent: "#ff79c6"},
@@ -853,7 +853,7 @@ Use the same color palette for consistency.
 ```go
 func detectExistingInstall() (bool, string, error) {
     // Check for existing binary
-    binPath := filepath.Join(os.Getenv("HOME"), ".local", "bin", "nanobot")
+    binPath := filepath.Join(os.Getenv("HOME"), ".local", "bin", "smolbot")
     if _, err := os.Stat(binPath); os.IsNotExist(err) {
         return false, "", nil
     }
@@ -911,7 +911,7 @@ func handleTaskError(m *model, taskIdx int, err error) {
    - Run install.sh
    - Verify binaries installed
    - Verify service started
-   - Test nanobot-tui connects
+   - Test smolbot-tui connects
 
 2. **Upgrade Test:**
    - Install older version
@@ -936,7 +936,7 @@ func handleTaskError(m *model, taskIdx int, err error) {
 
 2. **Configuration Templates:**
    - Preset configs (minimal, full, etc.)
-   - Import from existing nanobot-python
+   - Import from existing smolbot-python
 
 3. **Plugin Discovery:**
    - Detect installed skills
@@ -948,5 +948,5 @@ func handleTaskError(m *model, taskIdx int, err error) {
 
 - **sysc-greet installer:** `/home/nomadx/Documents/sysc-greet-dev/cmd/installer/main.go`
 - **jellywatch installer:** `/home/nomadx/Documents/jellywatch/cmd/installer/`
-- **nanobot-tui themes:** `/home/nomadx/nanobot-tui/internal/theme/theme.go`
+- **smolbot-tui themes:** `/home/nomadx/smolbot-tui/internal/theme/theme.go`
 - **systemd user services:** https://wiki.archlinux.org/title/Systemd/User

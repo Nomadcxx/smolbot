@@ -37,9 +37,9 @@ func cloneRepository(m *model) error {
 
 // Task: Build nanobot binary
 func buildNanobot(m *model) error {
-	setLastCommand("go", "build", "-o", "nanobot", "./cmd/nanobot")
+	setLastCommand("go", "build", "-o", "smolbot", "./cmd/nanobot")
 
-	result := runCommand(m, "go", "build", "-o", "nanobot", "./cmd/nanobot")
+	result := runCommand(m, "go", "build", "-o", "smolbot", "./cmd/nanobot")
 
 	if result.Err != nil {
 		return CommandError{
@@ -55,9 +55,9 @@ func buildNanobot(m *model) error {
 
 // Task: Build nanobot-tui binary
 func buildNanobotTUI(m *model) error {
-	setLastCommand("go", "build", "-o", "nanobot-tui", "./cmd/nanobot-tui")
+	setLastCommand("go", "build", "-o", "smolbot-tui", "./cmd/nanobot-tui")
 
-	result := runCommand(m, "go", "build", "-o", "nanobot-tui", "./cmd/nanobot-tui")
+	result := runCommand(m, "go", "build", "-o", "smolbot-tui", "./cmd/nanobot-tui")
 
 	if result.Err != nil {
 		return CommandError{
@@ -81,7 +81,7 @@ func installBinaries(m *model) error {
 	}
 
 	// Install binaries
-	for _, binary := range []string{"nanobot", "nanobot-tui"} {
+	for _, binary := range []string{"smolbot", "smolbot-tui"} {
 		src := filepath.Join(m.projectDir, binary)
 		dst := filepath.Join(binDir, binary)
 
@@ -104,7 +104,7 @@ func installBinaries(m *model) error {
 func removeBinaries(m *model) error {
 	binDir := filepath.Join(os.Getenv("HOME"), ".local", "bin")
 
-	for _, binary := range []string{"nanobot", "nanobot-tui"} {
+	for _, binary := range []string{"smolbot", "smolbot-tui"} {
 		dst := filepath.Join(binDir, binary)
 		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove %s: %w", binary, err)
@@ -129,7 +129,7 @@ func createWorkspace(m *model) error {
 	// Create SOUL.md and HEARTBEAT.md
 	soulPath := filepath.Join(m.workspacePath, "SOUL.md")
 	if _, err := os.Stat(soulPath); os.IsNotExist(err) {
-		soulContent := "# Agent Personality\n\nYou are a helpful AI coding assistant. You help users write code, debug issues, and understand complex systems.\n"
+		soulContent := "# Agent Personality\n\nYou are smolbot, a practical coding assistant. You help users write code, debug issues, and understand complex systems.\n"
 		if err := os.WriteFile(soulPath, []byte(soulContent), 0644); err != nil {
 			return fmt.Errorf("create SOUL.md: %w", err)
 		}
@@ -155,7 +155,7 @@ func removeWorkspace(m *model) error {
 	}
 	
 	// Also remove legacy nanobot-go directory if it exists
-	legacyDir := filepath.Join(os.Getenv("HOME"), ".nanobot-go")
+	legacyDir := filepath.Join(os.Getenv("HOME"), ".smolbot")
 	if err := os.RemoveAll(legacyDir); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove legacy workspace: %w", err)
 	}
@@ -189,7 +189,7 @@ func writeConfig(m *model) error {
 			},
 			"whatsapp": map[string]interface{}{
 				"enabled":    false,
-				"deviceName": "nanobot-go",
+				"deviceName": "smolbot",
 				"storePath":  filepath.Join(os.Getenv("HOME"), ".nanobot", "whatsapp.db"),
 			},
 		},
@@ -291,7 +291,7 @@ func removeConfig(m *model) error {
 	}
 	
 	// Also remove legacy config if it exists
-	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".nanobot-go", "config.json")
+	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".smolbot", "config.json")
 	if err := os.Remove(legacyConfigPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove legacy config: %w", err)
 	}
@@ -307,7 +307,7 @@ func setupSystemd(m *model) error {
 	}
 
 	serviceContent := fmt.Sprintf(`[Unit]
-Description=nanobot-go - AI coding assistant
+Description=smolbot - AI coding assistant
 After=network.target
 
 [Service]
@@ -321,7 +321,7 @@ Environment=HOME=%s
 WantedBy=default.target
 `, os.Getenv("HOME"), m.configPath, m.workspacePath, m.port, os.Getenv("HOME"))
 
-	servicePath := filepath.Join(serviceDir, "nanobot-go.service")
+	servicePath := filepath.Join(serviceDir, "smolbot.service")
 	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
 		return fmt.Errorf("write service file: %w", err)
 	}
@@ -333,7 +333,7 @@ WantedBy=default.target
 	}
 
 	// Enable service
-	result = runCommand(m, "systemctl", "--user", "enable", "nanobot-go")
+	result = runCommand(m, "systemctl", "--user", "enable", "smolbot")
 	if result.Err != nil {
 		return fmt.Errorf("enable service: %w", result.Err)
 	}
@@ -344,14 +344,14 @@ WantedBy=default.target
 // Task: Disable systemd service (for uninstall)
 func disableSystemd(m *model) error {
 	// Disable service
-	result := runCommand(m, "systemctl", "--user", "disable", "nanobot-go")
+	result := runCommand(m, "systemctl", "--user", "disable", "smolbot")
 	if result.Err != nil {
 		// Service might not exist, that's ok
 		return nil
 	}
 
 	// Remove service file
-	servicePath := filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user", "nanobot-go.service")
+	servicePath := filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user", "smolbot.service")
 	if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove service file: %w", err)
 	}
@@ -364,7 +364,7 @@ func disableSystemd(m *model) error {
 
 // Task: Start service
 func startService(m *model) error {
-	result := runCommand(m, "systemctl", "--user", "start", "nanobot-go")
+	result := runCommand(m, "systemctl", "--user", "start", "smolbot")
 	if result.Err != nil {
 		return fmt.Errorf("start service: %w", result.Err)
 	}
@@ -373,7 +373,7 @@ func startService(m *model) error {
 
 // Task: Stop service
 func stopService(m *model) error {
-	result := runCommand(m, "systemctl", "--user", "stop", "nanobot-go")
+	result := runCommand(m, "systemctl", "--user", "stop", "smolbot")
 	if result.Err != nil {
 		// Service might not be running, that's ok
 		return nil
@@ -423,7 +423,7 @@ func (m *model) initTasks() {
 		// Upgrade mode
 		m.tasks = []installTask{
 			{name: "Backup config", description: "Backing up existing config", execute: backupConfig},
-			{name: "Stop service", description: "Stopping nanobot-go", execute: stopService},
+			{name: "Stop service", description: "Stopping smolbot", execute: stopService},
 			{name: "Clone repository", description: "Cloning smolbot", execute: cloneRepository},
 			{name: "Build nanobot", description: "Building daemon binary", execute: buildNanobot},
 			{name: "Build nanobot-tui", description: "Building TUI binary", execute: buildNanobotTUI},
@@ -434,7 +434,7 @@ func (m *model) initTasks() {
 		if m.daemonWasRunning {
 			m.tasks = append(m.tasks, installTask{
 				name:        "Start service",
-				description: "Starting nanobot-go",
+				description: "Starting smolbot",
 				execute:     startService,
 				optional:    true,
 			})
@@ -446,7 +446,7 @@ func (m *model) initTasks() {
 			{name: "Build nanobot", description: "Building daemon binary", execute: buildNanobot},
 			{name: "Build nanobot-tui", description: "Building TUI binary", execute: buildNanobotTUI},
 			{name: "Install binaries", description: "Installing to ~/.local/bin", execute: installBinaries},
-			{name: "Create workspace", description: "Creating ~/.nanobot/workspace", execute: createWorkspace},
+			{name: "Create workspace", description: "Creating ~/.smolbot/workspace", execute: createWorkspace},
 			{name: "Write config", description: "Writing config.json", execute: writeConfig},
 			{name: "Setup systemd", description: "Installing user service", execute: setupSystemd},
 		}
@@ -454,7 +454,7 @@ func (m *model) initTasks() {
 		if m.enableService && m.startNow {
 			m.tasks = append(m.tasks, installTask{
 				name:        "Start service",
-				description: "Starting nanobot-go",
+				description: "Starting smolbot",
 				execute:     startService,
 				optional:    true,
 			})
@@ -465,10 +465,10 @@ func (m *model) initTasks() {
 // Initialize uninstall tasks
 func (m *model) initUninstallTasks() {
 	m.tasks = []installTask{
-		{name: "Stop service", description: "Stopping nanobot-go", execute: stopService, optional: true},
+		{name: "Stop service", description: "Stopping smolbot", execute: stopService, optional: true},
 		{name: "Disable systemd", description: "Removing systemd service", execute: disableSystemd, optional: true},
 		{name: "Remove binaries", description: "Removing from ~/.local/bin", execute: removeBinaries},
 		{name: "Remove config", description: "Removing config.json", execute: removeConfig, optional: true},
-		{name: "Remove workspace", description: "Removing ~/.nanobot", execute: removeWorkspace, optional: true},
+		{name: "Remove workspace", description: "Removing ~/.smolbot", execute: removeWorkspace, optional: true},
 	}
 }

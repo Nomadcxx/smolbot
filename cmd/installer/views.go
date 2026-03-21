@@ -417,23 +417,23 @@ func (m model) renderComplete() string {
 	b.WriteString("\n\n")
 
 	b.WriteString("Launch TUI (interactive mode):\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  nanobot-tui"))
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  smolbot-tui"))
 	b.WriteString("\n\n")
 
 	b.WriteString("Launch CLI (single command):\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  nanobot run \"your prompt here\""))
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  smolbot run \"your prompt here\""))
 	b.WriteString("\n\n")
 
 	b.WriteString("Service management:\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  systemctl --user start nanobot-go"))
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  systemctl --user start smolbot"))
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  systemctl --user stop nanobot-go"))
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  systemctl --user stop smolbot"))
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  systemctl --user status nanobot-go"))
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  systemctl --user status smolbot"))
 	b.WriteString("\n\n")
 
 	b.WriteString("Edit configuration:\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  nano ~/.nanobot/config.json"))
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  nano ~/.smolbot/config.json"))
 	b.WriteString("\n")
 
 	return b.String()
@@ -448,12 +448,12 @@ func (m model) renderUninstall() string {
 
 	b.WriteString("The following will be removed:\n\n")
 	b.WriteString("  Binaries:\n")
-	b.WriteString("    ~/.local/bin/nanobot\n")
-	b.WriteString("    ~/.local/bin/nanobot-tui\n\n")
+	b.WriteString("    ~/.local/bin/smolbot\n")
+	b.WriteString("    ~/.local/bin/smolbot-tui\n\n")
 	b.WriteString("  Config:\n")
-	b.WriteString("    ~/.nanobot/config.json\n\n")
+	b.WriteString("    ~/.smolbot/config.json\n\n")
 	b.WriteString("  Workspace:\n")
-	b.WriteString("    ~/.nanobot/workspace/\n\n")
+	b.WriteString("    ~/.smolbot/workspace/\n\n")
 
 	b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("Warning: This action cannot be undone!"))
 

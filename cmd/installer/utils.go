@@ -97,7 +97,7 @@ func getLastCommand() string {
 // detectExistingInstall checks for existing installation
 func detectExistingInstall() (exists bool, version string, daemonRunning bool, configExists bool, err error) {
 	// Check binary
-	binPath := filepath.Join(os.Getenv("HOME"), ".local", "bin", "nanobot")
+	binPath := filepath.Join(os.Getenv("HOME"), "".local", "bin", "smolbot")
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
 		return false, "", false, false, nil
 	}
@@ -111,7 +111,7 @@ func detectExistingInstall() (exists bool, version string, daemonRunning bool, c
 	}
 
 	// Check if service is running
-	cmd = exec.Command("systemctl", "--user", "is-active", "nanobot-go")
+	cmd = exec.Command("systemctl", "--user", "is-active", "smolbot")
 	if err := cmd.Run(); err == nil {
 		daemonRunning = true
 	}
@@ -123,7 +123,7 @@ func detectExistingInstall() (exists bool, version string, daemonRunning bool, c
 	}
 	
 	// Also check legacy location
-	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".nanobot-go", "config.json")
+	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".smolbot-go", "config.json")
 	if _, err := os.Stat(legacyConfigPath); err == nil {
 		configExists = true
 	}

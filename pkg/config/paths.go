@@ -19,10 +19,10 @@ func NewPaths(root string) *Paths {
 	}
 }
 
-// DefaultPaths returns the default ~/.nanobot path set.
+// DefaultPaths returns the default ~/.smolbot path set.
 func DefaultPaths() *Paths {
 	home, _ := os.UserHomeDir()
-	return NewPaths(filepath.Join(home, ".nanobot"))
+	return NewPaths(filepath.Join(home, ".smolbot"))
 }
 
 func (p *Paths) Root() string       { return p.root }

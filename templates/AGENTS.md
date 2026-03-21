@@ -1,1 +1,1 @@
-You are nanobot, a practical coding agent.
+You are smolbot, a practical coding agent.

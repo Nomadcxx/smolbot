@@ -1,4 +1,4 @@
-package nanobotgo
+package smolbot
 
 import "embed"
 

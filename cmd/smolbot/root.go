@@ -15,8 +15,8 @@ func NewRootCmd(version string) *cobra.Command {
 	opts := &rootOptions{version: version}
 
 	cmd := &cobra.Command{
-		Use:   "nanobot",
-		Short: "nanobot daemon and CLI",
+		Use:   "smolbot",
+		Short: "smolbot daemon and CLI",
 	}
 
 	cmd.PersistentFlags().StringVar(&opts.configPath, "config", "", "Path to config file")

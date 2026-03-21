@@ -11,7 +11,7 @@ func TestConfigRoundTrip(t *testing.T) {
 			"defaults": {
 				"model": "claude-sonnet-4-20250514",
 				"provider": "anthropic",
-				"workspace": "~/.nanobot/workspace",
+				"workspace": "~/.smolbot/workspace",
 				"maxTokens": 8192,
 				"contextWindowTokens": 200000,
 				"temperature": 0.7,
@@ -112,20 +112,20 @@ func TestConfigDefaults(t *testing.T) {
 }
 
 func TestPaths(t *testing.T) {
-	p := NewPaths("/home/test/.nanobot")
-	if p.ConfigFile() != "/home/test/.nanobot/config.json" {
+	p := NewPaths("/home/test/.smolbot")
+	if p.ConfigFile() != "/home/test/.smolbot/config.json" {
 		t.Errorf("ConfigFile = %q", p.ConfigFile())
 	}
-	if p.Workspace() != "/home/test/.nanobot/workspace" {
+	if p.Workspace() != "/home/test/.smolbot/workspace" {
 		t.Errorf("Workspace = %q", p.Workspace())
 	}
-	if p.SessionsDB() != "/home/test/.nanobot/sessions.db" {
+	if p.SessionsDB() != "/home/test/.smolbot/sessions.db" {
 		t.Errorf("SessionsDB = %q", p.SessionsDB())
 	}
-	if p.JobsFile() != "/home/test/.nanobot/jobs.json" {
+	if p.JobsFile() != "/home/test/.smolbot/jobs.json" {
 		t.Errorf("JobsFile = %q", p.JobsFile())
 	}
-	if p.MemoryDir() != "/home/test/.nanobot/workspace/memory" {
+	if p.MemoryDir() != "/home/test/.smolbot/workspace/memory" {
 		t.Errorf("MemoryDir = %q", p.MemoryDir())
 	}
 }

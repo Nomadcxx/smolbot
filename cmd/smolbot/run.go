@@ -11,7 +11,7 @@ func newRunCmd(opts *rootOptions) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "Start the nanobot daemon",
+		Short: "Start the smolbot daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return launchDaemon(context.Background(), daemonLaunchOptions{
 				ConfigPath: defaultConfigPath(*opts),

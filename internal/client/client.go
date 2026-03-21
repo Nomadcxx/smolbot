@@ -54,7 +54,7 @@ func (c *Client) Connect() (*HelloPayload, error) {
 		ID:     c.allocID(),
 		Method: "hello",
 		Params: HelloParams{
-			Client:   "nanobot-tui",
+			Client:   "smolbot-tui",
 			Version:  "0.1.0",
 			Protocol: ProtocolVersion,
 			Platform: runtime.GOOS,

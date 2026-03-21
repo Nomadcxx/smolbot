@@ -154,7 +154,7 @@ func TestAdapterStatusAndLogin(t *testing.T) {
 
 	wantCalls := []commandCall{{
 		Name: "signal-cli",
-		Args: []string{"--config", "/tmp/signal", "-a", "+15551234567", "link", "-n", "nanobot-go"},
+		Args: []string{"--config", "/tmp/signal", "-a", "+15551234567", "link", "-n", "smolbot"},
 	}}
 	if !reflect.DeepEqual(runner.calls, wantCalls) {
 		t.Fatalf("unexpected calls %#v, want %#v", runner.calls, wantCalls)

@@ -59,10 +59,10 @@ The installer walks you through configuration:
 Or if already installed:
 
 ```bash
-nanobot onboard
+smolbot onboard
 ```
 
-**2. Configure** (`~/.nanobot/config.json`)
+**2. Configure** (`~/.smolbot/config.json`)
 
 Minimal config for Ollama (local):
 
@@ -86,10 +86,10 @@ Minimal config for Ollama (local):
 
 ```bash
 # Terminal 1: Start the gateway
-nanobot run
+smolbot run
 
 # Terminal 2: Launch TUI
-nanobot-tui
+smolbot-tui
 ```
 
 ## Configuration
@@ -183,13 +183,13 @@ Set `tools.exec.restrictToWorkspace: true` to prevent the agent from accessing f
 For channel integrations, unknown senders receive a pairing code instead of immediate responses. Approve with:
 
 ```bash
-nanobot pairing approve signal +1234567890
+smolbot pairing approve signal +1234567890
 ```
 
 ## Workspace Structure
 
 ```
-~/.nanobot/
+~/.smolbot/
 ├── config.json          # Main configuration
 ├── sessions.db          # Chat history
 └── workspace/
@@ -202,10 +202,10 @@ nanobot pairing approve signal +1234567890
 
 ```bash
 # Build daemon
-go build -o nanobot ./cmd/nanobot
+go build -o smolbot ./cmd/smolbot
 
 # Build TUI
-go build -o nanobot-tui ./cmd/nanobot-tui
+go build -o smolbot-tui ./cmd/smolbot-tui
 
 # Build installer
 go build -o install-smolbot ./cmd/installer

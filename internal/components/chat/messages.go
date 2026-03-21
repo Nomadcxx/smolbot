@@ -153,7 +153,7 @@ func (m *MessagesModel) renderContent() string {
 		case "user":
 			lines = append(lines, lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("You: ")+msg.Content)
 		case "assistant":
-			lines = append(lines, lipgloss.NewStyle().Foreground(t.Secondary).Bold(true).Render("nanobot"))
+			lines = append(lines, lipgloss.NewStyle().Foreground(t.Secondary).Bold(true).Render("smolbot"))
 			lines = append(lines, m.renderAssistant(msg.Content))
 		case "error":
 			lines = append(lines, lipgloss.NewStyle().Foreground(t.Error).Render("Error: "+msg.Content))

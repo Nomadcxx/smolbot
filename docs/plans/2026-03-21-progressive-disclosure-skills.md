@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Redesign nanobot-go's skill system to use progressive disclosure (metadata → content → resources), reducing baseline token usage by 80%+ while maintaining skill discoverability.
+**Goal:** Redesign smolbot's skill system to use progressive disclosure (metadata → content → resources), reducing baseline token usage by 80%+ while maintaining skill discoverability.
 
 **Architecture:** Skills self-register via filesystem. Only metadata (name, description, availability) loaded at startup. Agent reads full SKILL.md on demand via existing file tools. Supports bundled resources (references/, scripts/, assets/) for complex skills.
 
@@ -12,7 +12,7 @@
 
 ## Overview
 
-This plan implements a progressive disclosure skill system based on patterns from OpenClaw, Python nanobot, and opencode. The key insight: load only metadata into context (~20 tokens/skill), let agent decide relevance, then load full content on demand (~200-1000 tokens).
+This plan implements a progressive disclosure skill system based on patterns from OpenClaw, Python smolbot, and opencode. The key insight: load only metadata into context (~20 tokens/skill), let agent decide relevance, then load full content on demand (~200-1000 tokens).
 
 **Current State:** All skill content loaded into system prompt immediately (~500 tokens/skill)
 **Target State:** Only metadata loaded (~20 tokens/skill), 80%+ token savings
@@ -50,7 +50,7 @@ func TestSplitFrontmatterHandlesWindowsLineEndings(t *testing.T) {
 **Step 2: Run test to verify it fails**
 
 ```bash
-cd ~/nanobot-go
+cd ~/smolbot
 go test ./pkg/skill/... -v -run TestSplitFrontmatterHandlesWindowsLineEndings
 ```
 Expected: FAIL with "unterminated YAML frontmatter"
@@ -295,13 +295,13 @@ You have access to specialized skills listed in <available_skills>.
 **Step 2: Update workspace SOUL.md**
 
 ```bash
-cp templates/SOUL.md ~/.nanobot-go/workspace/SOUL.md
+cp templates/SOUL.md ~/.smolbot/workspace/SOUL.md
 ```
 
 **Step 3: Test system prompt generation**
 
 ```bash
-cd ~/nanobot-go
+cd ~/smolbot
 go test ./pkg/agent/... -v -run TestBuildSystemPrompt
 ```
 Expected: PASS (may need to update test expectations)
@@ -319,7 +319,7 @@ git commit -m "docs: add skill loading instructions to SOUL template"
 
 ### Task 5: Add User Skills Directory to Discovery
 
-**Context:** Add `~/.nanobot-go/skills/` as highest-priority skill source.
+**Context:** Add `~/.smolbot/skills/` as highest-priority skill source.
 
 **Files:**
 - Modify: `pkg/config/paths.go` (add SkillsDir method)
@@ -366,7 +366,7 @@ func NewRegistry(paths *config.Paths) (*Registry, error) {
 	
 	reg := &Registry{skills: builtin}
 	
-	// Load user skills from ~/.nanobot-go/skills/
+	// Load user skills from ~/.smolbot/skills/
 	userSkills, err := LoadDir(paths.SkillsDir())
 	if err != nil {
 		return nil, err
@@ -390,7 +390,7 @@ func NewRegistry(paths *config.Paths) (*Registry, error) {
 
 **Step 4: Create user skills directory on startup**
 
-In `cmd/nanobot/main.go` or config initialization:
+In `cmd/smolbot/main.go` or config initialization:
 ```go
 func ensureUserSkillsDir(paths *config.Paths) error {
 	skillsDir := paths.SkillsDir()
@@ -411,7 +411,7 @@ go test ./pkg/skill/... -v
 
 ```bash
 git add pkg/config/paths.go pkg/skill/registry.go pkg/skill/registry_test.go
-git commit -m "feat: add user skills directory (~/.nanobot-go/skills/)"
+git commit -m "feat: add user skills directory (~/.smolbot/skills/)"
 ```
 
 ---
@@ -512,8 +512,8 @@ Create `docs/skills/creating-skills.md`:
 Create a new skill:
 
 ```bash
-mkdir ~/.nanobot-go/skills/my-skill
-cat > ~/.nanobot-go/skills/my-skill/SKILL.md << 'EOF'
+mkdir ~/.smolbot/skills/my-skill
+cat > ~/.smolbot/skills/my-skill/SKILL.md << 'EOF'
 ---
 name: my-skill
 description: Use when [specific trigger conditions]
@@ -575,8 +575,8 @@ my-skill/
 
 ## Testing Your Skill
 
-1. Restart nanobot: `systemctl restart nanobot-go`
-2. Check available skills: `nanobot status`
+1. Restart smolbot: `systemctl restart smolbot`
+2. Check available skills: `smolbot status`
 3. Test with a query that should trigger it
 ```
 
@@ -602,7 +602,7 @@ git commit -m "docs: add skill creation guide"
 **Step 1: Run all tests**
 
 ```bash
-cd ~/nanobot-go
+cd ~/smolbot
 go test ./... -count=1
 ```
 Expected: ALL PASS
@@ -610,21 +610,21 @@ Expected: ALL PASS
 **Step 2: Build binaries**
 
 ```bash
-go build -o ~/.local/bin/nanobot ./cmd/nanobot
-go build -o ~/.local/bin/nanobot-tui ./cmd/nanobot-tui
+go build -o ~/.local/bin/smolbot ./cmd/smolbot
+go build -o ~/.local/bin/smolbot-tui ./cmd/smolbot-tui
 ```
 
 **Step 3: Restart daemon**
 
 ```bash
-sudo systemctl restart nanobot-go
-systemctl status nanobot-go
+sudo systemctl restart smolbot
+systemctl status smolbot
 ```
 
 **Step 4: Test CLI chat**
 
 ```bash
-nanobot chat -m "What is 2+2?"
+smolbot chat -m "What is 2+2?"
 ```
 Expected: Works without "unterminated YAML frontmatter" error
 
@@ -654,13 +654,13 @@ import (
 	"os"
 	"path/filepath"
 	
-	"github.com/Nomadcxx/nanobot-go/pkg/agent"
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
-	"github.com/Nomadcxx/nanobot-go/pkg/skill"
+	"github.com/Nomadcxx/smolbot/pkg/agent"
+	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/skill"
 )
 
 func main() {
-	workspace := os.Getenv("HOME") + "/.nanobot-go/workspace"
+	workspace := os.Getenv("HOME") + "/.smolbot/workspace"
 	paths := config.DefaultPaths()
 	
 	reg, err := skill.NewRegistry(paths)

@@ -222,7 +222,7 @@ func (s *whatsmeowSeam) Start(ctx context.Context, handle func(rawInboundMessage
 		return errors.New("whatsapp inbound handler is required")
 	}
 	if s.client.Store.ID == nil {
-		return errors.New("whatsapp login required; run `nanobot channels login whatsapp`")
+		return errors.New("whatsapp login required; run `smolbot channels login whatsapp`")
 	}
 
 	s.mu.Lock()
@@ -315,7 +315,7 @@ func (s *whatsmeowSeam) Login(ctx context.Context, report func(loginUpdate) erro
 
 func (s *whatsmeowSeam) ensureConnected(ctx context.Context) error {
 	if s.client.Store.ID == nil {
-		return errors.New("whatsapp login required; run `nanobot channels login whatsapp`")
+		return errors.New("whatsapp login required; run `smolbot channels login whatsapp`")
 	}
 	if s.client.IsConnected() {
 		return nil

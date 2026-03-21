@@ -2,5 +2,5 @@ package assets
 
 import _ "embed"
 
-//go:embed NANOBOT.txt
+//go:embed SMOLBOT.txt
 var Header string

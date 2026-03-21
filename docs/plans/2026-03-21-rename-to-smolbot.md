@@ -1,23 +1,23 @@
-# Implementation Plan: Rename nanobot-go to smolbot
+# Implementation Plan: Rename smolbot to smolbot
 
 ## Overview
-Rename the project from "nanobot-go" to "smolbot" across all files, directories, and configurations.
+Rename the project from "smolbot" to "smolbot" across all files, directories, and configurations.
 
 ## Phase 1: Module and Import Path Changes
 
 ### 1.1 Update go.mod
 **File:** `go.mod`
-- Change: `module github.com/Nomadcxx/nanobot-go`
+- Change: `module github.com/Nomadcxx/smolbot`
 - To: `module github.com/Nomadcxx/smolbot`
 
 ### 1.2 Update All Import Paths
 **Files:** All `.go` files (100+ files)
-- Change: `github.com/Nomadcxx/nanobot-go/...`
+- Change: `github.com/Nomadcxx/smolbot/...`
 - To: `github.com/Nomadcxx/smolbot/...`
 
 **Key directories:**
-- `cmd/nanobot/` → `cmd/smolbot/`
-- `cmd/nanobot-tui/` → `cmd/smolbot-tui/`
+- `cmd/smolbot/` → `cmd/smolbot/`
+- `cmd/smolbot-tui/` → `cmd/smolbot-tui/`
 - `pkg/**/*`
 - `internal/**/*`
 
@@ -25,8 +25,8 @@ Rename the project from "nanobot-go" to "smolbot" across all files, directories,
 
 ### 2.1 Rename Directories
 ```bash
-mv cmd/nanobot cmd/smolbot
-mv cmd/nanobot-tui cmd/smolbot-tui
+mv cmd/smolbot cmd/smolbot
+mv cmd/smolbot-tui cmd/smolbot-tui
 ```
 
 ### 2.2 Update Binary Names in Code
@@ -34,18 +34,18 @@ mv cmd/nanobot-tui cmd/smolbot-tui
 - `cmd/installer/tasks.go`: Lines 40, 42, 46, 58, 60, 64, 84, 107
 - `cmd/installer/utils.go`: Line 100
 - `cmd/installer/views.go`: Lines 420, 424, 451, 452
-- `cmd/smolbot/root.go` (was nanobot/root.go): Lines 18, 19
-- `cmd/smolbot/run.go` (was nanobot/run.go): Line 14
+- `cmd/smolbot/root.go` (was smolbot/root.go): Lines 18, 19
+- `cmd/smolbot/run.go` (was smolbot/run.go): Line 14
 
 **Changes:**
-- `"nanobot"` → `"smolbot"`
-- `"nanobot-tui"` → `"smolbot-tui"`
+- `"smolbot"` → `"smolbot"`
+- `"smolbot-tui"` → `"smolbot-tui"`
 
 ## Phase 3: Config Paths
 
 ### 3.1 Update Default Config Directory
 **File:** `pkg/config/paths.go`
-- Change: `~/.nanobot`
+- Change: `~/.smolbot`
 - To: `~/.smolbot`
 
 ### 3.2 Update All Config Path References
@@ -58,8 +58,8 @@ mv cmd/nanobot-tui cmd/smolbot-tui
 - `cmd/installer/views.go`: Lines 436, 454, 456
 
 **Changes:**
-- `~/.nanobot` → `~/.smolbot`
-- Keep `~/.nanobot-go` references for legacy migration
+- `~/.smolbot` → `~/.smolbot`
+- Keep `~/.smolbot` references for legacy migration
 
 ## Phase 4: Systemd Service Names
 
@@ -67,10 +67,10 @@ mv cmd/nanobot-tui cmd/smolbot-tui
 **File:** `cmd/installer/tasks.go`
 
 **Changes:**
-- `nanobot-go.service` → `smolbot.service`
-- `Description=nanobot-go` → `Description=smolbot`
-- `ExecStart=%s/.local/bin/nanobot` → `ExecStart=%s/.local/bin/smolbot`
-- Service commands: `nanobot-go` → `smolbot`
+- `smolbot.service` → `smolbot.service`
+- `Description=smolbot` → `Description=smolbot`
+- `ExecStart=%s/.local/bin/smolbot` → `ExecStart=%s/.local/bin/smolbot`
+- Service commands: `smolbot` → `smolbot`
 
 **Lines:** 310, 315, 324, 336, 347, 354, 367, 376, 426, 428, 437, 446, 447, 457
 
@@ -98,10 +98,10 @@ mv cmd/nanobot-tui cmd/smolbot-tui
 - `pkg/agent/context.go`: Line 17 - `DefaultIdentityBlock`
 - `templates/SOUL.md`: Line 5
 - `templates/AGENTS.md`: Line 1
-- `cmd/smolbot/runtime.go` (was nanobot/runtime.go): Line 328
+- `cmd/smolbot/runtime.go` (was smolbot/runtime.go): Line 328
 
 **Changes:**
-- `"You are nanobot"` → `"You are smolbot"`
+- `"You are smolbot"` → `"You are smolbot"`
 
 ### 6.2 Update Workspace Template Files
 **File:** `cmd/installer/tasks.go` - Lines 135-147
@@ -126,29 +126,29 @@ heartbeatContent := "# Heartbeat Instructions\n\nPeriodic status checks..."
 
 ### 7.1 Update TUI State Path
 **File:** `internal/app/state.go`: Line 20
-- Change: `filepath.Join(dir, "nanobot-tui", "state.json")`
+- Change: `filepath.Join(dir, "smolbot-tui", "state.json")`
 - To: `filepath.Join(dir, "smolbot-tui", "state.json")`
 
 ### 7.2 Update Client Identification
 **File:** `internal/client/client.go`: Line 57
-- Change: `Client: "nanobot-tui"`
+- Change: `Client: "smolbot-tui"`
 - To: `Client: "smolbot-tui"`
 
 ### 7.3 Update Chat Display Name
 **File:** `internal/components/chat/messages.go`: Line 156
-- Change: `.Render("nanobot")`
+- Change: `.Render("smolbot")`
 - To: `.Render("smolbot")`
 
 ### 7.4 Update Test Files
 **File:** `internal/client/protocol_test.go`: Line 17
-- Change: `Client: "nanobot-tui"`
+- Change: `Client: "smolbot-tui"`
 - To: `Client: "smolbot-tui"`
 
 ## Phase 8: Server, Channels, and Protocol
 
 ### 8.1 Update Server Identification
 **File:** `pkg/gateway/server.go`: Line 179
-- Change: `"server": "nanobot-go"`
+- Change: `"server": "smolbot"`
 - To: `"server": "smolbot"`
 
 ### 8.2 Update WhatsApp Device Name
@@ -157,24 +157,24 @@ heartbeatContent := "# Heartbeat Instructions\n\nPeriodic status checks..."
 - `cmd/installer/tasks.go`: Line 192
 
 **Change:**
-- `"nanobot-go"` → `"smolbot"`
+- `"smolbot"` → `"smolbot"`
 
 ### 8.3 Update Channel Error Messages
 **File:** `pkg/channel/whatsapp/adapter.go`
 - Lines 225, 318: Update command references
-- Change: `nanobot channels login whatsapp`
+- Change: `smolbot channels login whatsapp`
 - To: `smolbot channels login whatsapp`
 
 ### 8.4 Update Signal CLI Device Name
 **File:** `pkg/channel/signal/adapter.go`: Line 156
-- Change: `"nanobot-go"` in link command
+- Change: `"smolbot"` in link command
 - To: `"smolbot"`
 
 ## Phase 9: Package Declaration
 
 ### 9.1 Update Package Name
 **File:** `embed.go`
-- Change: `package nanobotgo`
+- Change: `package smolbotgo`
 - To: `package smolbot`
 
 ## Phase 10: Shell Scripts and Documentation
@@ -186,8 +186,8 @@ heartbeatContent := "# Heartbeat Instructions\n\nPeriodic status checks..."
 
 ### 10.2 Update .gitignore
 **File:** `.gitignore`
-- `nanobot` → `smolbot`
-- `./nanobot-tui` → `./smolbot-tui`
+- `smolbot` → `smolbot`
+- `./smolbot-tui` → `./smolbot-tui`
 
 ### 10.3 Update README.md
 Update all command examples and references.
@@ -215,7 +215,7 @@ Update all command examples and references.
 ### 11.1 Update Test Configurations
 **Files with test data:**
 - `pkg/config/config_test.go`
-- `cmd/smolbot/onboard_test.go` (was nanobot/onboard_test.go)
+- `cmd/smolbot/onboard_test.go` (was smolbot/onboard_test.go)
 - `cmd/smolbot/onboard_validation_test.go`
 - `cmd/smolbot/runtime_test.go`
 - `pkg/channel/whatsapp/adapter_test.go`
@@ -228,9 +228,9 @@ Update all command examples and references.
 - `cmd/smolbot/runtime_chat_test.go`
 
 **Changes:**
-- Test paths: `~/.nanobot` → `~/.smolbot`
-- Test device names: `nanobot-go` → `smolbot`
-- Test agent names: `nanobot-test-agent` → `smolbot-test-agent`
+- Test paths: `~/.smolbot` → `~/.smolbot`
+- Test device names: `smolbot` → `smolbot`
+- Test agent names: `smolbot-test-agent` → `smolbot-test-agent`
 
 ## Phase 12: Error Messages and Comments
 
@@ -269,21 +269,21 @@ Update all command examples and references.
 ## Runtime Implications and Migration Strategy
 
 ### User Data Migration
-**Issue:** Existing users have data in `~/.nanobot/` and `~/.nanobot-go/`
+**Issue:** Existing users have data in `~/.smolbot/` and `~/.smolbot/`
 **Solution:** 
 - The uninstaller already removes both legacy directories
 - Fresh installs will use `~/.smolbot/` only
 - Users must manually migrate or reinstall
 
 ### Service Conflicts
-**Issue:** Existing systemd service `nanobot-go.service` may conflict with new `smolbot.service`
+**Issue:** Existing systemd service `smolbot.service` may conflict with new `smolbot.service`
 **Solution:**
 - The uninstaller stops and disables the old service
 - New service uses different name `smolbot.service`
 - No automatic migration of running services
 
 ### TUI State Migration
-**Issue:** TUI state stored in `~/.config/nanobot-tui/state.json`
+**Issue:** TUI state stored in `~/.config/smolbot-tui/state.json`
 **Solution:**
 - New TUI uses `~/.config/smolbot-tui/state.json`
 - Users lose session history and settings
@@ -302,7 +302,7 @@ Update all command examples and references.
 
 ## Notes
 
-- Keep `~/.nanobot-go` references for legacy migration support
+- Keep `~/.smolbot` references for legacy migration support
 - The repository URL already points to `smolbot` - no change needed
 - Update GitHub repository name after code changes are complete
 - Consider adding migration assistant in future release

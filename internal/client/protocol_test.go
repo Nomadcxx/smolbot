@@ -11,7 +11,7 @@ func TestRequestJSONRoundTrip(t *testing.T) {
 		ID:     "1",
 		Method: "hello",
 		Params: HelloParams{
-			Client:   "nanobot-tui",
+			Client:   "smolbot-tui",
 			Version:  "0.1.0",
 			Protocol: ProtocolVersion,
 			Platform: "linux",

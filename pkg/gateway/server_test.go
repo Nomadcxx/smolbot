@@ -59,7 +59,7 @@ func TestServerMethods(t *testing.T) {
 		if frame.Kind != FrameResponse || frame.Response.Error != nil {
 			t.Fatalf("unexpected hello response %#v", frame)
 		}
-		if !strings.Contains(string(frame.Response.Result), `"server":"nanobot-go"`) {
+		if !strings.Contains(string(frame.Response.Result), `"server":"smolbot"`) {
 			t.Fatalf("unexpected hello payload %s", frame.Response.Result)
 		}
 	})

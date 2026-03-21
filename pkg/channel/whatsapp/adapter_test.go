@@ -131,7 +131,7 @@ func TestAdapterStopUsesClientSeam(t *testing.T) {
 }
 
 func TestNewProductionAdapterRejectsMissingStorePath(t *testing.T) {
-	if _, err := NewProductionAdapter(config.WhatsAppChannelConfig{DeviceName: "nanobot-go"}); err == nil {
+	if _, err := NewProductionAdapter(config.WhatsAppChannelConfig{DeviceName: "smolbot"}); err == nil {
 		t.Fatal("expected NewProductionAdapter to reject an empty store path")
 	}
 }
@@ -148,14 +148,14 @@ func TestNewProductionAdapterUsesFactory(t *testing.T) {
 	}
 
 	adapter, err := NewProductionAdapter(config.WhatsAppChannelConfig{
-		DeviceName: "nanobot-go-test",
+		DeviceName: "smolbot-test",
 		StorePath:  "/tmp/nanobot-whatsapp.db",
 	})
 	if err != nil {
 		t.Fatalf("NewProductionAdapter: %v", err)
 	}
 
-	if gotCfg.DeviceName != "nanobot-go-test" || gotCfg.StorePath != "/tmp/nanobot-whatsapp.db" {
+	if gotCfg.DeviceName != "smolbot-test" || gotCfg.StorePath != "/tmp/nanobot-whatsapp.db" {
 		t.Fatalf("factory received %#v, want the supplied config", gotCfg)
 	}
 	if err := adapter.Send(context.Background(), channel.OutboundMessage{ChatID: "15551234567", Content: "hello"}); err != nil {

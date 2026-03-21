@@ -14,7 +14,7 @@ import (
 
 var BootstrapFiles = []string{"AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"}
 
-const DefaultIdentityBlock = "You are nanobot, a practical coding agent."
+const DefaultIdentityBlock = "You are smolbot, a practical coding agent."
 
 const PlatformPolicyBlock = "Platform policy: prefer UTF-8, POSIX shell tools, and direct file operations."
 

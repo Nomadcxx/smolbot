@@ -1,5 +1,5 @@
 gateway.test
-nanobot
-./nanobot-tui
+smolbot
+./smolbot-tui
 nanobot.test
 .worktrees/
