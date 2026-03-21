@@ -11,10 +11,11 @@ import (
 )
 
 type FooterModel struct {
-	app      *app.App
-	width    int
-	metadata string
-	usage    client.UsageInfo
+	app         *app.App
+	width       int
+	metadata    string
+	usage       client.UsageInfo
+	compression *client.CompressionInfo
 }
 
 func NewFooter(a *app.App) FooterModel {
@@ -33,6 +34,40 @@ func (m *FooterModel) SetUsage(value client.UsageInfo) {
 	m.usage = value
 }
 
+func (m *FooterModel) SetCompression(info *client.CompressionInfo) {
+	m.compression = info
+}
+
+func (m FooterModel) renderCompression(t *theme.Theme) string {
+	if m.compression == nil || !m.compression.Enabled {
+		return ""
+	}
+
+	pct := m.compression.ReductionPercent
+
+	// Choose style based on reduction percentage (inspired by nanocoder)
+	var style lipgloss.Style
+	indicator := "↓" // Down arrow indicates compression
+
+	switch {
+	case pct >= 60: // Heavy compression
+		style = lipgloss.NewStyle().
+			Foreground(t.CompressionWarning).
+			Bold(true)
+		indicator += fmt.Sprintf("%.0f%%", pct)
+	case pct >= 30: // Moderate compression
+		style = lipgloss.NewStyle().
+			Foreground(t.CompressionSuccess)
+		indicator += fmt.Sprintf("%.0f%%", pct)
+	default: // Light compression
+		style = lipgloss.NewStyle().
+			Foreground(t.CompressionActive)
+		indicator += fmt.Sprintf("%.0f%%", pct)
+	}
+
+	return style.Render(indicator)
+}
+
 func (m FooterModel) View() string {
 	t := theme.Current()
 	if t == nil || m.app == nil {
@@ -44,6 +79,10 @@ func (m FooterModel) View() string {
 	}
 	if strings.TrimSpace(m.metadata) != "" {
 		parts = append(parts, strings.TrimSpace(m.metadata))
+	}
+	// Add compression indicator if available
+	if comp := m.renderCompression(t); comp != "" {
+		parts = append(parts, comp)
 	}
 	left := " " + strings.Join(parts, " | ")
 	right := m.renderUsage(t, false)
@@ -112,23 +151,29 @@ func (m FooterModel) renderUsage(t *theme.Theme, compact bool) string {
 	}
 
 	percentage := (float64(m.usage.TotalTokens) / float64(m.usage.ContextWindow)) * 100
-	percentageStyle := lipgloss.NewStyle().
-		Background(t.Panel).
-		Foreground(t.TextMuted).
-		Bold(true)
-	if percentage >= 80 {
-		percentageStyle = percentageStyle.Foreground(t.Warning)
+
+	// Color coding inspired by nanocoder (green → yellow → red)
+	var percentStyle lipgloss.Style
+	if percentage >= 90 {
+		percentStyle = lipgloss.NewStyle().Foreground(t.TokenHighUsage).Bold(true)
+	} else if percentage >= 80 {
+		percentStyle = lipgloss.NewStyle().Foreground(t.Warning).Bold(true)
+	} else if percentage >= 60 {
+		percentStyle = lipgloss.NewStyle().Foreground(t.CompressionWarning)
+	} else {
+		percentStyle = lipgloss.NewStyle().Foreground(t.TextMuted)
 	}
 
-	percentageText := percentageStyle.Render(fmt.Sprintf("%d%%", int(percentage+0.5)))
+	percentText := percentStyle.Render(fmt.Sprintf("%d%%", int(percentage+0.5)))
+
 	if compact {
-		return percentageText + " " + lipgloss.NewStyle().
+		return percentText + " " + lipgloss.NewStyle().
 			Background(t.Panel).
 			Foreground(t.TextMuted).
 			Render("("+formatUsageTokens(m.usage.TotalTokens)+")")
 	}
 
-	return percentageText + " " + lipgloss.NewStyle().
+	return percentText + " " + lipgloss.NewStyle().
 		Background(t.Panel).
 		Foreground(t.TextMuted).
 		Render(fmt.Sprintf("(%s/%s)", formatUsageTokens(m.usage.TotalTokens), formatUsageTokens(m.usage.ContextWindow)))

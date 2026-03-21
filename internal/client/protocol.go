@@ -114,3 +114,23 @@ type HistoryMessage struct {
 	Content   string `json:"content"`
 	Timestamp string `json:"timestamp,omitempty"`
 }
+
+// CompressionInfo contains context compression state for UI display
+type CompressionInfo struct {
+	Enabled            bool    `json:"enabled"`
+	Mode               string  `json:"mode"`               // conservative, default, aggressive
+	LastRun            string  `json:"lastRun,omitempty"` // ISO timestamp
+	OriginalTokens     int     `json:"originalTokens"`
+	CompressedTokens   int     `json:"compressedTokens"`
+	ReductionPercent   float64 `json:"reductionPercent"`   // 0-100
+}
+
+// UsageLevel categorizes token usage for color coding
+type UsageLevel int
+
+const (
+	UsageLevelLow UsageLevel = iota    // < 60%
+	UsageLevelMedium                   // 60-80%
+	UsageLevelHigh                     // 80-90%
+	UsageLevelCritical                 // > 90%
+)

@@ -182,7 +182,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"methods": []string{
 				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set",
 			},
-			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking.done"},
+			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking.done", "context.compressed"},
 		}, nil
 	case "status":
 		var channels []string
@@ -512,6 +512,16 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 			_ = s.writeEvent(state.owner, "chat.error", map[string]any{"message": event.Content})
 		case agent.EventDone:
 			// handled after ProcessDirect returns
+		case agent.EventContextCompressed:
+			originalTokens, _ := event.Data["originalTokens"].(int)
+			compressedTokens, _ := event.Data["compressedTokens"].(int)
+			reductionPercent, _ := event.Data["reductionPercent"].(float64)
+			_ = s.writeEvent(state.owner, "context.compressed", map[string]any{
+				"enabled":          true,
+				"originalTokens":   originalTokens,
+				"compressedTokens": compressedTokens,
+				"reductionPercent": reductionPercent,
+			})
 		}
 	})
 

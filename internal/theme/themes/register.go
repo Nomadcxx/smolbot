@@ -46,6 +46,10 @@ func register(name string, colors [15]string, opts ...themeOption) {
 		ToolArtifactBorder:        lipgloss.Color(colors[14]),
 		ToolArtifactHeader:        lipgloss.Color(darkenHex(colors[5], 0.18)),
 		ToolArtifactBody:          lipgloss.Color(darkenHex(colors[3], 0.55)),
+		CompressionActive:         lipgloss.Color(colors[12]), // Success color
+		CompressionSuccess:        lipgloss.Color(colors[7]),  // Accent
+		CompressionWarning:        lipgloss.Color(colors[11]), // Warning
+		TokenHighUsage:            lipgloss.Color(colors[10]), // Error
 	}
 
 	for _, opt := range opts {

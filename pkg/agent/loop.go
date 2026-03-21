@@ -157,7 +157,7 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 			history = anyToMessages(result.CompressedMessages)
 			
 			emit(cb, Event{
-				Type:    "context.compressed",
+				Type:    EventContextCompressed,
 				Content: fmt.Sprintf("Context compressed: %d→%d tokens (%.0f%% reduction)", 
 					orig, comp, reduction),
 			})

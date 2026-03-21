@@ -49,4 +49,10 @@ type Theme struct {
 	ToolArtifactBorder color.Color
 	ToolArtifactHeader color.Color
 	ToolArtifactBody   color.Color
+
+	// Compression indicator colors (inspired by nanocoder)
+	CompressionActive  color.Color // Light compression (20-40%)
+	CompressionSuccess color.Color // Moderate compression (40-60%)
+	CompressionWarning color.Color // High compression (>60%)
+	TokenHighUsage     color.Color // Token usage critical (>90%)
 }

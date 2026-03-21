@@ -32,6 +32,9 @@ type StatusLoadedMsg struct {
 	Payload client.StatusPayload
 	Echo    bool
 }
+type CompressionStatusMsg struct {
+	Info client.CompressionInfo
+}
 type SessionsLoadedMsg struct{ Sessions []client.SessionInfo }
 type SessionResetDoneMsg struct{ Key string }
 type ModelsLoadedMsg struct {
@@ -388,6 +391,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				status = "error"
 			}
 			m.messages.FinishTool(p.Name, status, p.Output)
+		case "context.compressed":
+			var p client.CompressionInfo
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			m.footer.SetCompression(&p)
 		}
 		if mapped != nil {
 			nextModel, cmd := m.Update(mapped)

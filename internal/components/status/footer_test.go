@@ -10,6 +10,7 @@ import (
 	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
+	"github.com/stretchr/testify/require"
 )
 
 func stripANSIStatus(text string) string {
@@ -161,4 +162,87 @@ func TestFooterWarnsOnHighUsage(t *testing.T) {
 func ansiRGB(c color.Color) string {
 	r, g, b, _ := c.RGBA()
 	return fmt.Sprintf("38;2;%d;%d;%d", r>>8, g>>8, b>>8)
+}
+
+func TestFooterCompressionIndicator(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
+
+	a := app.New(app.Config{})
+	footer := NewFooter(a)
+	footer.SetWidth(100)
+
+	footer.SetCompression(&client.CompressionInfo{
+		Enabled:          true,
+		ReductionPercent: 35.0,
+	})
+
+	view := stripANSIStatus(footer.View())
+	require.Contains(t, view, "↓35%")
+}
+
+func TestFooterCompressionHighReduction(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
+
+	t := theme.Current()
+	if t == nil {
+		t.Fatal("expected theme current")
+	}
+
+	a := app.New(app.Config{})
+	footer := NewFooter(a)
+	footer.SetWidth(100)
+
+	footer.SetCompression(&client.CompressionInfo{
+		Enabled:          true,
+		ReductionPercent: 65.0, // High - should use warning color
+	})
+
+	view := footer.View()
+	require.Contains(t, stripANSIStatus(view), "↓65%")
+}
+
+func TestFooterCompressionDisabled(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
+
+	a := app.New(app.Config{})
+	footer := NewFooter(a)
+	footer.SetWidth(100)
+
+	footer.SetCompression(&client.CompressionInfo{Enabled: false})
+	view := stripANSIStatus(footer.View())
+
+	// Should not show compression indicator
+	require.NotContains(t, view, "↓")
+}
+
+func TestFooterTokenUsageColorCoding(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
+
+	a := app.New(app.Config{})
+	footer := NewFooter(a)
+	footer.SetWidth(100)
+
+	// Test high usage (>90%)
+	footer.SetUsage(client.UsageInfo{
+		TotalTokens:   9000,
+		ContextWindow: 10000,
+	})
+	view := stripANSIStatus(footer.View())
+	require.Contains(t, view, "90%")
+
+	// Test medium usage (60-80%)
+	footer.SetUsage(client.UsageInfo{
+		TotalTokens:   7000,
+		ContextWindow: 10000,
+	})
+	view = stripANSIStatus(footer.View())
+	require.Contains(t, view, "70%")
 }
