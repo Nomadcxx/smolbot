@@ -103,6 +103,25 @@ mv cmd/nanobot-tui cmd/smolbot-tui
 **Changes:**
 - `"You are nanobot"` → `"You are smolbot"`
 
+### 6.2 Update Workspace Template Files
+**File:** `cmd/installer/tasks.go` - Lines 135-147
+
+The installer creates default SOUL.md and HEARTBEAT.md files. Update the content:
+
+**Current SOUL.md content:**
+```go
+soulContent := "# Agent Personality\n\nYou are a helpful AI coding assistant..."
+```
+
+**Should reference smolbot instead of generic assistant.
+
+**Current HEARTBEAT.md content:**
+```go
+heartbeatContent := "# Heartbeat Instructions\n\nPeriodic status checks..."
+```
+
+**Consider adding smolbot branding to these generated files.
+
 ## Phase 7: TUI and Client References
 
 ### 7.1 Update TUI State Path
@@ -125,7 +144,7 @@ mv cmd/nanobot-tui cmd/smolbot-tui
 - Change: `Client: "nanobot-tui"`
 - To: `Client: "smolbot-tui"`
 
-## Phase 8: Server and Protocol
+## Phase 8: Server, Channels, and Protocol
 
 ### 8.1 Update Server Identification
 **File:** `pkg/gateway/server.go`: Line 179
@@ -139,6 +158,17 @@ mv cmd/nanobot-tui cmd/smolbot-tui
 
 **Change:**
 - `"nanobot-go"` → `"smolbot"`
+
+### 8.3 Update Channel Error Messages
+**File:** `pkg/channel/whatsapp/adapter.go`
+- Lines 225, 318: Update command references
+- Change: `nanobot channels login whatsapp`
+- To: `smolbot channels login whatsapp`
+
+### 8.4 Update Signal CLI Device Name
+**File:** `pkg/channel/signal/adapter.go`: Line 156
+- Change: `"nanobot-go"` in link command
+- To: `"smolbot"`
 
 ## Phase 9: Package Declaration
 
