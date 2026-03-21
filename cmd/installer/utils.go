@@ -1,0 +1,116 @@
+// cmd/installer/utils.go
+package main
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// runCommand executes a command with logging
+type commandResult struct {
+	Output   string
+	ExitCode int
+	Duration time.Duration
+	Err      error
+}
+
+func runCommand(m *model, name string, args ...string) commandResult {
+	start := time.Now()
+
+	// Check for context cancellation
+	select {
+	case <-m.ctx.Done():
+		return commandResult{Err: m.ctx.Err()}
+	default:
+	}
+
+	cmd := exec.CommandContext(m.ctx, name, args...)
+	cmd.Dir = m.projectDir
+
+	// Log command
+	if m.logFile != nil {
+		fmt.Fprintf(m.logFile, "[CMD] %s %s\n", name, strings.Join(args, " "))
+	}
+
+	output, err := cmd.CombinedOutput()
+	duration := time.Since(start)
+
+	result := commandResult{
+		Output:   string(output),
+		Duration: duration,
+		Err:      err,
+	}
+
+	if cmd.ProcessState != nil {
+		result.ExitCode = cmd.ProcessState.ExitCode()
+	}
+
+	// Log result
+	if m.logFile != nil {
+		if err != nil {
+			fmt.Fprintf(m.logFile, "[FAIL] Exit code %d, duration %v\n%s\n\n",
+				result.ExitCode, duration, output)
+		} else {
+			fmt.Fprintf(m.logFile, "[OK] Duration %v\n\n", duration)
+		}
+	}
+
+	return result
+}
+
+// validatePort checks if a port is available
+func validatePort(port int) error {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return fmt.Errorf("port %d is already in use: %w", port, err)
+	}
+	listener.Close()
+	return nil
+}
+
+// getLastCommand returns the last executed command for error display
+var lastCommand string
+
+func setLastCommand(name string, args ...string) {
+	lastCommand = name + " " + strings.Join(args, " ")
+}
+
+func getLastCommand() string {
+	return lastCommand
+}
+
+// detectExistingInstall checks for existing installation
+func detectExistingInstall() (exists bool, version string, daemonRunning bool, configExists bool, err error) {
+	// Check binary
+	binPath := filepath.Join(os.Getenv("HOME"), ".local", "bin", "nanobot")
+	if _, err := os.Stat(binPath); os.IsNotExist(err) {
+		return false, "", false, false, nil
+	}
+	exists = true
+
+	// Get version
+	cmd := exec.Command(binPath, "--version")
+	output, err := cmd.Output()
+	if err == nil {
+		version = strings.TrimSpace(string(output))
+	}
+
+	// Check if service is running
+	cmd = exec.Command("systemctl", "--user", "is-active", "nanobot-go")
+	if err := cmd.Run(); err == nil {
+		daemonRunning = true
+	}
+
+	// Check config
+	configPath := filepath.Join(os.Getenv("HOME"), ".nanobot-go", "config.json")
+	if _, err := os.Stat(configPath); err == nil {
+		configExists = true
+	}
+
+	return exists, version, daemonRunning, configExists, nil
+}
