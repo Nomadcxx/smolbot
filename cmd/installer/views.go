@@ -396,7 +396,7 @@ func (m model) renderComplete() string {
 	b.WriteString("\n\n")
 
 	if m.updateMode {
-		b.WriteString(fmt.Sprintf("Successfully upgraded SMOLBOT\n"))
+		b.WriteString("Successfully upgraded SMOLBOT\n")
 	} else {
 		b.WriteString("SMOLBOT is installed and ready to use!\n")
 	}
@@ -407,6 +407,31 @@ func (m model) renderComplete() string {
 	if m.enableService {
 		b.WriteString("  Service: systemd user service enabled\n")
 	}
+
+	// Post-installation quick start guide
+	b.WriteString("\n")
+	b.WriteString(headerStyle.Render("Quick Start"))
+	b.WriteString("\n\n")
+
+	b.WriteString("Launch TUI (interactive mode):\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  nanobot-tui"))
+	b.WriteString("\n\n")
+
+	b.WriteString("Launch CLI (single command):\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  nanobot run \"your prompt here\""))
+	b.WriteString("\n\n")
+
+	b.WriteString("Service management:\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  systemctl --user start nanobot-go"))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  systemctl --user stop nanobot-go"))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  systemctl --user status nanobot-go"))
+	b.WriteString("\n\n")
+
+	b.WriteString("Edit configuration:\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  nano ~/.nanobot/config.json"))
+	b.WriteString("\n")
 
 	return b.String()
 }
