@@ -145,17 +145,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tickMsg:
-		// Update animations
+		// Update animations (beams and ticker both update every 50ms)
 		if m.beams != nil {
 			m.beams.Update()
+		}
+		if m.ticker != nil {
+			m.ticker.Update()
 		}
 		return m, tickCmd()
 
 	case tickerMsg:
-		// Update typewriter ticker
-		if m.ticker != nil {
-			m.ticker.Update()
-		}
+		// Ticker messages cycle handled internally by TypewriterTicker
 		return m, tickerCmd()
 
 	case taskCompleteMsg:

@@ -121,11 +121,7 @@ func (m model) View() string {
 func (m model) getHelpText() string {
 	switch m.step {
 	case stepWelcome:
-		help := "↑/↓: Navigate  •  Enter: Continue  •  q: Quit"
-		if m.existingInstall {
-			help += "  •  W: Full wizard"
-		}
-		return help
+		return "↑/↓: Navigate  •  Enter: Continue  •  q: Quit"
 	case stepPrerequisites:
 		return "Enter: Continue  •  q: Quit"
 	case stepProvider:
@@ -150,7 +146,7 @@ func (m model) getHelpText() string {
 func (m model) renderWelcome() string {
 	var b strings.Builder
 
-	b.WriteString(headerStyle.Render("Welcome to SMOLBOT"))
+	b.WriteString(headerStyle.Render("SMOLBOT Installer"))
 	b.WriteString("\n\n")
 
 	options := []struct {
