@@ -5,11 +5,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -21,52 +22,35 @@ func newModel() model {
 	// Initialize spinner
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(defaultTheme.Primary))
+	s.Style = lipgloss.NewStyle().Foreground(Secondary)
 
 	// Detect existing installation
 	exists, version, daemonRunning, configExists, _ := detectExistingInstall()
 
-	// Default paths - use ~/.nanobot/ per spec (not ~/.nanobot-go/)
+	// Default paths
 	workspacePath := filepath.Join(os.Getenv("HOME"), ".nanobot", "workspace")
 	configPath := filepath.Join(os.Getenv("HOME"), ".nanobot", "config.json")
 
-	// Create temp directory for build - will be set after clone
-	tempDir := ""
+	// Check prerequisites
+	hasGo := false
+	hasGit := false
+	if _, err := exec.LookPath("go"); err == nil {
+		hasGo = true
+	}
+	if _, err := exec.LookPath("git"); err == nil {
+		hasGit = true
+	}
 
-	// Initialize text inputs
-	inputs := make([]textinput.Model, 4)
-	
-	// Port input
-	inputs[0] = textinput.New()
-	inputs[0].Placeholder = "18791"
-	inputs[0].CharLimit = 5
-	inputs[0].Width = 20
-	
-	// Workspace path input
-	inputs[1] = textinput.New()
-	inputs[1].Placeholder = workspacePath
-	inputs[1].CharLimit = 256
-	inputs[1].Width = 50
-	
-	// Config path input
-	inputs[2] = textinput.New()
-	inputs[2].Placeholder = configPath
-	inputs[2].CharLimit = 256
-	inputs[2].Width = 50
-	
-	// API Key input (for cloud providers)
-	inputs[3] = textinput.New()
-	inputs[3].Placeholder = "sk-..."
-	inputs[3].CharLimit = 256
-	inputs[3].Width = 50
-	inputs[3].EchoMode = textinput.EchoPassword
+	// Initialize animations
+	asciiHeader := strings.Join(asciiHeaderLines, "\n")
+	beams := NewBeamsTextEffect(80, 8, asciiHeader)
+	ticker := NewTypewriterTicker(tickerMessages)
 
 	m := model{
 		ctx:              ctx,
 		cancel:           cancel,
 		spinner:          s,
 		step:             stepWelcome,
-		projectDir:       tempDir,
 		workspacePath:    workspacePath,
 		configPath:       configPath,
 		port:             18791,
@@ -78,17 +62,21 @@ func newModel() model {
 		updateMode:       exists,
 		enableService:    true,
 		startNow:         true,
-		provider:         providerOllama, // Default to Ollama
-		inputs:           inputs,
-		focusedInput:     0,
+		provider:         providerOllama,
+		hasGo:            hasGo,
+		hasGit:           hasGit,
+		selectedOption:   0,
+		providerIndex:    0,
+		tickerIndex:      0,
+		beams:            beams,
+		ticker:           ticker,
 	}
 
-	// Create temp log file with proper cleanup
-	logFile, err := os.CreateTemp("", "nanobot-installer-*.log")
+	// Create temp log file
+	logFile, err := os.CreateTemp("", "smolbot-installer-*.log")
 	if err == nil {
-		fmt.Fprintf(logFile, "=== Nanobot Installer Log ===\n")
+		fmt.Fprintf(logFile, "=== SMOLBOT Installer Log ===\n")
 		fmt.Fprintf(logFile, "Started: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
-		// Note: logFile will be closed when installer exits
 	}
 	m.logFile = logFile
 
@@ -99,6 +87,7 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		tickCmd(),
+		tickerCmd(),
 	)
 }
 
@@ -108,53 +97,69 @@ func tickCmd() tea.Cmd {
 	})
 }
 
+func tickerCmd() tea.Cmd {
+	return tea.Tick(time.Second*3, func(t time.Time) tea.Msg {
+		return tickerMsg{}
+	})
+}
+
+type tickerMsg struct{}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q":
+		// Handle quit
+		if msg.String() == "ctrl+c" {
 			m.cancel()
 			return m, tea.Quit
-		case "enter":
-			return m.handleEnter()
-		case "up", "k":
-			return m.handleUp()
-		case "down", "j":
-			return m.handleDown()
-		case "left", "h":
-			return m.handleLeft()
-		case "right", "l":
-			return m.handleRight()
-		case "tab":
-			return m.handleTab()
-		case "shift+tab":
-			return m.handleShiftTab()
-		case "s":
-			return m.handleSkip()
-		case "r":
-			return m.handleRetry()
-		case "b":
-			return m.handleBack()
+		}
+
+		// Step-specific key handling
+		switch m.step {
+		case stepWelcome:
+			return m.handleWelcomeKeys(msg)
+		case stepPrerequisites:
+			return m.handlePrerequisitesKeys(msg)
+		case stepProvider:
+			return m.handleProviderKeys(msg)
+		case stepConfiguration:
+			return m.handleConfigurationKeys(msg)
+		case stepChannels:
+			return m.handleChannelsKeys(msg)
+		case stepService:
+			return m.handleServiceKeys(msg)
+		case stepInstalling:
+			return m.handleInstallingKeys(msg)
+		case stepComplete:
+			return m.handleCompleteKeys(msg)
+		case stepUninstall:
+			return m.handleUninstallKeys(msg)
 		}
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Resize beams animation
+		if m.beams != nil {
+			m.beams.Resize(m.width, 8)
+		}
 
 	case tickMsg:
+		// Update animations
+		if m.beams != nil {
+			m.beams.Update()
+		}
 		return m, tickCmd()
+
+	case tickerMsg:
+		// Update typewriter ticker
+		if m.ticker != nil {
+			m.ticker.Update()
+		}
+		return m, tickerCmd()
 
 	case taskCompleteMsg:
 		return m.handleTaskComplete(msg)
-
-	case ollamaModelsMsg:
-		m.ollamaModels = msg.models
-		if len(m.ollamaModels) > 0 {
-			m.ollamaModelIndex = 0
-			m.selectedModel = m.ollamaModels[0]
-		}
-		m.ollamaDetecting = false
-		return m, nil
 
 	case ollamaDetectMsg:
 		m.ollamaDetected = msg.detected
@@ -169,265 +174,204 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Update focused input if in configuration step
-	if m.step == stepConfiguration && m.focusedInput >= 0 && m.focusedInput < len(m.inputs) {
-		var cmd tea.Cmd
-		m.inputs[m.focusedInput], cmd = m.inputs[m.focusedInput].Update(msg)
-		return m, cmd
-	}
-
 	// Update spinner
 	var cmd tea.Cmd
 	m.spinner, cmd = m.spinner.Update(msg)
-
 	return m, cmd
 }
 
-func (m model) View() string {
-	switch m.step {
-	case stepWelcome:
-		return m.welcomeView()
-	case stepPrerequisites:
-		return m.prerequisitesView()
-	case stepProvider:
-		return m.providerView()
-	case stepConfiguration:
-		return m.configurationView()
-	case stepChannels:
-		return m.channelsView()
-	case stepService:
-		return m.serviceView()
-	case stepInstalling:
-		return m.installingView()
-	case stepComplete:
-		return m.completeView()
-	case stepUninstall:
-		return m.uninstallView()
+// Key handlers for each step
+func (m model) handleWelcomeKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q":
+		return m, tea.Quit
+	case "up", "k":
+		if m.selectedOption > 0 {
+			m.selectedOption--
+		}
+		return m, nil
+	case "down", "j":
+		maxOptions := 1
+		if m.existingInstall {
+			maxOptions = 3
+		}
+		if m.selectedOption < maxOptions-1 {
+			m.selectedOption++
+		}
+		return m, nil
+	case "enter":
+		// Determine what was selected
+		if m.existingInstall {
+			switch m.selectedOption {
+			case 0: // Update
+				m.updateMode = true
+				m.step = stepInstalling
+				m.initTasks()
+				return m, startFirstTask(&m)
+			case 1: // Install
+				m.updateMode = false
+				m.step = stepPrerequisites
+				return m, tea.Batch(detectOllamaCmd(m.ollamaURL), tickCmd())
+			case 2: // Uninstall
+				m.step = stepUninstall
+				return m, nil
+			}
+		} else {
+			m.step = stepPrerequisites
+			return m, tea.Batch(detectOllamaCmd(m.ollamaURL), tickCmd())
+		}
 	}
-	return "Unknown step"
+	return m, nil
 }
 
-// Handle Enter key
-func (m model) handleEnter() (tea.Model, tea.Cmd) {
-	switch m.step {
-	case stepWelcome:
-		m.step = stepPrerequisites
-		// Try to detect Ollama
-		return m, tea.Batch(detectOllamaCmd(m.ollamaURL), tickCmd())
-
-	case stepPrerequisites:
+func (m model) handlePrerequisitesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
 		m.step = stepProvider
 		return m, nil
+	}
+	return m, nil
+}
 
-	case stepProvider:
+func (m model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.providerIndex > 0 {
+			m.providerIndex--
+		}
+		return m, nil
+	case "down", "j":
+		if m.providerIndex < len(providers)-1 {
+			m.providerIndex++
+		}
+		return m, nil
+	case "enter":
 		m.step = stepConfiguration
-		// If Ollama selected, try to fetch models
-		if m.provider == providerOllama {
+		if m.providerIndex == 0 {
 			return m, tea.Batch(fetchOllamaModelsCmd(m.ollamaURL), tickCmd())
 		}
 		return m, nil
+	case "esc":
+		m.step = stepPrerequisites
+		return m, nil
+	}
+	return m, nil
+}
 
-	case stepConfiguration:
-		// Validate configuration before proceeding
+func (m model) handleConfigurationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.providerIndex == 0 && m.ollamaModelIndex > 0 {
+			m.ollamaModelIndex--
+		}
+		return m, nil
+	case "down", "j":
+		if m.providerIndex == 0 && m.ollamaModelIndex < len(m.ollamaModels)-1 {
+			m.ollamaModelIndex++
+		}
+		return m, nil
+	case "enter":
 		if m.validateConfiguration() {
 			m.step = stepChannels
 		}
 		return m, nil
+	case "esc":
+		m.step = stepProvider
+		return m, nil
+	}
+	return m, nil
+}
 
-	case stepChannels:
+func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "left", "h":
+		if m.channelIndex == 0 {
+			signalEnabled = !signalEnabled
+		} else if m.channelIndex == 1 {
+			whatsappEnabled = !whatsappEnabled
+		}
+		return m, nil
+	case "right", "l":
+		if m.channelIndex == 0 {
+			signalEnabled = !signalEnabled
+		} else if m.channelIndex == 1 {
+			whatsappEnabled = !whatsappEnabled
+		}
+		return m, nil
+	case "enter":
 		m.step = stepService
 		return m, nil
-
-	case stepService:
-		// Update paths from inputs
-		if m.inputs[0].Value() != "" {
-			fmt.Sscanf(m.inputs[0].Value(), "%d", &m.port)
-		}
-		if m.inputs[1].Value() != "" {
-			m.workspacePath = m.inputs[1].Value()
-		}
-		if m.inputs[2].Value() != "" {
-			m.configPath = m.inputs[2].Value()
-		}
-		m.step = stepInstalling
-		m.initTasks()
-		m.currentTaskIndex = 0
-		if len(m.tasks) > 0 {
-			m.tasks[0].status = statusRunning
-			return m, tea.Batch(m.spinner.Tick, executeTaskCmd(0, &m))
-		}
-		return m, nil
-
-	case stepComplete:
-		return m, tea.Quit
-	}
-
-	return m, nil
-}
-
-// Handle Back key
-func (m model) handleBack() (tea.Model, tea.Cmd) {
-	switch m.step {
-	case stepPrerequisites:
-		m.step = stepWelcome
-	case stepProvider:
-		m.step = stepPrerequisites
-	case stepConfiguration:
-		m.step = stepProvider
-	case stepChannels:
+	case "esc":
 		m.step = stepConfiguration
-	case stepService:
-		m.step = stepChannels
+		return m, nil
 	}
 	return m, nil
 }
 
-// Handle Up key
-func (m model) handleUp() (tea.Model, tea.Cmd) {
-	switch m.step {
-	case stepProvider:
-		if m.providerIndex > 0 {
-			m.providerIndex--
-		}
-	case stepConfiguration:
-		if m.ollamaModelIndex > 0 {
-			m.ollamaModelIndex--
-		}
-	case stepService:
-		if m.serviceOption > 0 {
-			m.serviceOption--
-		}
-	}
-	return m, nil
-}
-
-// Handle Down key
-func (m model) handleDown() (tea.Model, tea.Cmd) {
-	switch m.step {
-	case stepProvider:
-		if m.providerIndex < len(providers)-1 {
-			m.providerIndex++
-		}
-	case stepConfiguration:
-		if m.ollamaModelIndex < len(m.ollamaModels)-1 {
-			m.ollamaModelIndex++
-		}
-	case stepService:
-		if m.serviceOption < 2 {
-			m.serviceOption++
-		}
-	}
-	return m, nil
-}
-
-// Handle Left key
-func (m model) handleLeft() (tea.Model, tea.Cmd) {
-	switch m.step {
-	case stepService:
+func (m model) handleServiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "tab":
+		m.serviceOption = (m.serviceOption + 1) % 3
+		return m, nil
+	case "left", "h", "right", "l":
 		switch m.serviceOption {
 		case 0:
 			m.enableService = !m.enableService
 		case 1:
 			m.startNow = !m.startNow
 		}
-	case stepChannels:
-		if m.channelIndex == 0 {
-			signalEnabled = !signalEnabled
-		} else if m.channelIndex == 1 {
-			whatsappEnabled = !whatsappEnabled
-		}
+		return m, nil
+	case "enter":
+		m.step = stepInstalling
+		m.initTasks()
+		return m, startFirstTask(&m)
+	case "esc":
+		m.step = stepChannels
+		return m, nil
 	}
 	return m, nil
 }
 
-// Handle Right key
-func (m model) handleRight() (tea.Model, tea.Cmd) {
-	return m.handleLeft() // Toggle same as left
+func (m model) handleInstallingKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// During installation, only Ctrl+C works
+	return m, nil
 }
 
-// Handle Tab key
-func (m model) handleTab() (tea.Model, tea.Cmd) {
-	if m.step == stepConfiguration {
-		m.focusedInput++
-		if m.focusedInput >= len(m.inputs) {
-			m.focusedInput = 0
-		}
-		for i := range m.inputs {
-			if i == m.focusedInput {
-				m.inputs[i].Focus()
-			} else {
-				m.inputs[i].Blur()
-			}
-		}
+func (m model) handleCompleteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter", "q":
+		return m, tea.Quit
 	}
 	return m, nil
 }
 
-// Handle Shift+Tab key
-func (m model) handleShiftTab() (tea.Model, tea.Cmd) {
-	if m.step == stepConfiguration {
-		m.focusedInput--
-		if m.focusedInput < 0 {
-			m.focusedInput = len(m.inputs) - 1
-		}
-		for i := range m.inputs {
-			if i == m.focusedInput {
-				m.inputs[i].Focus()
-			} else {
-				m.inputs[i].Blur()
-			}
-		}
+func (m model) handleUninstallKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.initUninstallTasks()
+		m.step = stepInstalling
+		return m, startFirstTask(&m)
+	case "esc":
+		m.step = stepWelcome
+		return m, nil
 	}
 	return m, nil
 }
 
-// Handle Skip key
-func (m model) handleSkip() (tea.Model, tea.Cmd) {
-	if m.step == stepInstalling && m.currentTaskIndex < len(m.tasks) {
-		if m.tasks[m.currentTaskIndex].optional {
-			m.tasks[m.currentTaskIndex].status = statusSkipped
-			m.currentTaskIndex++
-			if m.currentTaskIndex < len(m.tasks) {
-				m.tasks[m.currentTaskIndex].status = statusRunning
-				return m, tea.Batch(m.spinner.Tick, executeTaskCmd(m.currentTaskIndex, &m))
-			}
-			m.step = stepComplete
-		}
-	}
-	return m, nil
-}
-
-// Handle Retry key
-func (m model) handleRetry() (tea.Model, tea.Cmd) {
-	if m.step == stepInstalling && m.currentTaskIndex < len(m.tasks) {
-		if m.tasks[m.currentTaskIndex].status == statusFailed {
-			m.tasks[m.currentTaskIndex].status = statusRunning
-			m.tasks[m.currentTaskIndex].errorDetails = nil
-			return m, tea.Batch(m.spinner.Tick, executeTaskCmd(m.currentTaskIndex, &m))
-		}
-	}
-	return m, nil
-}
-
-// Handle task completion
 func (m model) handleTaskComplete(msg taskCompleteMsg) (tea.Model, tea.Cmd) {
 	if msg.success {
-		// Mark current task as complete
 		m.tasks[msg.index].status = statusComplete
 		m.currentTaskIndex++
 
-		// Start next task if available
 		if m.currentTaskIndex < len(m.tasks) {
 			m.tasks[m.currentTaskIndex].status = statusRunning
 			return m, tea.Batch(m.spinner.Tick, executeTaskCmd(m.currentTaskIndex, &m))
 		}
 
-		// All tasks complete
 		m.step = stepComplete
 		return m, nil
 	}
 
-	// Task failed
 	m.tasks[msg.index].status = statusFailed
 	m.tasks[msg.index].errorDetails = &errorInfo{
 		message: msg.err.Error(),
@@ -435,46 +379,16 @@ func (m model) handleTaskComplete(msg taskCompleteMsg) (tea.Model, tea.Cmd) {
 		logFile: m.logFile.Name(),
 	}
 
-	// If optional, allow skip
-	if m.tasks[msg.index].optional {
-		return m, nil
-	}
-
-	// Required task failed - stop
 	return m, nil
 }
 
-// Validate configuration
-func (m *model) validateConfiguration() bool {
-	// Validate port
-	if m.inputs[0].Value() != "" {
-		var port int
-		if _, err := fmt.Sscanf(m.inputs[0].Value(), "%d", &port); err != nil {
-			m.errors = append(m.errors, "Invalid port number")
-			return false
-		}
-		if err := validatePort(port); err != nil {
-			m.errors = append(m.errors, err.Error())
-			return false
-		}
-		m.port = port
+func startFirstTask(m *model) tea.Cmd {
+	if len(m.tasks) == 0 {
+		return nil
 	}
-
-	// Update selected model
-	if m.provider == providerOllama && len(m.ollamaModels) > 0 && m.ollamaModelIndex >= 0 {
-		m.selectedModel = m.ollamaModels[m.ollamaModelIndex]
-	}
-
-	m.errors = nil
-	return true
-}
-
-// Execute task command
-func executeTaskCmd(index int, m *model) tea.Cmd {
-	return func() tea.Msg {
-		err := m.tasks[index].execute(m)
-		return taskCompleteMsg{index: index, success: err == nil, err: err}
-	}
+	m.currentTaskIndex = 0
+	m.tasks[0].status = statusRunning
+	return tea.Batch(m.spinner.Tick, executeTaskCmd(0, m))
 }
 
 func main() {

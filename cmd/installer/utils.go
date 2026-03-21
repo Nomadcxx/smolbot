@@ -170,3 +170,36 @@ var (
 	signalEnabled   = false
 	whatsappEnabled = false
 )
+
+// executeTaskCmd executes a task and returns a message when complete
+func executeTaskCmd(index int, m *model) tea.Cmd {
+	return func() tea.Msg {
+		task := &m.tasks[index]
+		err := task.execute(m)
+		return taskCompleteMsg{
+			index:   index,
+			success: err == nil,
+			err:     err,
+		}
+	}
+}
+
+// validateConfiguration validates the current configuration
+func (m *model) validateConfiguration() bool {
+	// Basic validation - ensure required fields are set
+	switch m.provider {
+	case providerOllama:
+		// Ollama just needs a model selected
+		return m.selectedModel != "" || len(m.ollamaModels) > 0
+	case providerOpenAI, providerAnthropic:
+		// These need an API key
+		return m.apiKey != ""
+	case providerAzure:
+		// Azure needs endpoint and key
+		return m.apiKey != "" && m.apiEndpoint != ""
+	case providerCustom:
+		// Custom needs endpoint
+		return m.apiEndpoint != ""
+	}
+	return true
+}

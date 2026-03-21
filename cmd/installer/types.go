@@ -117,6 +117,11 @@ type model struct {
 	providerIndex  int
 	serviceOption  int
 	channelIndex   int
+	tickerIndex    int
+
+	// Animations
+	beams  *BeamsTextEffect
+	ticker *TypewriterTicker
 
 	// Provider configuration
 	provider    string
@@ -143,6 +148,9 @@ type model struct {
 	// Service options
 	enableService bool
 	startNow      bool
+	// Prerequisites
+	hasGo  bool
+	hasGit bool
 
 	// Upgrade detection
 	existingInstall  bool

@@ -3,83 +3,231 @@ package main
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Welcome view
-func (m model) welcomeView() string {
-	var b strings.Builder
-
-	// ASCII art
-	b.WriteString(getSmolbotArt())
-	b.WriteString("\n")
-
-	// Welcome message
-	title := headerStyle.Render("Welcome to nanobot-go")
-	b.WriteString(title)
-	b.WriteString("\n\n")
-
-	// Description
-	desc := "AI-powered coding assistant for your terminal\n"
-	desc += "Version: 1.0.0\n\n"
-	b.WriteString(descriptionStyle.Render(desc))
-
-	// Mode indicator
-	if m.updateMode {
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(defaultTheme.WarningColor)).
-			Render("⚡ Upgrade mode detected (v" + m.existingVersion + ")"))
-		b.WriteString("\n\n")
+// View renders the UI
+func (m model) View() string {
+	if m.width == 0 {
+		return "Loading..."
 	}
 
-	// Instructions
-	b.WriteString(mutedStyle.Render("Press Enter to continue, or 'q' to exit"))
+	// Terminal size check
+	if m.width < 80 || m.height < 24 {
+		return lipgloss.NewStyle().
+			Foreground(ErrorColor).
+			Background(BgBase).
+			Bold(true).
+			Width(m.width).
+			Height(m.height).
+			Render(fmt.Sprintf(
+				"Terminal too small!\n\nMinimum: 80x24\nCurrent: %dx%d\n\nPlease resize.",
+				m.width, m.height,
+			))
+	}
+
+	var content strings.Builder
+
+	// ASCII Header with Beams Animation
+	if m.beams != nil {
+		headerRendered := m.beams.Render()
+		content.WriteString(headerRendered)
+		content.WriteString("\n")
+	}
+
+	// Ticker/Tagline with Typewriter Animation
+	if m.ticker != nil {
+		tickerText := m.ticker.Render(m.width)
+		tickerStyled := lipgloss.NewStyle().
+			Foreground(FgMuted).
+			Background(BgBase).
+			Italic(true).
+			Render(tickerText)
+		content.WriteString(tickerStyled)
+		content.WriteString("\n\n")
+	}
+
+	// Main content based on step
+	var mainContent string
+	switch m.step {
+	case stepWelcome:
+		mainContent = m.renderWelcome()
+	case stepPrerequisites:
+		mainContent = m.renderPrerequisites()
+	case stepProvider:
+		mainContent = m.renderProvider()
+	case stepConfiguration:
+		mainContent = m.renderConfiguration()
+	case stepChannels:
+		mainContent = m.renderChannels()
+	case stepService:
+		mainContent = m.renderService()
+	case stepInstalling:
+		mainContent = m.renderInstalling()
+	case stepComplete:
+		mainContent = m.renderComplete()
+	case stepUninstall:
+		mainContent = m.renderUninstall()
+	}
+
+	// Boxed content with rounded border
+	mainStyle := lipgloss.NewStyle().
+		Padding(1, 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(Secondary).
+		Foreground(FgPrimary).
+		Background(BgBase).
+		Width(m.width - 4)
+
+	mainRendered := mainStyle.Render(mainContent)
+	mainHeight := lipgloss.Height(mainRendered)
+
+	// Place content with filled background
+	mainPlaced := lipgloss.Place(
+		m.width-4, mainHeight,
+		lipgloss.Left, lipgloss.Top,
+		mainRendered,
+		lipgloss.WithWhitespaceBackground(BgBase),
+	)
+	content.WriteString(mainPlaced)
+	content.WriteString("\n")
+
+	// Help text footer
+	helpText := m.getHelpText()
+	if helpText != "" {
+		helpStyle := lipgloss.NewStyle().
+			Foreground(FgMuted).
+			Background(BgBase).
+			Italic(true).
+			Width(m.width).
+			Align(lipgloss.Center)
+		content.WriteString("\n" + helpStyle.Render(helpText))
+	}
+
+	// Full-screen wrapper
+	bgStyle := lipgloss.NewStyle().
+		Background(BgBase).
+		Foreground(FgPrimary).
+		Width(m.width).
+		Height(m.height).
+		Align(lipgloss.Center, lipgloss.Top)
+
+	return bgStyle.Render(content.String())
+}
+
+// getHelpText returns context-sensitive help text
+func (m model) getHelpText() string {
+	switch m.step {
+	case stepWelcome:
+		help := "↑/↓: Navigate  •  Enter: Continue  •  q: Quit"
+		if m.existingInstall {
+			help += "  •  W: Full wizard"
+		}
+		return help
+	case stepPrerequisites:
+		return "Enter: Continue  •  q: Quit"
+	case stepProvider:
+		return "↑/↓: Navigate  •  Enter: Select  •  Esc: Back"
+	case stepConfiguration:
+		return "Tab: Next field  •  ↑/↓: Navigate  •  Enter: Continue  •  Esc: Back"
+	case stepChannels:
+		return "←/→: Toggle  •  Enter: Continue  •  Esc: Back"
+	case stepService:
+		return "Tab: Next option  •  ←/→: Toggle  •  Enter: Install  •  Esc: Back"
+	case stepInstalling:
+		return "Please wait..."
+	case stepComplete:
+		return "Enter: Exit"
+	case stepUninstall:
+		return "Enter: Confirm  •  Esc: Back"
+	}
+	return ""
+}
+
+// Welcome screen
+func (m model) renderWelcome() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render("Welcome to SMOLBOT"))
+	b.WriteString("\n\n")
+
+	options := []struct {
+		label       string
+		description string
+	}{
+		{"Install", "Fresh installation with full configuration"},
+	}
+
+	if m.existingInstall {
+		options = append([]struct {
+			label       string
+			description string
+		}{
+			{"Update", "Update existing installation"},
+		}, options...)
+		options = append(options, struct {
+			label       string
+			description string
+		}{"Uninstall", "Remove SMOLBOT from system"})
+	}
+
+	for i, opt := range options {
+		marker := "○"
+		if i == m.selectedOption {
+			marker = "●"
+		}
+		if i == m.selectedOption {
+			b.WriteString(lipgloss.NewStyle().Foreground(Primary).Bold(true).
+				Render(fmt.Sprintf("  %s %s", marker, opt.label)))
+		} else {
+			b.WriteString(fmt.Sprintf("  %s %s", marker, opt.label))
+		}
+		b.WriteString("\n")
+		if opt.description != "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).
+				Render(fmt.Sprintf("     %s", opt.description)))
+			b.WriteString("\n")
+		}
+	}
 
 	return b.String()
 }
 
-// Prerequisites view
-func (m model) prerequisitesView() string {
+// Prerequisites screen
+func (m model) renderPrerequisites() string {
 	var b strings.Builder
 
 	b.WriteString(headerStyle.Render("Prerequisites Check"))
 	b.WriteString("\n\n")
 
-	// Check Go
-	goStatus := "[PENDING]"
-	if _, err := exec.LookPath("go"); err == nil {
-		goStatus = checkMark.String() + " Go detected"
+	// Go
+	if m.hasGo {
+		b.WriteString(checkMark.String() + " Go detected\n")
 	} else {
-		goStatus = failMark.String() + " Go not found (required)"
+		b.WriteString(failMark.String() + " Go not found (required)\n")
 	}
-	b.WriteString(goStatus + "\n")
 
-	// Check Git
-	gitStatus := "[PENDING]"
-	if _, err := exec.LookPath("git"); err == nil {
-		gitStatus = checkMark.String() + " Git detected"
+	// Git
+	if m.hasGit {
+		b.WriteString(checkMark.String() + " Git detected\n")
 	} else {
-		gitStatus = failMark.String() + " Git not found (required)"
+		b.WriteString(failMark.String() + " Git not found (required)\n")
 	}
-	b.WriteString(gitStatus + "\n")
 
-	// Check Ollama (optional)
-	ollamaStatus := checkMark.String() + " Ollama detected"
-	if !m.ollamaDetected {
-		ollamaStatus = skipMark.String() + " Ollama not detected (optional)"
+	// Ollama (optional)
+	if m.ollamaDetected {
+		b.WriteString(checkMark.String() + " Ollama detected\n")
+	} else {
+		b.WriteString(skipMark.String() + " Ollama not detected (optional)\n")
 	}
-	b.WriteString(ollamaStatus + "\n")
-
-	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("Press Enter to continue"))
 
 	return b.String()
 }
 
-// Provider selection view
-func (m model) providerView() string {
+// Provider selection
+func (m model) renderProvider() string {
 	var b strings.Builder
 
 	b.WriteString(headerStyle.Render("Select AI Provider"))
@@ -100,116 +248,60 @@ func (m model) providerView() string {
 		marker := "○"
 		if i == m.providerIndex {
 			marker = "●"
-			b.WriteString(selectedStyle.Render(fmt.Sprintf("  %s %-15s %s", marker, p.name, mutedStyle.Render(p.description))))
+		}
+		if i == m.providerIndex {
+			b.WriteString(lipgloss.NewStyle().Foreground(Primary).Bold(true).
+				Render(fmt.Sprintf("  %s %-15s %s", marker, p.name,
+					lipgloss.NewStyle().Foreground(FgMuted).Render(p.description))))
 		} else {
-			b.WriteString(fmt.Sprintf("  %s %-15s %s", marker, p.name, mutedStyle.Render(p.description)))
+			b.WriteString(fmt.Sprintf("  %s %-15s %s", marker, p.name,
+				lipgloss.NewStyle().Foreground(FgMuted).Render(p.description)))
 		}
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("↑/↓ to select, Enter to continue, 'b' to go back"))
-
 	return b.String()
 }
 
-// Configuration view - provider-specific
-func (m model) configurationView() string {
+// Configuration screen
+func (m model) renderConfiguration() string {
 	var b strings.Builder
 
 	b.WriteString(headerStyle.Render("Configuration"))
 	b.WriteString("\n\n")
 
-	// Show provider
 	providerNames := []string{"Ollama", "OpenAI", "Anthropic", "Azure OpenAI", "Custom"}
 	b.WriteString(fmt.Sprintf("Provider: %s\n\n", providerNames[m.providerIndex]))
 
 	switch m.providerIndex {
 	case 0: // Ollama
 		b.WriteString("Select Default Model:\n\n")
-
 		if m.ollamaDetecting {
 			b.WriteString("  " + m.spinner.View() + " Detecting Ollama models...\n")
 		} else if len(m.ollamaModels) > 0 {
-			for i, model := range m.ollamaModels {
+			for i, modelName := range m.ollamaModels {
 				marker := "○"
 				if i == m.ollamaModelIndex {
 					marker = "●"
 				}
-				b.WriteString(fmt.Sprintf("  %s %s\n", marker, model))
+				if i == m.ollamaModelIndex {
+					b.WriteString(lipgloss.NewStyle().Foreground(Primary).Bold(true).
+						Render(fmt.Sprintf("  %s %s", marker, modelName)))
+				} else {
+					b.WriteString(fmt.Sprintf("  %s %s", marker, modelName))
+				}
+				b.WriteString("\n")
 			}
 		} else {
 			b.WriteString("  No Ollama models detected\n")
-			b.WriteString("  Run 'ollama pull llama2' to download a model\n")
 		}
-
-		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("↑/↓ to select, Enter to continue"))
-
-	case 1: // OpenAI
-		b.WriteString("OpenAI Configuration:\n\n")
-		b.WriteString("API Key:\n")
-		b.WriteString(m.inputs[3].View())
-		b.WriteString("\n\n")
-		b.WriteString("Model (default: gpt-4):\n")
-		if m.selectedModel == "" {
-			m.selectedModel = "gpt-4"
-		}
-		b.WriteString(fmt.Sprintf("  %s\n", m.selectedModel))
-		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("Tab to switch fields, Enter to continue"))
-
-	case 2: // Anthropic
-		b.WriteString("Anthropic Configuration:\n\n")
-		b.WriteString("API Key:\n")
-		b.WriteString(m.inputs[3].View())
-		b.WriteString("\n\n")
-		b.WriteString("Model (default: claude-3-sonnet):\n")
-		if m.selectedModel == "" {
-			m.selectedModel = "claude-3-sonnet-20240229"
-		}
-		b.WriteString(fmt.Sprintf("  %s\n", m.selectedModel))
-		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("Tab to switch fields, Enter to continue"))
-
-	case 3: // Azure
-		b.WriteString("Azure OpenAI Configuration:\n\n")
-		b.WriteString("API Key:\n")
-		b.WriteString(m.inputs[3].View())
-		b.WriteString("\n\n")
-		b.WriteString("Endpoint URL:\n")
-		b.WriteString(m.inputs[1].View())
-		b.WriteString("\n\n")
-		b.WriteString("Model (default: gpt-4):\n")
-		if m.selectedModel == "" {
-			m.selectedModel = "gpt-4"
-		}
-		b.WriteString(fmt.Sprintf("  %s\n", m.selectedModel))
-		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("Tab to switch fields, Enter to continue"))
-
-	case 4: // Custom
-		b.WriteString("Custom Provider Configuration:\n\n")
-		b.WriteString("API Endpoint:\n")
-		b.WriteString(m.inputs[1].View())
-		b.WriteString("\n\n")
-		b.WriteString("API Key (optional):\n")
-		b.WriteString(m.inputs[3].View())
-		b.WriteString("\n\n")
-		b.WriteString("Model name:\n")
-		if m.selectedModel == "" {
-			m.selectedModel = "default"
-		}
-		b.WriteString(fmt.Sprintf("  %s\n", m.selectedModel))
-		b.WriteString("\n")
-		b.WriteString(mutedStyle.Render("Tab to switch fields, Enter to continue"))
 	}
 
 	return b.String()
 }
 
-// Channel setup view
-func (m model) channelsView() string {
+// Channels screen
+func (m model) renderChannels() string {
 	var b strings.Builder
 
 	b.WriteString(headerStyle.Render("Channel Setup (Optional)"))
@@ -217,107 +309,65 @@ func (m model) channelsView() string {
 
 	// Signal
 	signalStatus := "[ ] Disabled"
-	if signalEnabled {
+	if m.signalEnabled {
 		signalStatus = "[✓] Enabled"
 	}
 	b.WriteString(fmt.Sprintf("Signal Integration  %s\n", signalStatus))
-	if signalEnabled {
-		b.WriteString(mutedStyle.Render("  signal-cli path: " + m.inputs[1].View()))
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Requires signal-cli"))
+	b.WriteString("\n\n")
 
 	// WhatsApp
 	whatsappStatus := "[ ] Disabled"
-	if whatsappEnabled {
+	if m.whatsappEnabled {
 		whatsappStatus = "[✓] Enabled"
 	}
 	b.WriteString(fmt.Sprintf("WhatsApp Integration  %s\n", whatsappStatus))
-
-	b.WriteString("\n")
-	b.WriteString(mutedStyle.Render("←/→ to toggle, Enter to continue, 'b' to go back"))
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Requires QR code scan"))
 	b.WriteString("\n\n")
-	b.WriteString(mutedStyle.Render("Note: Channel setup can be configured later in config.json"))
+
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Note: Can be configured later"))
 
 	return b.String()
 }
 
-// Service setup view
-func (m model) serviceView() string {
+// Service screen
+func (m model) renderService() string {
 	var b strings.Builder
 
 	b.WriteString(headerStyle.Render("Service Setup"))
 	b.WriteString("\n\n")
 
-	// Service options
+	// Enable service
 	enableStatus := "[ ] No"
 	if m.enableService {
 		enableStatus = "[✓] Yes"
 	}
 	b.WriteString(fmt.Sprintf("Enable systemd service    %s\n", enableStatus))
 
+	// Start now
 	startStatus := "[ ] No"
 	if m.startNow {
 		startStatus = "[✓] Yes"
 	}
 	b.WriteString(fmt.Sprintf("Start service now         %s\n", startStatus))
 
-	b.WriteString("\n")
-
 	// Port
-	b.WriteString("Gateway Port:\n")
-	if m.focusedInput == 0 {
-		b.WriteString(inputFocusedStyle.Render(m.inputs[0].View()))
-	} else {
-		b.WriteString(inputStyle.Render(m.inputs[0].View()))
-	}
-	b.WriteString("\n\n")
-
-	// Workspace path
-	b.WriteString("Workspace Path:\n")
-	if m.focusedInput == 1 {
-		b.WriteString(inputFocusedStyle.Render(m.inputs[1].View()))
-	} else {
-		b.WriteString(inputStyle.Render(m.inputs[1].View()))
-	}
-	b.WriteString("\n\n")
-
-	// Config path
-	b.WriteString("Config File Path:\n")
-	if m.focusedInput == 2 {
-		b.WriteString(inputFocusedStyle.Render(m.inputs[2].View()))
-	} else {
-		b.WriteString(inputStyle.Render(m.inputs[2].View()))
-	}
-	b.WriteString("\n\n")
-
-	// Show errors if any
-	if len(m.errors) > 0 {
-		for _, err := range m.errors {
-			b.WriteString(errorStyle.Render("✗ " + err))
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-
-	b.WriteString(mutedStyle.Render("←/→ to toggle options, Tab to switch fields, Enter to install, 'b' to go back"))
+	b.WriteString(fmt.Sprintf("\nGateway Port: %d\n", m.port))
 
 	return b.String()
 }
 
-// Installing view
-func (m model) installingView() string {
+// Installing screen
+func (m model) renderInstalling() string {
 	var b strings.Builder
 
 	if m.updateMode {
-		b.WriteString(headerStyle.Render("Upgrading nanobot-go"))
+		b.WriteString(headerStyle.Render("Upgrading SMOLBOT"))
 	} else {
-		b.WriteString(headerStyle.Render("Installing nanobot-go"))
+		b.WriteString(headerStyle.Render("Installing SMOLBOT"))
 	}
 	b.WriteString("\n\n")
 
-	// Task list
 	for i, task := range m.tasks {
 		status := "[PENDING]"
 		switch task.status {
@@ -327,9 +377,6 @@ func (m model) installingView() string {
 			status = checkMark.String() + " " + task.description
 		case statusFailed:
 			status = failMark.String() + " " + task.description
-			if task.optional {
-				status += " (optional)"
-			}
 		case statusSkipped:
 			status = skipMark.String() + " " + task.description
 		}
@@ -342,74 +389,37 @@ func (m model) installingView() string {
 		b.WriteString("\n")
 	}
 
-	// Show error if any
-	if m.currentTaskIndex < len(m.tasks) && m.tasks[m.currentTaskIndex].errorDetails != nil {
-		b.WriteString("\n")
-		errInfo := m.tasks[m.currentTaskIndex].errorDetails
-		b.WriteString(errorStyle.Render("Error: " + errInfo.message))
-		b.WriteString("\n")
-		if m.tasks[m.currentTaskIndex].optional {
-			b.WriteString(mutedStyle.Render("Press 's' to skip this optional task"))
-			b.WriteString("  ")
-		}
-		b.WriteString(mutedStyle.Render("Press 'r' to retry"))
-	}
-
 	return b.String()
 }
 
-// Complete view
-func (m model) completeView() string {
+// Complete screen
+func (m model) renderComplete() string {
 	var b strings.Builder
 
-	b.WriteString(successStyle.Render("✓ Installation Complete!"))
+	b.WriteString(headerStyle.Render("✓ Installation Complete!"))
 	b.WriteString("\n\n")
 
 	if m.updateMode {
-		b.WriteString(fmt.Sprintf("Successfully upgraded nanobot-go\n"))
-		if m.existingVersion != "" {
-			b.WriteString(fmt.Sprintf("From: %s\n", m.existingVersion))
-		}
-		b.WriteString("To:   v1.0.0\n\n")
+		b.WriteString(fmt.Sprintf("Successfully upgraded SMOLBOT\n"))
 	} else {
-		b.WriteString("nanobot-go is installed and ready to use!\n\n")
+		b.WriteString("SMOLBOT is installed and ready to use!\n")
 	}
 
-	b.WriteString(titleStyle.Render("Installation Summary:"))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("  Binaries: ~/.local/bin/nanobot, ~/.local/bin/nanobot-tui\n"))
 	b.WriteString(fmt.Sprintf("  Config: %s\n", m.configPath))
 	b.WriteString(fmt.Sprintf("  Workspace: %s\n", m.workspacePath))
 	if m.enableService {
 		b.WriteString("  Service: systemd user service enabled\n")
 	}
-	b.WriteString("\n")
-
-	b.WriteString(titleStyle.Render("Quick Start:"))
-	b.WriteString("\n")
-	b.WriteString("  nanobot-tui              # Launch TUI\n")
-	b.WriteString("  nanobot chat \"hello\"     # Quick CLI chat\n")
-	b.WriteString("\n")
-
-	if m.enableService {
-		b.WriteString(titleStyle.Render("Systemd Commands:"))
-		b.WriteString("\n")
-		b.WriteString("  systemctl --user status nanobot-go\n")
-		b.WriteString("  systemctl --user stop nanobot-go\n")
-		b.WriteString("  systemctl --user restart nanobot-go\n")
-		b.WriteString("\n")
-	}
-
-	b.WriteString(mutedStyle.Render("Press Enter or 'q' to exit"))
 
 	return b.String()
 }
 
-// Uninstall view
-func (m model) uninstallView() string {
+// Uninstall screen
+func (m model) renderUninstall() string {
 	var b strings.Builder
 
-	b.WriteString(errorStyle.Render("⚠ Uninstall nanobot-go"))
+	b.WriteString(headerStyle.Render("⚠ Uninstall SMOLBOT"))
 	b.WriteString("\n\n")
 
 	b.WriteString("The following will be removed:\n\n")
@@ -421,16 +431,7 @@ func (m model) uninstallView() string {
 	b.WriteString("  Workspace:\n")
 	b.WriteString("    ~/.nanobot/workspace/\n\n")
 
-	b.WriteString(errorStyle.Render("Warning: This action cannot be undone!"))
-	b.WriteString("\n\n")
-
-	b.WriteString("Options:\n")
-	b.WriteString("  [●] Remove binaries only\n")
-	b.WriteString("  [ ] Remove binaries + config\n")
-	b.WriteString("  [ ] Remove everything (including workspace)\n")
-	b.WriteString("\n")
-
-	b.WriteString(mutedStyle.Render("Press Enter to confirm uninstall, 'b' to go back"))
+	b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("Warning: This action cannot be undone!"))
 
 	return b.String()
 }
