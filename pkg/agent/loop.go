@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Nomadcxx/smolbot/pkg/agent/compression"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
 	"github.com/Nomadcxx/smolbot/pkg/session"
@@ -116,6 +117,53 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	}
 
 	userMessage := a.buildUserMessage(req)
+	
+	// Context compression: check if threshold exceeded
+	if a.config.Agents.Defaults.Compression.Enabled && a.tokenizer != nil {
+		compConfig := a.config.Agents.Defaults.Compression
+		compressor := compression.NewCompressor(compression.Config{
+			Enabled:            compConfig.Enabled,
+			Mode:               compression.Mode(compConfig.Mode),
+			ThresholdPercent:   compConfig.ThresholdPercent,
+			KeepRecentMessages: compression.DefaultKeepRecentMessages,
+		})
+		tokenTracker := compression.NewTokenTracker(a.tokenizer)
+		
+		threshold := compConfig.ThresholdPercent
+		if threshold == 0 {
+			threshold = compression.DefaultThresholdPercent
+		}
+		
+		if tokenTracker.ShouldCompress(
+			historyToAny(history),
+			a.config.Agents.Defaults.ContextWindowTokens,
+			threshold,
+		) {
+			result := compressor.Compress(historyToAny(history))
+			
+			// Calculate token stats
+			orig, comp, reduction := tokenTracker.CalculateStats(
+				historyToAny(history),
+				result.CompressedMessages,
+			)
+			result.OriginalTokenCount = orig
+			result.CompressedTokenCount = comp
+			result.ReductionPercentage = reduction
+			
+			// Record stats for session
+			compression.RecordCompression(req.SessionKey, &result)
+			
+			// Convert back
+			history = anyToMessages(result.CompressedMessages)
+			
+			emit(cb, Event{
+				Type:    "context.compressed",
+				Content: fmt.Sprintf("Context compressed: %d→%d tokens (%.0f%% reduction)", 
+					orig, comp, reduction),
+			})
+		}
+	}
+	
 	conversation := make([]provider.Message, 0, len(history)+2)
 	conversation = append(conversation, provider.Message{Role: "system", Content: systemPrompt})
 	conversation = append(conversation, history...)
@@ -491,3 +539,76 @@ func firstNonEmptyString(values ...string) string {
 }
 
 var timeNow = time.Now
+
+// Helper functions for compression integration
+
+func historyToAny(history []provider.Message) []any {
+	result := make([]any, len(history))
+	for i, m := range history {
+		result[i] = messageToAny(m)
+	}
+	return result
+}
+
+func messageToAny(m provider.Message) any {
+	result := map[string]any{
+		"role":    m.Role,
+		"content": m.Content,
+		"name":    m.Name,
+	}
+	if len(m.ToolCalls) > 0 {
+		toolCalls := make([]map[string]any, len(m.ToolCalls))
+		for i, tc := range m.ToolCalls {
+			toolCalls[i] = map[string]any{
+				"id": tc.ID,
+				"function": map[string]any{
+					"name":      tc.Function.Name,
+					"arguments": tc.Function.Arguments,
+				},
+			}
+		}
+		result["tool_calls"] = toolCalls
+	}
+	return result
+}
+
+func anyToMessages(a []any) []provider.Message {
+	result := make([]provider.Message, 0, len(a))
+	for _, item := range a {
+		m := item.(map[string]any)
+		msg := provider.Message{
+			Role:    getString(m, "role"),
+			Content: m["content"],
+			Name:    getString(m, "name"),
+		}
+		if toolCalls, ok := m["tool_calls"].([]any); ok {
+			for _, tc := range toolCalls {
+				tcm := tc.(map[string]any)
+				fn := getMap(tcm, "function")
+				msg.ToolCalls = append(msg.ToolCalls, provider.ToolCall{
+					ID: getString(tcm, "id"),
+					Function: provider.FunctionCall{
+						Name:      getString(fn, "name"),
+						Arguments: getString(fn, "arguments"),
+					},
+				})
+			}
+		}
+		result = append(result, msg)
+	}
+	return result
+}
+
+func getString(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func getMap(m map[string]any, key string) map[string]any {
+	if v, ok := m[key].(map[string]any); ok {
+		return v
+	}
+	return nil
+}

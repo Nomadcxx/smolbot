@@ -21,15 +21,22 @@ type AgentsConfig struct {
 	Defaults AgentDefaults `json:"defaults"`
 }
 
+type CompressionConfig struct {
+	Enabled          bool   `json:"enabled"`
+	Mode             string `json:"mode"`
+	ThresholdPercent int    `json:"thresholdPercent"`
+}
+
 type AgentDefaults struct {
-	Model               string  `json:"model"`
-	Provider            string  `json:"provider"`
-	Workspace           string  `json:"workspace"`
-	MaxTokens           int     `json:"maxTokens"`
-	ContextWindowTokens int     `json:"contextWindowTokens"`
-	Temperature         float64 `json:"temperature"`
-	MaxToolIterations   int     `json:"maxToolIterations"`
-	ReasoningEffort     string  `json:"reasoningEffort,omitempty"`
+	Model               string            `json:"model"`
+	Provider            string            `json:"provider"`
+	Workspace           string            `json:"workspace"`
+	MaxTokens           int               `json:"maxTokens"`
+	ContextWindowTokens int               `json:"contextWindowTokens"`
+	Temperature         float64           `json:"temperature"`
+	MaxToolIterations   int               `json:"maxToolIterations"`
+	ReasoningEffort     string            `json:"reasoningEffort,omitempty"`
+	Compression         CompressionConfig `json:"compression"`
 }
 
 type ProviderConfig struct {
@@ -113,6 +120,11 @@ func DefaultConfig() Config {
 				ContextWindowTokens: 200000,
 				Temperature:         0.7,
 				MaxToolIterations:   40,
+				Compression: CompressionConfig{
+					Enabled:          true,
+					Mode:             "default",
+					ThresholdPercent: 60,
+				},
 			},
 		},
 		Providers: make(map[string]ProviderConfig),
