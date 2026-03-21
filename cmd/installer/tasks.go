@@ -2,17 +2,23 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 // Task: Clone repository
 func cloneRepository(m *model) error {
-	setLastCommand("git", "clone", "--depth", "1", "https://github.com/Nomadcxx/smolbot.git", m.projectDir)
+	// Create a subdirectory for the clone
+	cloneDir := filepath.Join(m.projectDir, "smolbot")
+	
+	setLastCommand("git", "clone", "--depth", "1", "https://github.com/Nomadcxx/smolbot.git", cloneDir)
 
 	result := runCommand(m, "git", "clone", "--depth", "1",
-		"https://github.com/Nomadcxx/smolbot.git", m.projectDir)
+		"https://github.com/Nomadcxx/smolbot.git", cloneDir)
 
 	if result.Err != nil {
 		return CommandError{
@@ -23,6 +29,9 @@ func cloneRepository(m *model) error {
 			Err:      result.Err,
 		}
 	}
+
+	// Update projectDir to the cloned directory
+	m.projectDir = cloneDir
 	return nil
 }
 
@@ -91,33 +100,185 @@ func installBinaries(m *model) error {
 	return nil
 }
 
+// Task: Remove binaries (for uninstall)
+func removeBinaries(m *model) error {
+	binDir := filepath.Join(os.Getenv("HOME"), ".local", "bin")
+
+	for _, binary := range []string{"nanobot", "nanobot-tui"} {
+		dst := filepath.Join(binDir, binary)
+		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", binary, err)
+		}
+	}
+
+	return nil
+}
+
 // Task: Create workspace directory
 func createWorkspace(m *model) error {
 	if err := os.MkdirAll(m.workspacePath, 0755); err != nil {
 		return fmt.Errorf("create workspace: %w", err)
 	}
+
+	// Create memory subdirectory
+	memoryPath := filepath.Join(m.workspacePath, "memory")
+	if err := os.MkdirAll(memoryPath, 0755); err != nil {
+		return fmt.Errorf("create memory directory: %w", err)
+	}
+
+	// Create SOUL.md and HEARTBEAT.md
+	soulPath := filepath.Join(m.workspacePath, "SOUL.md")
+	if _, err := os.Stat(soulPath); os.IsNotExist(err) {
+		soulContent := "# Agent Personality\n\nYou are a helpful AI coding assistant. You help users write code, debug issues, and understand complex systems.\n"
+		if err := os.WriteFile(soulPath, []byte(soulContent), 0644); err != nil {
+			return fmt.Errorf("create SOUL.md: %w", err)
+		}
+	}
+
+	heartbeatPath := filepath.Join(m.workspacePath, "HEARTBEAT.md")
+	if _, err := os.Stat(heartbeatPath); os.IsNotExist(err) {
+		heartbeatContent := "# Heartbeat Instructions\n\nPeriodic status checks and system maintenance.\n"
+		if err := os.WriteFile(heartbeatPath, []byte(heartbeatContent), 0644); err != nil {
+			return fmt.Errorf("create HEARTBEAT.md: %w", err)
+		}
+	}
+
 	return nil
 }
 
-// Task: Write config file
-func writeConfig(m *model) error {
-	configContent := fmt.Sprintf(`{
-  "agents": {
-    "defaults": {
-      "model": "%s",
-      "provider": "ollama",
-      "maxTokens": 4096
-    }
-  },
-  "providers": {
-    "ollama": {
-      "apiBase": "%s"
-    }
-  }
-}`, m.selectedModel, m.ollamaURL)
+// Task: Remove workspace (for uninstall)
+func removeWorkspace(m *model) error {
+	baseDir := filepath.Join(os.Getenv("HOME"), ".nanobot")
+	if err := os.RemoveAll(baseDir); err != nil {
+		return fmt.Errorf("remove workspace: %w", err)
+	}
+	return nil
+}
 
-	if err := os.WriteFile(m.configPath, []byte(configContent), 0644); err != nil {
+// Task: Write config file with full structure
+func writeConfig(m *model) error {
+	config := map[string]interface{}{
+		"agents": map[string]interface{}{
+			"defaults": map[string]interface{}{
+				"model":               m.selectedModel,
+				"provider":            m.provider,
+				"workspace":           m.workspacePath,
+				"maxTokens":           8192,
+				"contextWindowTokens": 128000,
+				"temperature":         0.7,
+				"maxToolIterations":   40,
+			},
+		},
+		"providers":    map[string]interface{}{},
+		"channels": map[string]interface{}{
+			"sendProgress": true,
+			"sendToolHints": true,
+			"signal": map[string]interface{}{
+				"enabled": false,
+				"account": "",
+				"cliPath": "signal-cli",
+				"dataDir": filepath.Join(os.Getenv("HOME"), ".nanobot", "signal"),
+			},
+			"whatsapp": map[string]interface{}{
+				"enabled":    false,
+				"deviceName": "nanobot-go",
+				"storePath":  filepath.Join(os.Getenv("HOME"), ".nanobot", "whatsapp.db"),
+			},
+		},
+		"gateway": map[string]interface{}{
+			"host": "127.0.0.1",
+			"port": m.port,
+			"heartbeat": map[string]interface{}{
+				"enabled":  true,
+				"interval": 60,
+				"channel":  "",
+			},
+		},
+		"tools": map[string]interface{}{
+			"web": map[string]interface{}{
+				"searchBackend": "duckduckgo",
+				"maxResults":    5,
+			},
+			"exec": map[string]interface{}{
+				"defaultTimeout":       60,
+				"maxTimeout":           600,
+				"denyPatterns":         []string{"rm -rf /", "dd if="},
+				"restrictToWorkspace":  true,
+			},
+			"mcpServers": map[string]interface{}{},
+		},
+	}
+
+	// Add provider-specific configuration
+	providers := config["providers"].(map[string]interface{})
+	switch m.provider {
+	case providerOllama:
+		providers["ollama"] = map[string]interface{}{
+			"apiBase": m.ollamaURL,
+		}
+	case providerOpenAI:
+		providers["openai"] = map[string]interface{}{
+			"apiKey": m.apiKey,
+		}
+		if m.apiEndpoint != "" {
+			providers["openai"].(map[string]interface{})["apiBase"] = m.apiEndpoint
+		}
+	case providerAnthropic:
+		providers["anthropic"] = map[string]interface{}{
+			"apiKey": m.apiKey,
+		}
+	case providerAzure:
+		providers["azure"] = map[string]interface{}{
+			"apiKey":   m.apiKey,
+			"endpoint": m.apiEndpoint,
+		}
+	case providerCustom:
+		providers["custom"] = map[string]interface{}{
+			"apiBase": m.apiEndpoint,
+			"apiKey":  m.apiKey,
+		}
+	}
+
+	// Update channel settings if enabled
+	channels := config["channels"].(map[string]interface{})
+	if signalEnabled {
+		signalConfig := channels["signal"].(map[string]interface{})
+		signalConfig["enabled"] = true
+		if m.signalCLIPath != "" {
+			signalConfig["cliPath"] = m.signalCLIPath
+		}
+	}
+	if whatsappEnabled {
+		whatsappConfig := channels["whatsapp"].(map[string]interface{})
+		whatsappConfig["enabled"] = true
+		if m.whatsappDBPath != "" {
+			whatsappConfig["storePath"] = m.whatsappDBPath
+		}
+	}
+
+	// Marshal to JSON
+	configData, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	// Ensure config directory exists
+	configDir := filepath.Dir(m.configPath)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+
+	if err := os.WriteFile(m.configPath, configData, 0644); err != nil {
 		return fmt.Errorf("write config: %w", err)
+	}
+
+	return nil
+}
+
+// Task: Remove config (for uninstall)
+func removeConfig(m *model) error {
+	if err := os.Remove(m.configPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove config: %w", err)
 	}
 	return nil
 }
@@ -135,13 +296,14 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s/.local/bin/nanobot run --config %s --port %d
+ExecStart=%s/.local/bin/nanobot run --config %s --workspace %s --port %d
 Restart=on-failure
 RestartSec=5
+Environment=HOME=%s
 
 [Install]
 WantedBy=default.target
-`, os.Getenv("HOME"), m.configPath, m.port)
+`, os.Getenv("HOME"), m.configPath, m.workspacePath, m.port, os.Getenv("HOME"))
 
 	servicePath := filepath.Join(serviceDir, "nanobot-go.service")
 	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
@@ -163,6 +325,27 @@ WantedBy=default.target
 	return nil
 }
 
+// Task: Disable systemd service (for uninstall)
+func disableSystemd(m *model) error {
+	// Disable service
+	result := runCommand(m, "systemctl", "--user", "disable", "nanobot-go")
+	if result.Err != nil {
+		// Service might not exist, that's ok
+		return nil
+	}
+
+	// Remove service file
+	servicePath := filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user", "nanobot-go.service")
+	if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove service file: %w", err)
+	}
+
+	// Reload systemd
+	runCommand(m, "systemctl", "--user", "daemon-reload")
+
+	return nil
+}
+
 // Task: Start service
 func startService(m *model) error {
 	result := runCommand(m, "systemctl", "--user", "start", "nanobot-go")
@@ -172,7 +355,7 @@ func startService(m *model) error {
 	return nil
 }
 
-// Task: Stop service (for upgrade)
+// Task: Stop service
 func stopService(m *model) error {
 	result := runCommand(m, "systemctl", "--user", "stop", "nanobot-go")
 	if result.Err != nil {
@@ -182,7 +365,7 @@ func stopService(m *model) error {
 	return nil
 }
 
-// Task: Backup config (for upgrade)
+// Task: Backup config with timestamp
 func backupConfig(m *model) error {
 	if _, err := os.Stat(m.configPath); os.IsNotExist(err) {
 		return nil
@@ -190,14 +373,32 @@ func backupConfig(m *model) error {
 
 	data, err := os.ReadFile(m.configPath)
 	if err != nil {
-		return nil
+		return fmt.Errorf("read config for backup: %w", err)
 	}
 
-	backupPath := m.configPath + ".backup"
+	timestamp := time.Now().Format("20060102_150405")
+	backupPath := m.configPath + ".backup." + timestamp
 	if err := os.WriteFile(backupPath, data, 0644); err != nil {
 		return fmt.Errorf("backup config: %w", err)
 	}
+
 	return nil
+}
+
+// Compare versions (simple string comparison)
+func compareVersions(v1, v2 string) int {
+	// Remove 'v' prefix if present
+	v1 = strings.TrimPrefix(v1, "v")
+	v2 = strings.TrimPrefix(v2, "v")
+
+	// Simple comparison (assumes semantic versioning)
+	if v1 == v2 {
+		return 0
+	}
+	if v1 < v2 {
+		return -1
+	}
+	return 1
 }
 
 // Initialize tasks based on install mode
@@ -229,12 +430,12 @@ func (m *model) initTasks() {
 			{name: "Build nanobot", description: "Building daemon binary", execute: buildNanobot},
 			{name: "Build nanobot-tui", description: "Building TUI binary", execute: buildNanobotTUI},
 			{name: "Install binaries", description: "Installing to ~/.local/bin", execute: installBinaries},
-			{name: "Create workspace", description: "Creating ~/.nanobot-go", execute: createWorkspace},
+			{name: "Create workspace", description: "Creating ~/.nanobot/workspace", execute: createWorkspace},
 			{name: "Write config", description: "Writing config.json", execute: writeConfig},
 			{name: "Setup systemd", description: "Installing user service", execute: setupSystemd},
 		}
 
-		if m.enableService {
+		if m.enableService && m.startNow {
 			m.tasks = append(m.tasks, installTask{
 				name:        "Start service",
 				description: "Starting nanobot-go",
@@ -242,5 +443,16 @@ func (m *model) initTasks() {
 				optional:    true,
 			})
 		}
+	}
+}
+
+// Initialize uninstall tasks
+func (m *model) initUninstallTasks() {
+	m.tasks = []installTask{
+		{name: "Stop service", description: "Stopping nanobot-go", execute: stopService, optional: true},
+		{name: "Disable systemd", description: "Removing systemd service", execute: disableSystemd, optional: true},
+		{name: "Remove binaries", description: "Removing from ~/.local/bin", execute: removeBinaries},
+		{name: "Remove config", description: "Removing config.json", execute: removeConfig, optional: true},
+		{name: "Remove workspace", description: "Removing ~/.nanobot", execute: removeWorkspace, optional: true},
 	}
 }

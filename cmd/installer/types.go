@@ -17,10 +17,31 @@ type installStep int
 const (
 	stepWelcome installStep = iota
 	stepPrerequisites
+	stepProvider
 	stepConfiguration
+	stepChannels
+	stepService
 	stepInstalling
 	stepComplete
+	stepUninstall
 )
+
+// Provider types
+const (
+	providerOllama     = "ollama"
+	providerOpenAI     = "openai"
+	providerAnthropic  = "anthropic"
+	providerAzure      = "azure"
+	providerCustom     = "custom"
+)
+
+var providers = []string{
+	providerOllama,
+	providerOpenAI,
+	providerAnthropic,
+	providerAzure,
+	providerCustom,
+}
 
 // Task execution status
 type taskStatus int
@@ -41,6 +62,15 @@ type taskCompleteMsg struct {
 }
 
 type tickMsg time.Time
+
+type ollamaModelsMsg struct {
+	models []string
+}
+
+type ollamaDetectMsg struct {
+	detected bool
+	models   []string
+}
 
 // Install task with error handling
 type installTask struct {
@@ -84,16 +114,31 @@ type model struct {
 	inputs         []textinput.Model
 	focusedInput   int
 	selectedOption int
+	providerIndex  int
+	serviceOption  int
+	channelIndex   int
+
+	// Provider configuration
+	provider    string
+	apiKey      string
+	apiEndpoint string
 
 	// Configuration
 	selectedModel    string
 	ollamaURL        string
 	ollamaDetected   bool
+	ollamaDetecting  bool
 	ollamaModels     []string
 	ollamaModelIndex int
 	workspacePath    string
 	configPath       string
 	port             int
+
+	// Channel configuration
+	signalEnabled   bool
+	whatsappEnabled bool
+	signalCLIPath   string
+	whatsappDBPath  string
 
 	// Service options
 	enableService bool

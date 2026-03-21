@@ -2,13 +2,18 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // runCommand executes a command with logging
@@ -30,11 +35,16 @@ func runCommand(m *model, name string, args ...string) commandResult {
 	}
 
 	cmd := exec.CommandContext(m.ctx, name, args...)
-	cmd.Dir = m.projectDir
+	if m.projectDir != "" {
+		cmd.Dir = m.projectDir
+	}
 
 	// Log command
 	if m.logFile != nil {
 		fmt.Fprintf(m.logFile, "[CMD] %s %s\n", name, strings.Join(args, " "))
+		if cmd.Dir != "" {
+			fmt.Fprintf(m.logFile, "[CWD] %s\n", cmd.Dir)
+		}
 	}
 
 	output, err := cmd.CombinedOutput()
@@ -107,10 +117,56 @@ func detectExistingInstall() (exists bool, version string, daemonRunning bool, c
 	}
 
 	// Check config
-	configPath := filepath.Join(os.Getenv("HOME"), ".nanobot-go", "config.json")
+	configPath := filepath.Join(os.Getenv("HOME"), ".nanobot", "config.json")
 	if _, err := os.Stat(configPath); err == nil {
 		configExists = true
 	}
 
 	return exists, version, daemonRunning, configExists, nil
 }
+
+// detectOllamaCmd returns a command to detect Ollama
+func detectOllamaCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Get(url + "/api/tags")
+		if err != nil {
+			return ollamaDetectMsg{detected: false}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return ollamaDetectMsg{detected: false}
+		}
+
+		// Parse models from response
+		var result struct {
+			Models []struct {
+				Name string `json:"name"`
+			} `json:"models"`
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		if err := json.Unmarshal(body, &result); err != nil {
+			return ollamaDetectMsg{detected: true}
+		}
+
+		models := make([]string, 0, len(result.Models))
+		for _, m := range result.Models {
+			models = append(models, m.Name)
+		}
+
+		return ollamaDetectMsg{detected: true, models: models}
+	}
+}
+
+// fetchOllamaModelsCmd returns a command to fetch Ollama models
+func fetchOllamaModelsCmd(url string) tea.Cmd {
+	return detectOllamaCmd(url) // Same implementation
+}
+
+// Global channel state (persisted across views)
+var (
+	signalEnabled   = false
+	whatsappEnabled = false
+)
