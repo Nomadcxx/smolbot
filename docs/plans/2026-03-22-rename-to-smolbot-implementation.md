@@ -256,7 +256,7 @@ git commit -m "chore: update ASCII art"
 
 ---
 
-## Task 8: Update Agent Identity
+## Task 8: Update Agent Identity and Templates
 
 **Files:**
 - Modify: `pkg/agent/context.go:17`
@@ -332,11 +332,13 @@ git commit -m "chore: update server and device names"
 
 ---
 
-## Task 11: Update Channel Error Messages
+## Task 11: Update Channel Error Messages and Device Names
 
 **Files:**
 - Modify: `pkg/channel/whatsapp/adapter.go:225,318`
 - Modify: `pkg/channel/signal/adapter.go:156`
+- Modify: `pkg/channel/whatsapp/adapter_test.go`
+- Modify: `pkg/channel/signal/adapter_test.go`
 
 **Step 1: Update command references**
 
@@ -345,7 +347,14 @@ sed -i 's/nanobot channels login/smolbot channels login/' pkg/channel/whatsapp/a
 sed -i 's/-n nanobot-go/-n smolbot/' pkg/channel/signal/adapter.go
 ```
 
-**Step 2: Commit**
+**Step 2: Update test files**
+
+```bash
+sed -i 's/nanobot-go/smolbot/g' pkg/channel/whatsapp/adapter_test.go
+sed -i 's/nanobot-go/smolbot/g' pkg/channel/signal/adapter_test.go
+```
+
+**Step 3: Commit**
 
 ```bash
 git add -A
@@ -480,7 +489,34 @@ git commit -m "docs: update documentation"
 
 ---
 
-## Task 16: Verify Build
+## Task 16: Update Workspace Templates
+
+**Files:**
+- Modify: `cmd/installer/tasks.go:135-147`
+
+**Step 1: Update SOUL.md generation in installer**
+
+```bash
+sed -i 's/You are a helpful AI coding assistant/You are smolbot, a practical coding assistant/' cmd/installer/tasks.go
+```
+
+**Step 2: Update HEARTBEAT.md generation (if it mentions nanobot)**
+
+```bash
+# Check if HEARTBEAT content needs update
+grep -n "HEARTBEAT" cmd/installer/tasks.go
+```
+
+**Step 3: Commit**
+
+```bash
+git add -A
+git commit -m "chore: update workspace templates"
+```
+
+---
+
+## Task 17: Verify Build
 
 **Step 1: Clean and build**
 
@@ -513,6 +549,43 @@ go test ./... 2>&1 | head -50
 
 ```bash
 git status
+```
+
+## Task 17: Update Workspace Template Generation
+
+**Files:**
+- Modify: `cmd/installer/tasks.go:135-147`
+
+**Step 1: Update installer workspace templates**
+
+Update the createWorkspace function to generate smolbot-branded files:
+
+```bash
+# Update SOUL.md content
+cat > /tmp/soul_patch.txt << 'EOF'
+# Agent Personality
+
+You are smolbot, a practical coding assistant with a clear working style.
+
+## Tone
+- Be direct and calm.
+- Prefer clarity over flourish.
+- Stay technically precise and grounded in what is actually implemented.
+EOF
+```
+
+**Step 2: Update the installer code**
+
+```go
+// In createWorkspace function, update:
+soulContent := "# Agent Personality\n\nYou are smolbot, a practical coding assistant. You help users write code, debug issues, and understand complex systems.\n"
+```
+
+**Step 3: Commit**
+
+```bash
+git add -A
+git commit -m "chore: update workspace templates"
 ```
 
 ---
