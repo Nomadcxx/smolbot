@@ -37,9 +37,9 @@ func cloneRepository(m *model) error {
 
 // Task: Build nanobot binary
 func buildNanobot(m *model) error {
-	setLastCommand("go", "build", "-o", "smolbot", "./cmd/nanobot")
+	setLastCommand("go", "build", "-o", "smolbot", "./cmd/smolbot")
 
-	result := runCommand(m, "go", "build", "-o", "smolbot", "./cmd/nanobot")
+	result := runCommand(m, "go", "build", "-o", "smolbot", "./cmd/smolbot")
 
 	if result.Err != nil {
 		return CommandError{
@@ -55,9 +55,9 @@ func buildNanobot(m *model) error {
 
 // Task: Build nanobot-tui binary
 func buildNanobotTUI(m *model) error {
-	setLastCommand("go", "build", "-o", "smolbot-tui", "./cmd/nanobot-tui")
+	setLastCommand("go", "build", "-o", "smolbot-tui", "./cmd/smolbot-tui")
 
-	result := runCommand(m, "go", "build", "-o", "smolbot-tui", "./cmd/nanobot-tui")
+	result := runCommand(m, "go", "build", "-o", "smolbot-tui", "./cmd/smolbot-tui")
 
 	if result.Err != nil {
 		return CommandError{
