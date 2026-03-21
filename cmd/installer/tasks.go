@@ -185,12 +185,12 @@ func writeConfig(m *model) error {
 				"enabled": false,
 				"account": "",
 				"cliPath": "signal-cli",
-				"dataDir": filepath.Join(os.Getenv("HOME"), ".nanobot", "signal"),
+				"dataDir": filepath.Join(os.Getenv("HOME"), ".smolbot", "signal"),
 			},
 			"whatsapp": map[string]interface{}{
 				"enabled":    false,
 				"deviceName": "smolbot",
-				"storePath":  filepath.Join(os.Getenv("HOME"), ".nanobot", "whatsapp.db"),
+				"storePath":  filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db"),
 			},
 		},
 		"gateway": map[string]interface{}{
@@ -291,7 +291,7 @@ func removeConfig(m *model) error {
 	}
 	
 	// Also remove legacy config if it exists
-	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".smolbot", "config.json")
+	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".nanobot", "config.json")
 	if err := os.Remove(legacyConfigPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove legacy config: %w", err)
 	}
@@ -312,7 +312,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s/.local/bin/nanobot run --config %s --workspace %s --port %d
+ExecStart=%s/.local/bin/smolbot run --config %s --workspace %s --port %d
 Restart=on-failure
 RestartSec=5
 Environment=HOME=%s

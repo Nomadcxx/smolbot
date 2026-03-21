@@ -117,13 +117,13 @@ func detectExistingInstall() (exists bool, version string, daemonRunning bool, c
 	}
 
 	// Check config (current location)
-	configPath := filepath.Join(os.Getenv("HOME"), ".nanobot", "config.json")
+	configPath := filepath.Join(os.Getenv("HOME"), ".smolbot", "config.json")
 	if _, err := os.Stat(configPath); err == nil {
 		configExists = true
 	}
 	
 	// Also check legacy location
-	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".smolbot-go", "config.json")
+	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".nanobot", "config.json")
 	if _, err := os.Stat(legacyConfigPath); err == nil {
 		configExists = true
 	}
