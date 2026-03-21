@@ -231,7 +231,14 @@ func (t *ListDirTool) Execute(_ context.Context, raw json.RawMessage, tctx ToolC
 func filesystemParameters(fields ...string) map[string]any {
 	properties := map[string]any{}
 	for _, field := range fields {
-		properties[field] = map[string]any{"type": "string"}
+		switch field {
+		case "recursive", "replace_all":
+			properties[field] = map[string]any{"type": "boolean"}
+		case "offset", "limit", "max_depth":
+			properties[field] = map[string]any{"type": "integer"}
+		default:
+			properties[field] = map[string]any{"type": "string"}
+		}
 	}
 	return map[string]any{
 		"type":       "object",
