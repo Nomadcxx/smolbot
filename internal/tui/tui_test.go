@@ -7,9 +7,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/tui/client"
-	"github.com/Nomadcxx/nanobot-go/internal/tui/theme"
-	_ "github.com/Nomadcxx/nanobot-go/internal/tui/theme/themes"
+	"github.com/Nomadcxx/nanobot-go/internal/app"
+	"github.com/Nomadcxx/nanobot-go/internal/client"
+	"github.com/Nomadcxx/nanobot-go/internal/theme"
+	_ "github.com/Nomadcxx/nanobot-go/internal/theme/themes"
 )
 
 type fakeClient struct {
@@ -59,16 +60,12 @@ func (f *fakeClient) ModelsSet(id string) error {
 	f.current = id
 	return nil
 }
-func (f *fakeClient) Status() (client.StatusPayload, error) {
-	var payload client.StatusPayload
-	if err := json.Unmarshal([]byte(f.status), &payload); err != nil {
-		return client.StatusPayload{}, err
-	}
-	return payload, nil
+func (f *fakeClient) Status() (json.RawMessage, error) {
+	return json.RawMessage(f.status), nil
 }
 
 func TestHandleSlashCommandSessionNewClearsMessages(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.messages.AppendUser("old message")
 
 	updated, _ := model.handleSlashCommand("/session new")
@@ -83,7 +80,7 @@ func TestHandleSlashCommandSessionNewClearsMessages(t *testing.T) {
 }
 
 func TestHandleSlashCommandThemeSwitchesTheme(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 
 	updated, _ := model.handleSlashCommand("/theme dracula")
 	got := updated.(Model)
@@ -97,7 +94,7 @@ func TestHandleSlashCommandThemeSwitchesTheme(t *testing.T) {
 }
 
 func TestModelSelectionWaitsForGatewaySuccess(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.app.Model = "model-a"
 	model.client = &fakeClient{modelErr: errors.New("nope")}
 
@@ -116,7 +113,7 @@ func TestModelSelectionWaitsForGatewaySuccess(t *testing.T) {
 }
 
 func TestHandleSlashCommandSessionOpensDialog(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.client = &fakeClient{
 		sessions: []client.SessionInfo{
 			{Key: "tui:main"},
@@ -138,7 +135,7 @@ func TestHandleSlashCommandSessionOpensDialog(t *testing.T) {
 }
 
 func TestHandleSlashCommandModelOpensDialog(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.client = &fakeClient{
 		models: []client.ModelInfo{
 			{ID: "model-a", Name: "Model A"},
@@ -160,9 +157,9 @@ func TestHandleSlashCommandModelOpensDialog(t *testing.T) {
 	}
 }
 
-func TestHandleSlashCommandStatusReturnsStructuredMetadataMsg(t *testing.T) {
-	model := New(Config{})
-	model.client = &fakeClient{status: `{"model":"test","provider":"openai"}`}
+func TestHandleSlashCommandStatusReturnsChatDoneMsg(t *testing.T) {
+	model := New(app.Config{})
+	model.client = &fakeClient{status: `{"model":"test"}`}
 
 	_, cmd := model.handleSlashCommand("/status")
 	if cmd == nil {
@@ -170,17 +167,17 @@ func TestHandleSlashCommandStatusReturnsStructuredMetadataMsg(t *testing.T) {
 	}
 
 	msg := cmd()
-	loaded, ok := msg.(StatusLoadedMsg)
+	done, ok := msg.(ChatDoneMsg)
 	if !ok {
-		t.Fatalf("expected StatusLoadedMsg, got %T", msg)
+		t.Fatalf("expected ChatDoneMsg, got %T", msg)
 	}
-	if loaded.Status.Model != "test" || loaded.Status.Provider != "openai" {
-		t.Fatalf("unexpected status payload: %#v", loaded.Status)
+	if !strings.Contains(done.Content, `"model":"test"`) {
+		t.Fatalf("unexpected status payload: %q", done.Content)
 	}
 }
 
 func TestSessionResetWaitsForGatewaySuccess(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.client = &fakeClient{resetErr: errors.New("boom")}
 	model.messages.AppendUser("keep me")
 
@@ -198,25 +195,22 @@ func TestSessionResetWaitsForGatewaySuccess(t *testing.T) {
 	}
 }
 
-func TestStatusResultUpdatesMetadataWithoutTranscriptNoise(t *testing.T) {
-	model := New(Config{})
-	model.client = &fakeClient{status: `{"model":"test","provider":"openai","connectedClients":2}`}
+func TestStatusResultIsRenderedIntoChat(t *testing.T) {
+	model := New(app.Config{})
+	model.client = &fakeClient{status: `{"model":"test"}`}
 
 	_, cmd := model.handleSlashCommand("/status")
 	msg := cmd()
 	updated, _ := model.Update(msg)
 	got := updated.(Model)
 
-	if strings.Contains(got.messages.View(), `"model":"test"`) {
-		t.Fatalf("expected status payload to stay out of chat, got %q", got.messages.View())
-	}
-	if !strings.Contains(got.footer.View(), "test") || !strings.Contains(got.footer.View(), "openai") {
-		t.Fatalf("expected footer metadata to render, got %q", got.footer.View())
+	if !strings.Contains(got.messages.View(), `"model":"test"`) {
+		t.Fatalf("expected status payload in chat, got %q", got.messages.View())
 	}
 }
 
 func TestEventMsgUpdatesToolLifecycle(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.messages.SetSize(80, 20)
 
 	startPayload, _ := json.Marshal(client.ToolStartPayload{Name: "read_file"})
@@ -241,7 +235,7 @@ func TestEventMsgUpdatesToolLifecycle(t *testing.T) {
 }
 
 func TestWaitForEventIsResubscribedAfterDisconnect(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 
 	updated, cmd := model.Update(DisconnectedMsg{})
 	if cmd == nil {
@@ -254,7 +248,7 @@ func TestWaitForEventIsResubscribedAfterDisconnect(t *testing.T) {
 }
 
 func TestCtrlCQuitsImmediatelyWhenIdle(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 
 	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
 	_ = updated.(Model)
@@ -268,7 +262,7 @@ func TestCtrlCQuitsImmediatelyWhenIdle(t *testing.T) {
 
 func TestCtrlCAbortsStreamingRun(t *testing.T) {
 	fake := &fakeClient{}
-	model := New(Config{})
+	model := New(app.Config{})
 	model.client = fake
 	model.streaming = true
 	model.currentRunID = "run-123"
@@ -298,15 +292,15 @@ func TestInterruptMsgIsMappedToCtrlCMessage(t *testing.T) {
 }
 
 func TestSlashKeyGoesToEditor(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.width = 80
 	model.height = 24
 
 	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
 	got := updated.(Model)
 
-	if got.dialog == nil {
-		t.Fatal("expected slash palette to open through shared dialog ownership")
+	if got.dialog != nil {
+		t.Fatal("expected slash to remain in editor, not open dialog")
 	}
 	if got.editor.Value() != "/" {
 		t.Fatalf("expected slash to be inserted into editor, got %q", got.editor.Value())
@@ -317,7 +311,7 @@ func TestSlashKeyGoesToEditor(t *testing.T) {
 }
 
 func TestSlashDropdownFiltersFromEditorValue(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.width = 80
 	model.height = 24
 
@@ -338,7 +332,7 @@ func TestSlashDropdownFiltersFromEditorValue(t *testing.T) {
 }
 
 func TestSlashDropdownDoesNotExtendLayoutHeight(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.width = 80
 	model.height = 12
 
@@ -352,7 +346,7 @@ func TestSlashDropdownDoesNotExtendLayoutHeight(t *testing.T) {
 }
 
 func TestSlashDropdownEnterExecutesCurrentCommand(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.width = 80
 	model.height = 24
 	model.client = &fakeClient{status: `{"model":"test"}`}
@@ -377,19 +371,16 @@ func TestSlashDropdownEnterExecutesCurrentCommand(t *testing.T) {
 	if got.editor.Value() != "" {
 		t.Fatalf("expected editor to clear after command selection, got %q", got.editor.Value())
 	}
-	if strings.Contains(got.messages.View(), `"model":"test"`) {
-		t.Fatalf("expected selected /status command to avoid transcript noise, got %q", got.messages.View())
+	if got.showCommands {
+		t.Fatal("expected slash dropdown to close after command selection")
 	}
-	if !strings.Contains(got.footer.View(), "test") {
-		t.Fatalf("expected selected /status command to update metadata footer, got %q", got.footer.View())
-	}
-	if got.dialog != nil {
-		t.Fatal("expected slash palette to close after command selection")
+	if !strings.Contains(got.messages.View(), `"model":"test"`) {
+		t.Fatalf("expected selected /status command result in chat, got %q", got.messages.View())
 	}
 }
 
 func TestThemeCommandWithoutArgsOpensThemeChooser(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 
 	updated, _ := model.handleSlashCommand("/theme")
 	got := updated.(Model)
@@ -400,7 +391,7 @@ func TestThemeCommandWithoutArgsOpensThemeChooser(t *testing.T) {
 }
 
 func TestViewDoesNotForceTerminalBackground(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 	model.width = 80
 	model.height = 24
 	view := model.View()
@@ -410,7 +401,7 @@ func TestViewDoesNotForceTerminalBackground(t *testing.T) {
 }
 
 func TestHelpCommandAddsAssistantMessage(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 
 	updated, _ := model.handleSlashCommand("/help")
 	got := updated.(Model)
@@ -420,7 +411,7 @@ func TestHelpCommandAddsAssistantMessage(t *testing.T) {
 }
 
 func TestQuitCommandReturnsQuit(t *testing.T) {
-	model := New(Config{})
+	model := New(app.Config{})
 
 	_, cmd := model.handleSlashCommand("/quit")
 	if cmd == nil {

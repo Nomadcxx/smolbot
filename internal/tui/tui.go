@@ -7,14 +7,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/tui/client"
-	"github.com/Nomadcxx/nanobot-go/internal/tui/components/chat"
-	dialogcmp "github.com/Nomadcxx/nanobot-go/internal/tui/components/dialog"
-	"github.com/Nomadcxx/nanobot-go/internal/tui/components/footer"
-	"github.com/Nomadcxx/nanobot-go/internal/tui/components/header"
-	"github.com/Nomadcxx/nanobot-go/internal/tui/components/status"
-	"github.com/Nomadcxx/nanobot-go/internal/tui/theme"
-	_ "github.com/Nomadcxx/nanobot-go/internal/tui/theme/themes"
+	"github.com/Nomadcxx/nanobot-go/internal/app"
+	"github.com/Nomadcxx/nanobot-go/internal/client"
+	"github.com/Nomadcxx/nanobot-go/internal/components/chat"
+	dialogcmp "github.com/Nomadcxx/nanobot-go/internal/components/dialog"
+	"github.com/Nomadcxx/nanobot-go/internal/components/header"
+	"github.com/Nomadcxx/nanobot-go/internal/components/status"
+	"github.com/Nomadcxx/nanobot-go/internal/theme"
+	_ "github.com/Nomadcxx/nanobot-go/internal/theme/themes"
 )
 
 type ConnectedMsg struct{ Hello *client.HelloPayload }
@@ -37,9 +37,6 @@ type ModelSetMsg struct{ ID string }
 type ModelCurrentMsg struct {
 	Current string
 }
-type StatusLoadedMsg struct {
-	Status client.StatusPayload
-}
 
 type Dialog interface {
 	Update(tea.Msg) (Dialog, tea.Cmd)
@@ -58,29 +55,29 @@ type gatewayClient interface {
 	SessionsReset(key string) error
 	ModelsList() ([]client.ModelInfo, string, error)
 	ModelsSet(id string) error
-	Status() (client.StatusPayload, error)
+	Status() (json.RawMessage, error)
 }
 
 type Model struct {
 	width, height int
-	app           *App
+	app           *app.App
 	client        gatewayClient
 	header        header.Model
 	messages      chat.MessagesModel
 	editor        chat.EditorModel
 	status        status.Model
-	footer        footer.Model
 	dialog        Dialog
+	commandMenu   dialogcmp.CommandsModel
+	showCommands  bool
 	eventCh       chan tea.Msg
 	connected     bool
 	reconnectWait time.Duration
 	streaming     bool
 	currentRunID  string
-	runtime       RuntimeStatus
 }
 
-func New(cfg Config) Model {
-	a := NewApp(cfg)
+func New(cfg app.Config) Model {
+	a := app.New(cfg)
 	_ = theme.Set(a.Theme)
 	if theme.Current() == nil {
 		_ = theme.Set("nord")
@@ -95,8 +92,7 @@ func New(cfg Config) Model {
 		header:   header.New(),
 		messages: chat.NewMessages(),
 		editor:   chat.NewEditor(),
-		status:   status.New(),
-		footer:   footer.New(),
+		status:   status.New(a),
 		eventCh:  eventCh,
 	}
 }
@@ -165,7 +161,7 @@ func (m Model) reconnectCmd(delay time.Duration) tea.Cmd {
 
 func (m Model) saveStateCmd() tea.Cmd {
 	return func() tea.Msg {
-		_ = SaveState(State{
+		_ = app.SaveState(app.State{
 			Theme:       m.app.Theme,
 			LastSession: m.app.Session,
 			LastModel:   m.app.Model,
@@ -179,7 +175,7 @@ func (m Model) saveStateCmd() tea.Cmd {
 
 func (m Model) persistStateCmd() tea.Cmd {
 	return func() tea.Msg {
-		_ = SaveState(State{
+		_ = app.SaveState(app.State{
 			Theme:       m.app.Theme,
 			LastSession: m.app.Session,
 			LastModel:   m.app.Model,
@@ -208,8 +204,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		headerH := m.header.Height()
 		editorH := m.editor.Height()
 		statusH := 1
-		footerH := m.footer.Height()
-		chatH := m.height - headerH - editorH - statusH - footerH
+		chatH := m.height - headerH - editorH - statusH
 		if chatH < 1 {
 			chatH = 1
 		}
@@ -217,8 +212,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages.SetSize(m.width, chatH)
 		m.editor.SetWidth(m.width)
 		m.status.SetWidth(m.width)
-		m.footer.SetWidth(m.width)
-		m.syncMetadataView()
 		return m, nil
 	case ConnectedMsg:
 		m.connected = true
@@ -263,21 +256,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ModelCurrentMsg:
 		if msg.Current != "" {
 			m.app.Model = msg.Current
-			m.footer.SetModel(msg.Current)
 		}
-		return m, nil
-	case StatusLoadedMsg:
-		m.runtime = RuntimeStatus{
-			Model:            msg.Status.Model,
-			Provider:         msg.Status.Provider,
-			UptimeSeconds:    msg.Status.UptimeSeconds,
-			Channels:         append([]string(nil), msg.Status.Channels...),
-			ConnectedClients: msg.Status.ConnectedClients,
-		}
-		if msg.Status.Model != "" {
-			m.app.Model = msg.Status.Model
-		}
-		m.syncMetadataView()
 		return m, nil
 	case SessionsLoadedMsg:
 		m.dialog = sessionDialog{dialogcmp.NewSessions(msg.Sessions, m.app.Session)}
@@ -285,26 +264,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SessionResetDoneMsg:
 		m.app.Session = msg.Key
 		m.messages = chat.NewMessages()
-		m.syncMetadataView()
 		return m, m.persistStateCmd()
 	case ModelsLoadedMsg:
 		m.dialog = modelsDialog{dialogcmp.NewModels(msg.Models, msg.Current)}
 		return m, nil
 	case ModelSetMsg:
 		m.app.Model = msg.ID
-		m.syncMetadataView()
 		return m, m.persistStateCmd()
 	case dialogcmp.SessionChosenMsg:
 		m.app.Session = msg.Key
 		m.messages = chat.NewMessages()
 		m.dialog = nil
-		m.syncMetadataView()
 		return m, tea.Batch(m.loadHistoryCmd(), m.persistStateCmd())
 	case dialogcmp.SessionNewMsg:
 		m.app.Session = "tui:" + time.Now().Format("20060102-150405")
 		m.messages = chat.NewMessages()
 		m.dialog = nil
-		m.syncMetadataView()
 		return m, m.persistStateCmd()
 	case dialogcmp.SessionResetMsg:
 		m.dialog = nil
@@ -324,10 +299,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case dialogcmp.CommandChosenMsg:
 		m.dialog = nil
-		m.editor.SetValue("")
+		if m.showCommands {
+			m.showCommands = false
+			m.editor.SetValue("")
+		}
 		return m.handleSlashCommand(msg.Command)
 	case dialogcmp.CloseDialogMsg:
 		m.dialog = nil
+		m.showCommands = false
 		return m, nil
 	case DisconnectedMsg:
 		m.connected = false
@@ -386,26 +365,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	case tea.KeyMsg:
 		if m.dialog != nil {
-			if _, ok := m.dialog.(*slashCommandsDialog); ok {
-				if handlesSlashMenuKey(msg.String()) {
-					next, cmd := m.dialog.Update(msg)
-					m.dialog = next
-					if cmd != nil {
-						return m.Update(cmd())
-					}
-					return m, nil
-				}
-				if msg.String() == "ctrl+c" {
-					return m.handleCtrlC()
-				}
-			} else {
-				next, cmd := m.dialog.Update(msg)
-				m.dialog = next
-				if cmd != nil {
-					return m.Update(cmd())
-				}
-				return m, nil
+			next, cmd := m.dialog.Update(msg)
+			m.dialog = next
+			return m, cmd
+		}
+		if m.showCommands && handlesSlashMenuKey(msg.String()) {
+			next, cmd := m.commandMenu.Update(msg)
+			m.commandMenu = next
+			if cmd != nil {
+				return m.Update(cmd())
 			}
+			return m, nil
 		}
 		switch msg.String() {
 		case "ctrl+c":
@@ -422,6 +392,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if submitted := m.editor.Submitted(); submitted != "" {
 		if strings.HasPrefix(submitted, "/") {
+			m.showCommands = false
 			return m.handleSlashCommand(submitted)
 		}
 		m.messages.AppendUser(submitted)
@@ -460,7 +431,6 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		if args == "new" {
 			m.app.Session = "tui:" + time.Now().Format("20060102-150405")
 			m.messages = chat.NewMessages()
-			m.syncMetadataView()
 			return m, m.persistStateCmd()
 		}
 		if args == "reset" {
@@ -513,11 +483,11 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		}
 	case "/status":
 		return m, func() tea.Msg {
-			payload, err := m.client.Status()
+			raw, err := m.client.Status()
 			if err != nil {
 				return ChatErrorMsg{Message: err.Error()}
 			}
-			return StatusLoadedMsg{Status: payload}
+			return ChatDoneMsg{Content: string(raw)}
 		}
 	default:
 		m.messages.AppendError("Unknown command: " + cmd)
@@ -537,7 +507,6 @@ func (m Model) View() tea.View {
 		m.messages.View(),
 		m.editor.View(),
 		m.status.View(),
-		m.footer.View(),
 	)
 	if m.width > 0 && m.height > 0 {
 		canvas := lipgloss.NewCanvas(m.width, m.height)
@@ -547,25 +516,16 @@ func (m Model) View() tea.View {
 			canvas.Compose(lipgloss.NewLayer(dialogView).
 				X(max(0, (m.width-lipgloss.Width(dialogView))/2)).
 				Y(max(0, (m.height-lipgloss.Height(dialogView))/2)))
+		} else if m.showCommands {
+			menuView := m.commandMenu.View()
+			x, y := m.commandMenuPosition(menuView)
+			canvas.Compose(lipgloss.NewLayer(menuView).X(x).Y(y))
 		}
 		content = canvas.Render()
 	}
 	view := tea.NewView(content)
 	view.AltScreen = true
 	return view
-}
-
-func (m *Model) syncMetadataView() {
-	model := m.runtime.Model
-	if model == "" {
-		model = m.app.Model
-	}
-	m.footer.SetModel(model)
-	m.footer.SetProvider(m.runtime.Provider)
-	m.footer.SetSession(m.app.Session)
-	m.footer.SetUptimeSeconds(m.runtime.UptimeSeconds)
-	m.footer.SetConnectedClients(m.runtime.ConnectedClients)
-	m.footer.SetChannels(m.runtime.Channels)
 }
 
 type sessionDialog struct{ dialogcmp.SessionsModel }
@@ -587,21 +547,6 @@ type commandsDialog struct{ dialogcmp.CommandsModel }
 func (d commandsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	next, cmd := d.CommandsModel.Update(msg)
 	return commandsDialog{next}, cmd
-}
-
-func (d commandsDialog) View() string { return d.CommandsModel.View() }
-
-type slashCommandsDialog struct{ dialogcmp.CommandsModel }
-
-func (d *slashCommandsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
-	next, cmd := d.CommandsModel.Update(msg)
-	return &slashCommandsDialog{next}, cmd
-}
-
-func (d *slashCommandsDialog) View() string { return d.CommandsModel.View() }
-
-func (d *slashCommandsDialog) SetFilter(filter string) {
-	d.CommandsModel.SetFilter(filter)
 }
 
 func (m Model) commandChoices() []string {
@@ -629,26 +574,30 @@ func (m Model) themeChoices() []string {
 
 func (m *Model) syncCommandMenu() {
 	if m.dialog != nil {
-		if current, ok := m.dialog.(*slashCommandsDialog); ok {
-			value := strings.TrimSpace(m.editor.Value())
-			if !strings.HasPrefix(value, "/") {
-				m.dialog = nil
-				return
-			}
-			current.SetFilter(strings.TrimSpace(strings.TrimPrefix(value, "/")))
-			m.dialog = current
-		}
+		m.showCommands = false
 		return
 	}
 	value := strings.TrimSpace(m.editor.Value())
 	if !strings.HasPrefix(value, "/") {
+		m.showCommands = false
 		return
 	}
 	filter := strings.TrimSpace(strings.TrimPrefix(value, "/"))
-	m.dialog = &slashCommandsDialog{dialogcmp.NewCommands(m.commandChoices())}
-	if current, ok := m.dialog.(*slashCommandsDialog); ok {
-		current.SetFilter(filter)
+	if !m.showCommands {
+		m.commandMenu = dialogcmp.NewCommands(m.commandChoices())
 	}
+	m.commandMenu.SetFilter(filter)
+	m.showCommands = true
+}
+
+func (m Model) commandMenuPosition(menuView string) (int, int) {
+	editorView := m.editor.View()
+	editorHeight := lipgloss.Height(editorView)
+	editorWidth := lipgloss.Width(editorView)
+	statusHeight := lipgloss.Height(m.status.View())
+	x := max(0, (m.width-editorWidth)/2)
+	y := m.height - statusHeight - editorHeight - lipgloss.Height(menuView)
+	return x, max(m.header.Height(), y)
 }
 
 func handlesSlashMenuKey(key string) bool {

@@ -5,23 +5,23 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/Nomadcxx/nanobot-go/internal/app"
 	"github.com/Nomadcxx/nanobot-go/internal/tui"
-	"github.com/spf13/pflag"
+	flag "github.com/spf13/pflag"
 )
 
 func main() {
-	help, cfg, err := parseConfig(os.Args[1:])
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	if help {
-		fmt.Println("Usage of nanobot-tui:")
-		fmt.Println("  --host string      Gateway host (default \"127.0.0.1\")")
-		fmt.Println("  --port int         Gateway port (default 18790)")
-		fmt.Println("  --session string   Initial session key")
-		fmt.Println("  --theme string     Initial theme (default from state)")
-		return
+	host := flag.String("host", "127.0.0.1", "Gateway host")
+	port := flag.Int("port", 18791, "Gateway port")
+	theme := flag.String("theme", "", "Initial theme (default from state)")
+	session := flag.String("session", "", "Initial session key")
+	flag.Parse()
+
+	cfg := app.Config{
+		Host:    *host,
+		Port:    *port,
+		Theme:   *theme,
+		Session: *session,
 	}
 
 	model := tui.New(cfg)
@@ -30,27 +30,4 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-func parseConfig(args []string) (bool, tui.Config, error) {
-	for _, arg := range args {
-		if arg == "--help" || arg == "-h" {
-			return true, tui.Config{}, nil
-		}
-	}
-	fs := pflag.NewFlagSet("nanobot-tui", pflag.ContinueOnError)
-	host := fs.String("host", "127.0.0.1", "Gateway host")
-	port := fs.Int("port", 18790, "Gateway port")
-	theme := fs.String("theme", "", "Initial theme (default from state)")
-	session := fs.String("session", "", "Initial session key")
-	if err := fs.Parse(args); err != nil {
-		return false, tui.Config{}, err
-	}
-
-	return false, tui.Config{
-		Host:    *host,
-		Port:    *port,
-		Theme:   *theme,
-		Session: *session,
-	}, nil
 }
