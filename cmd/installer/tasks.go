@@ -36,7 +36,7 @@ func cloneRepository(m *model) error {
 }
 
 // Task: Build nanobot binary
-func buildNanobot(m *model) error {
+func buildSmolbot(m *model) error {
 	setLastCommand("go", "build", "-o", "smolbot", "./cmd/smolbot")
 
 	result := runCommand(m, "go", "build", "-o", "smolbot", "./cmd/smolbot")
@@ -54,7 +54,7 @@ func buildNanobot(m *model) error {
 }
 
 // Task: Build nanobot-tui binary
-func buildNanobotTUI(m *model) error {
+func buildSmolbotTUI(m *model) error {
 	setLastCommand("go", "build", "-o", "smolbot-tui", "./cmd/smolbot-tui")
 
 	result := runCommand(m, "go", "build", "-o", "smolbot-tui", "./cmd/smolbot-tui")
@@ -441,9 +441,8 @@ func (m *model) initTasks() {
 	} else {
 		// Fresh install
 		m.tasks = []installTask{
-			{name: "Clone repository", description: "Cloning smolbot", execute: cloneRepository},
-			{name: "Build nanobot", description: "Building daemon binary", execute: buildNanobot},
-			{name: "Build nanobot-tui", description: "Building TUI binary", execute: buildNanobotTUI},
+			{name: "Build smolbot", description: "Building daemon binary", execute: buildSmolbot},
+			{name: "Build smolbot-tui", description: "Building TUI binary", execute: buildSmolbotTUI},
 			{name: "Install binaries", description: "Installing to ~/.local/bin", execute: installBinaries},
 			{name: "Create workspace", description: "Creating ~/.smolbot/workspace", execute: createWorkspace},
 			{name: "Write config", description: "Writing config.json", execute: writeConfig},
