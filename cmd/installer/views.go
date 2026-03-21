@@ -127,7 +127,7 @@ func (m model) getHelpText() string {
 	case stepProvider:
 		return "↑/↓: Navigate  •  Enter: Select  •  Esc: Back"
 	case stepConfiguration:
-		return "Tab: Next field  •  ↑/↓: Navigate  •  Enter: Continue  •  Esc: Back"
+		return "↑/↓: Select model  •  Enter: Confirm  •  Esc: Back"
 	case stepChannels:
 		return "←/→: Toggle  •  Enter: Continue  •  Esc: Back"
 	case stepService:
@@ -288,6 +288,9 @@ func (m model) renderConfiguration() string {
 				}
 				b.WriteString("\n")
 			}
+			b.WriteString("\n")
+			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).
+				Render(fmt.Sprintf("  ✓ Selected: %s", m.ollamaModels[m.ollamaModelIndex])))
 		} else {
 			b.WriteString("  No Ollama models detected\n")
 		}
