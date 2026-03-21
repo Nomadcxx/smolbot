@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
-	"github.com/Nomadcxx/nanobot-go/pkg/session"
-	"github.com/Nomadcxx/nanobot-go/pkg/tokenizer"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/session"
+	"github.com/Nomadcxx/smolbot/pkg/tokenizer"
 )
 
 func TestMaybeConsolidateSkipsWhenUnderThreshold(t *testing.T) {

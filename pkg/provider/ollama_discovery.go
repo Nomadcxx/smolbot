@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/config"
 )
 
 // OllamaClient provides model discovery for Ollama servers

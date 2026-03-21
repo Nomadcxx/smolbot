@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	nanobotgo "github.com/Nomadcxx/nanobot-go"
-	"github.com/Nomadcxx/nanobot-go/pkg/skill"
+	nanobotgo "github.com/Nomadcxx/smolbot"
+	"github.com/Nomadcxx/smolbot/pkg/skill"
 )
 
 var BootstrapFiles = []string{"AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"}

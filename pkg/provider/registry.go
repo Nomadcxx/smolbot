@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/config"
 )
 
 type ProviderFactory func(config.ProviderConfig) Provider

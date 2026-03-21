@@ -7,14 +7,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/app"
-	"github.com/Nomadcxx/nanobot-go/internal/client"
-	"github.com/Nomadcxx/nanobot-go/internal/components/chat"
-	dialogcmp "github.com/Nomadcxx/nanobot-go/internal/components/dialog"
-	"github.com/Nomadcxx/nanobot-go/internal/components/header"
-	"github.com/Nomadcxx/nanobot-go/internal/components/status"
-	"github.com/Nomadcxx/nanobot-go/internal/theme"
-	_ "github.com/Nomadcxx/nanobot-go/internal/theme/themes"
+	"github.com/Nomadcxx/smolbot/internal/app"
+	"github.com/Nomadcxx/smolbot/internal/client"
+	"github.com/Nomadcxx/smolbot/internal/components/chat"
+	dialogcmp "github.com/Nomadcxx/smolbot/internal/components/dialog"
+	"github.com/Nomadcxx/smolbot/internal/components/header"
+	"github.com/Nomadcxx/smolbot/internal/components/status"
+	"github.com/Nomadcxx/smolbot/internal/theme"
+	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 )
 
 type ConnectedMsg struct{ Hello *client.HelloPayload }

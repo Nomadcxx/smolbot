@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
-	"github.com/Nomadcxx/nanobot-go/pkg/tool"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/tool"
 )
 
 func TestAgentLoopIntegration(t *testing.T) {

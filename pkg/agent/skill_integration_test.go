@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
-	"github.com/Nomadcxx/nanobot-go/pkg/skill"
+	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/skill"
 )
 
 func TestAgentLoadsSkillOnDemand(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Nomadcxx/nanobot-go/internal/theme"
-	_ "github.com/Nomadcxx/nanobot-go/internal/theme/themes"
+	"github.com/Nomadcxx/smolbot/internal/theme"
+	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 )
 
 func TestHeaderRendersStyledCenteredOutput(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
-	"github.com/Nomadcxx/nanobot-go/pkg/tool"
+	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/tool"
 )
 
 type TransportKind string

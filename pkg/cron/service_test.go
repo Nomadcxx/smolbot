@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/agent"
-	toolpkg "github.com/Nomadcxx/nanobot-go/pkg/tool"
+	"github.com/Nomadcxx/smolbot/pkg/agent"
+	toolpkg "github.com/Nomadcxx/smolbot/pkg/tool"
 )
 
 func TestService(t *testing.T) {

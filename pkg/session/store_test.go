@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
 )
 
 func TestNewStore_CreatesSchema(t *testing.T) {

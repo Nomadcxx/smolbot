@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
 )
 
 func TestEvaluator_StructuredDecision(t *testing.T) {

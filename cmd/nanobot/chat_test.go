@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
 )
 
 func TestChatCommandOneShot(t *testing.T) {

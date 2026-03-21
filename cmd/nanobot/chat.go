@@ -15,7 +15,7 @@ import (
 	glamour "charm.land/glamour/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/config"
 )
 
 type chatIO struct {

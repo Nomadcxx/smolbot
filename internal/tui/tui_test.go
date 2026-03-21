@@ -7,10 +7,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/app"
-	"github.com/Nomadcxx/nanobot-go/internal/client"
-	"github.com/Nomadcxx/nanobot-go/internal/theme"
-	_ "github.com/Nomadcxx/nanobot-go/internal/theme/themes"
+	"github.com/Nomadcxx/smolbot/internal/app"
+	"github.com/Nomadcxx/smolbot/internal/client"
+	"github.com/Nomadcxx/smolbot/internal/theme"
+	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 )
 
 type fakeClient struct {

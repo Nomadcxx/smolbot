@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
 )
 
 type ToolContext struct {

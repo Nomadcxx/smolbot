@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/agent"
-	"github.com/Nomadcxx/nanobot-go/pkg/tool"
+	"github.com/Nomadcxx/smolbot/pkg/agent"
+	"github.com/Nomadcxx/smolbot/pkg/tool"
 	"github.com/google/uuid"
 )
 

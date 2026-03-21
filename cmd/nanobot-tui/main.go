@@ -5,8 +5,8 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/app"
-	"github.com/Nomadcxx/nanobot-go/internal/tui"
+	"github.com/Nomadcxx/smolbot/internal/app"
+	"github.com/Nomadcxx/smolbot/internal/tui"
 	flag "github.com/spf13/pflag"
 )
 

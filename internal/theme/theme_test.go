@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/theme"
-	_ "github.com/Nomadcxx/nanobot-go/internal/theme/themes"
+	"github.com/Nomadcxx/smolbot/internal/theme"
+	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 )
 
 func TestBuiltInThemesRegister(t *testing.T) {

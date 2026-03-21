@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/channel"
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
-	"github.com/Nomadcxx/nanobot-go/pkg/gateway"
+	"github.com/Nomadcxx/smolbot/pkg/channel"
+	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/gateway"
 	"github.com/gorilla/websocket"
 )
 

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
-	nanobotgo "github.com/Nomadcxx/nanobot-go"
+	"github.com/Nomadcxx/smolbot/pkg/config"
+	nanobotgo "github.com/Nomadcxx/smolbot"
 )
 
 // Registry manages loaded skills from builtin, user, and workspace sources.

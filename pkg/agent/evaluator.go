@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
 )
 
 type DecisionProvider interface {

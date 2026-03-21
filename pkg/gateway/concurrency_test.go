@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/agent"
+	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/gorilla/websocket"
 )
 

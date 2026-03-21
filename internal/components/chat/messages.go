@@ -8,7 +8,7 @@ import (
 	glamour "charm.land/glamour/v2"
 	styles "charm.land/glamour/v2/styles"
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/theme"
+	"github.com/Nomadcxx/smolbot/internal/theme"
 )
 
 type ChatMessage struct {

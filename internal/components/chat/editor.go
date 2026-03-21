@@ -4,7 +4,7 @@ import (
 	textarea "charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/theme"
+	"github.com/Nomadcxx/smolbot/internal/theme"
 	"strings"
 )
 

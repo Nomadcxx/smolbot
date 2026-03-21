@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/config"
 )
 
 func TestBuiltinSkillNames(t *testing.T) {

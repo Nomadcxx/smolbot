@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
-	"github.com/Nomadcxx/nanobot-go/pkg/session"
-	"github.com/Nomadcxx/nanobot-go/pkg/skill"
-	"github.com/Nomadcxx/nanobot-go/pkg/tokenizer"
-	"github.com/Nomadcxx/nanobot-go/pkg/tool"
+	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/session"
+	"github.com/Nomadcxx/smolbot/pkg/skill"
+	"github.com/Nomadcxx/smolbot/pkg/tokenizer"
+	"github.com/Nomadcxx/smolbot/pkg/tool"
 )
 
 var thinkBlockPattern = regexp.MustCompile(`(?s)<think>.*?</think>`)

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
 	_ "github.com/mattn/go-sqlite3"
 )
 

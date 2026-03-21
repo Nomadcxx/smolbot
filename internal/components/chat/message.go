@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/theme"
+	"github.com/Nomadcxx/smolbot/internal/theme"
 )
 
 type ToolCall struct {

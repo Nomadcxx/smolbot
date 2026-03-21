@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/agent"
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
-	"github.com/Nomadcxx/nanobot-go/pkg/skill"
+	"github.com/Nomadcxx/smolbot/pkg/agent"
+	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/skill"
 )
 
 func main() {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/agent"
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/agent"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
 )
 
 func TestHeartbeat(t *testing.T) {

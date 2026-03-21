@@ -11,11 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/agent"
-	"github.com/Nomadcxx/nanobot-go/pkg/channel"
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
-	"github.com/Nomadcxx/nanobot-go/pkg/provider"
-	"github.com/Nomadcxx/nanobot-go/pkg/session"
+	"github.com/Nomadcxx/smolbot/pkg/agent"
+	"github.com/Nomadcxx/smolbot/pkg/channel"
+	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/session"
 	"github.com/gorilla/websocket"
 )
 

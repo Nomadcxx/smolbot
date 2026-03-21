@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/assets"
-	"github.com/Nomadcxx/nanobot-go/internal/theme"
+	"github.com/Nomadcxx/smolbot/internal/assets"
+	"github.com/Nomadcxx/smolbot/internal/theme"
 )
 
 type Model struct {

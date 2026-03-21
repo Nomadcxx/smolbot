@@ -2,7 +2,7 @@ package themes
 
 import (
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/Nomadcxx/nanobot-go/internal/theme"
+	"github.com/Nomadcxx/smolbot/internal/theme"
 )
 
 func register(name string, colors [15]string) {

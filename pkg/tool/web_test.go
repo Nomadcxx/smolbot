@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/config"
 )
 
 func TestWebTools(t *testing.T) {

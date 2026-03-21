@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/security"
+	"github.com/Nomadcxx/smolbot/pkg/security"
 )
 
 const readFileMaxChars = 128000

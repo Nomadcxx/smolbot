@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Nomadcxx/nanobot-go/pkg/channel"
-	"github.com/Nomadcxx/nanobot-go/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/channel"
+	"github.com/Nomadcxx/smolbot/pkg/config"
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/proto/waE2E"
