@@ -1,6 +1,9 @@
 package theme
 
-import "sync"
+import (
+	"slices"
+	"sync"
+)
 
 var (
 	mu       sync.RWMutex
@@ -52,5 +55,6 @@ func List() []string {
 	for name := range registry {
 		names = append(names, name)
 	}
+	slices.Sort(names)
 	return names
 }
