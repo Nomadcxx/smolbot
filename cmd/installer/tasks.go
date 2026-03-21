@@ -61,7 +61,7 @@ func buildNanobotTUI(m *model) error {
 
 	if result.Err != nil {
 		return CommandError{
-			Command:  "go build nanobot-tui",
+			Command:  "go build smolbot-tui",
 			ExitCode: result.ExitCode,
 			Output:   result.Output,
 			Duration: result.Duration,
@@ -424,9 +424,8 @@ func (m *model) initTasks() {
 		m.tasks = []installTask{
 			{name: "Backup config", description: "Backing up existing config", execute: backupConfig},
 			{name: "Stop service", description: "Stopping smolbot", execute: stopService},
-			{name: "Clone repository", description: "Cloning smolbot", execute: cloneRepository},
-			{name: "Build nanobot", description: "Building daemon binary", execute: buildNanobot},
-			{name: "Build nanobot-tui", description: "Building TUI binary", execute: buildNanobotTUI},
+			{name: "Build smolbot", description: "Building daemon binary", execute: buildSmolbot},
+			{name: "Build smolbot-tui", description: "Building TUI binary", execute: buildSmolbotTUI},
 			{name: "Install binaries", description: "Installing to ~/.local/bin", execute: installBinaries},
 			{name: "Setup systemd", description: "Updating systemd service", execute: setupSystemd, optional: true},
 		}

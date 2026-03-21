@@ -51,6 +51,7 @@ func newModel() model {
 		cancel:           cancel,
 		spinner:          s,
 		step:             stepWelcome,
+		projectDir:       ".",
 		workspacePath:    workspacePath,
 		configPath:       configPath,
 		port:             18791,
