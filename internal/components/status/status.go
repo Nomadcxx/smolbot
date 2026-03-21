@@ -1,15 +1,12 @@
 package status
 
 import (
-	"fmt"
-
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/Nomadcxx/smolbot/internal/app"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 )
 
 type Model struct {
-	app          *app.App
 	width        int
 	connected    bool
 	reconnecting bool
@@ -18,7 +15,8 @@ type Model struct {
 }
 
 func New(a *app.App) Model {
-	return Model{app: a}
+	_ = a
+	return Model{}
 }
 
 func (m *Model) SetWidth(w int)         { m.width = w }
@@ -32,11 +30,6 @@ func (m Model) View() string {
 	if t == nil {
 		return ""
 	}
-	model := m.app.Model
-	if model == "" {
-		model = "connecting..."
-	}
-	session := m.app.Session
 	connStatus := lipgloss.NewStyle().Foreground(t.Error).Render("● disconnected")
 	if m.streaming {
 		connStatus = lipgloss.NewStyle().Foreground(t.Warning).Render("● streaming")
@@ -45,7 +38,7 @@ func (m Model) View() string {
 	} else if m.connected {
 		connStatus = lipgloss.NewStyle().Foreground(t.Success).Render("● connected")
 	}
-	bar := fmt.Sprintf(" %s │ %s │ %s", model, session, connStatus)
+	bar := " " + connStatus
 	if m.quitHint {
 		bar += lipgloss.NewStyle().Foreground(t.Warning).Render("  Press Ctrl+C again to quit")
 	}
