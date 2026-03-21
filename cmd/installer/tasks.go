@@ -148,10 +148,18 @@ func createWorkspace(m *model) error {
 
 // Task: Remove workspace (for uninstall)
 func removeWorkspace(m *model) error {
+	// Remove current nanobot directory
 	baseDir := filepath.Join(os.Getenv("HOME"), ".nanobot")
 	if err := os.RemoveAll(baseDir); err != nil {
 		return fmt.Errorf("remove workspace: %w", err)
 	}
+	
+	// Also remove legacy nanobot-go directory if it exists
+	legacyDir := filepath.Join(os.Getenv("HOME"), ".nanobot-go")
+	if err := os.RemoveAll(legacyDir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove legacy workspace: %w", err)
+	}
+	
 	return nil
 }
 
@@ -277,9 +285,17 @@ func writeConfig(m *model) error {
 
 // Task: Remove config (for uninstall)
 func removeConfig(m *model) error {
+	// Remove current config
 	if err := os.Remove(m.configPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove config: %w", err)
 	}
+	
+	// Also remove legacy config if it exists
+	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".nanobot-go", "config.json")
+	if err := os.Remove(legacyConfigPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove legacy config: %w", err)
+	}
+	
 	return nil
 }
 

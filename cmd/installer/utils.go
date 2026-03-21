@@ -116,9 +116,15 @@ func detectExistingInstall() (exists bool, version string, daemonRunning bool, c
 		daemonRunning = true
 	}
 
-	// Check config
+	// Check config (current location)
 	configPath := filepath.Join(os.Getenv("HOME"), ".nanobot", "config.json")
 	if _, err := os.Stat(configPath); err == nil {
+		configExists = true
+	}
+	
+	// Also check legacy location
+	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".nanobot-go", "config.json")
+	if _, err := os.Stat(legacyConfigPath); err == nil {
 		configExists = true
 	}
 
