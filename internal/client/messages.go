@@ -71,15 +71,30 @@ func (c *Client) ModelsList() ([]ModelInfo, string, error) {
 	return payload.Models, payload.Current, nil
 }
 
-func (c *Client) ModelsSet(id string) error {
-	_, err := c.sendRequest("models.set", map[string]string{"id": id})
-	return err
+func (c *Client) ModelsSet(id string) (string, error) {
+	res, err := c.sendRequest("models.set", map[string]string{"id": id})
+	if err != nil {
+		return "", err
+	}
+	
+	var payload struct {
+		Previous string `json:"previous"`
+	}
+	if err := json.Unmarshal(res.Payload, &payload); err != nil {
+		return "", err
+	}
+	return payload.Previous, nil
 }
 
-func (c *Client) Status() (json.RawMessage, error) {
-	res, err := c.sendRequest("status", map[string]string{})
+func (c *Client) Status(session string) (StatusPayload, error) {
+	res, err := c.sendRequest("status", map[string]string{"session": session})
 	if err != nil {
-		return nil, err
+		return StatusPayload{}, err
 	}
-	return res.Payload, nil
+	
+	var payload StatusPayload
+	if err := json.Unmarshal(res.Payload, &payload); err != nil {
+		return StatusPayload{}, err
+	}
+	return payload, nil
 }
