@@ -97,7 +97,7 @@ func getLastCommand() string {
 // detectExistingInstall checks for existing installation
 func detectExistingInstall() (exists bool, version string, daemonRunning bool, configExists bool, err error) {
 	// Check binary
-	binPath := filepath.Join(os.Getenv("HOME"), "".local", "bin", "smolbot")
+	binPath := filepath.Join(os.Getenv("HOME"), ".local", "bin", "smolbot")
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
 		return false, "", false, false, nil
 	}

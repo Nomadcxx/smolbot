@@ -176,7 +176,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 	switch req.Method {
 	case "hello":
 		return map[string]any{
-			"server":   "nanobot-go",
+			"server":   "smolbot",
 			"version":  s.version,
 			"protocol": 1,
 			"methods": []string{
