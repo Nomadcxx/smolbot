@@ -406,11 +406,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case tea.MouseWheelMsg:
-		switch msg.Button {
-		case tea.MouseWheelUp:
-			m.messages.HandleKey("pgup")
-		case tea.MouseWheelDown:
-			m.messages.HandleKey("pgdown")
+		if m.dialog == nil {
+			switch msg.Button {
+			case tea.MouseWheelUp:
+				m.messages.HandleKey("pgup")
+			case tea.MouseWheelDown:
+				m.messages.HandleKey("pgdown")
+			}
 		}
 		return m, nil
 	case tea.KeyMsg:

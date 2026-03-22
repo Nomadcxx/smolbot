@@ -978,6 +978,9 @@ func TestMouseWheelScrollsTranscript(t *testing.T) {
 }
 
 func TestThemeCommandShowsErrorOnUnknownTheme(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
 	model := New(app.Config{})
 	model.width = 80
 	model.height = 24

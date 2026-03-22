@@ -84,6 +84,9 @@ func (m *MessagesModel) SetProgress(content string) {
 	m.sync(m.viewport.AtBottom())
 }
 
+// SetThinking sets ephemeral in-progress thinking text shown during an active
+// streaming run. It is cleared when the run completes. For finalized thinking
+// content that should persist in the transcript, use AppendThinking instead.
 func (m *MessagesModel) SetThinking(content string) {
 	m.thinking = content
 	m.sync(m.viewport.AtBottom())
@@ -186,7 +189,7 @@ func (m *MessagesModel) renderContent() string {
 		lines = append(lines, renderMessageBlock("STREAM", m.progress, t.TranscriptStreaming, m.width))
 	}
 	if m.thinking != "" {
-		lines = append(lines, renderMessageBlock("THINKING", m.thinking, t.TranscriptThinking, m.width))
+		lines = append(lines, renderRoleBlock("THINKING", m.thinking, t.TranscriptThinking, m.width))
 	}
 	for _, tool := range m.tools {
 		lines = append(lines, renderToolCall(tool, m.width))
