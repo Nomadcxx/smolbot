@@ -131,6 +131,8 @@ func transcriptRoleAccent(label string, t *theme.Theme) color.Color {
 		return t.TranscriptUserAccent
 	case "ASSISTANT":
 		return t.TranscriptAssistantAccent
+	case "THINKING":
+		return t.TranscriptThinking
 	default:
 		return nil
 	}

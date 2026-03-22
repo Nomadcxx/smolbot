@@ -262,7 +262,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages.SetProgress(msg.Content)
 		return m, nil
 	case ThinkingDoneMsg:
-		m.messages.SetThinking(msg.Content)
+		m.messages.AppendThinking(msg.Content)
 		return m, nil
 	case ChatErrorMsg:
 		m.streaming = false

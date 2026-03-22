@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,6 +10,12 @@ import (
 	"github.com/Nomadcxx/smolbot/internal/theme"
 	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 )
+
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(s string) string {
+	return ansiEscape.ReplaceAllString(s, "")
+}
 
 func TestMessagesModelRendersToolLifecycle(t *testing.T) {
 	if !theme.Set("nord") {
@@ -222,6 +229,25 @@ func assertStyleColor(t *testing.T, label string, got *string, want string) {
 	}
 	if *got != want {
 		t.Fatalf("expected %s color %q, got %q", label, want, *got)
+	}
+}
+
+func TestThinkingContentPersistsAfterAssistantResponse(t *testing.T) {
+	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	model := NewMessages()
+	model.SetSize(80, 40)
+	model.AppendUser("what is 2+2?")
+	model.AppendThinking("Let me reason through this: 2+2 equals 4.")
+	model.AppendAssistant("The answer is 4.")
+	view := model.View()
+	if !strings.Contains(view, "THINKING") {
+		t.Fatalf("expected THINKING label in view after assistant responded, got %q", view)
+	}
+	if !strings.Contains(view, "Let me reason through this") {
+		t.Fatalf("expected thinking content to persist in view, got %q", view)
+	}
+	if !strings.Contains(stripANSI(view), "The answer is 4.") {
+		t.Fatalf("expected assistant response also visible, got %q", view)
 	}
 }
 

@@ -71,17 +71,21 @@ func (m *MessagesModel) AppendError(content string) {
 	m.sync(true)
 }
 
+func (m *MessagesModel) AppendThinking(content string) {
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+	m.messages = append(m.messages, ChatMessage{Role: "thinking", Content: content})
+	m.sync(m.viewport.AtBottom())
+}
+
 func (m *MessagesModel) SetProgress(content string) {
 	m.progress = content
 	m.sync(m.viewport.AtBottom())
 }
 
 func (m *MessagesModel) SetThinking(content string) {
-	if strings.TrimSpace(content) == "" {
-		m.thinking = "complete"
-	} else {
-		m.thinking = content
-	}
+	m.thinking = content
 	m.sync(m.viewport.AtBottom())
 }
 
@@ -160,6 +164,8 @@ func (m *MessagesModel) renderContent() string {
 			lines = append(lines, renderRoleBlock("ASSISTANT", m.renderAssistant(msg.Content), t.Secondary, m.width))
 		case "error":
 			lines = append(lines, renderMessageBlock("ERROR", msg.Content, t.Error, m.width))
+		case "thinking":
+			lines = append(lines, renderRoleBlock("THINKING", msg.Content, t.TranscriptThinking, m.width))
 		}
 		lines = append(lines, "")
 	}
