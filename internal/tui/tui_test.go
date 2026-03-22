@@ -982,8 +982,11 @@ func TestEscKeyDoesNotScrollTranscript(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		model.messages.AppendAssistant("line " + strconv.Itoa(i))
 	}
-	model.messages.HandleKey("home")
+	model.messages.HandleKey("pgdown")
 	offsetBefore := model.messages.ViewportOffset()
+	if offsetBefore == 0 {
+		t.Fatal("precondition: expected non-zero offset after pgdown")
+	}
 
 	next, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
 	got := next.(Model)
