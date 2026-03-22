@@ -976,3 +976,29 @@ func TestMouseWheelScrollsTranscript(t *testing.T) {
 		t.Fatalf("mouse wheel up should reduce scroll offset: before=%d after=%d", bottomOffset, got.messages.ViewportOffset())
 	}
 }
+
+func TestThemeCommandShowsErrorOnUnknownTheme(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	next, _ := model.handleSlashCommand("/theme totally-not-a-real-theme")
+	got := next.(Model)
+	view := got.messages.View()
+	if !strings.Contains(view, "Unknown theme") {
+		t.Fatalf("expected error message for unknown theme, got %q", view)
+	}
+}
+
+func TestThemeCommandInvalidatesMessageRender(t *testing.T) {
+	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	model.messages.SetSize(78, 10)
+	model.messages.AppendAssistant("hello")
+	next, _ := model.handleSlashCommand("/theme dracula")
+	got := next.(Model)
+	if !got.messages.IsDirty() {
+		t.Fatal("expected messages to be dirty after theme change")
+	}
+}

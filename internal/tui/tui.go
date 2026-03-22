@@ -523,8 +523,10 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		if theme.Set(args) {
 			m.app.Theme = args
 			m.header = header.New()
+			m.messages.InvalidateTheme()
 			return m, m.persistStateCmd()
 		}
+		m.messages.AppendError("Unknown theme: " + args + ". Available: " + strings.Join(theme.List(), ", "))
 	case "/status":
 		return m, m.syncStatusCmd(true)
 	default:

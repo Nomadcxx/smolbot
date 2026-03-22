@@ -127,6 +127,15 @@ func (m *MessagesModel) HasContentAbove() bool {
 	return m.viewport.YOffset() > 0
 }
 
+func (m *MessagesModel) InvalidateTheme() {
+	m.renderer = nil
+	m.dirty = true
+}
+
+func (m *MessagesModel) IsDirty() bool {
+	return m.dirty
+}
+
 func (m *MessagesModel) HandleKey(key string) {
 	m.sync(false)
 	switch key {
