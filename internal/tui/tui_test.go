@@ -996,3 +996,22 @@ func TestEscKeyDoesNotScrollTranscript(t *testing.T) {
 		t.Fatalf("esc should not change scroll position: before=%d after=%d", offsetBefore, offsetAfter)
 	}
 }
+
+func TestMouseWheelScrollsTranscript(t *testing.T) {
+	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	model.messages.SetSize(78, 10)
+	for i := 0; i < 30; i++ {
+		model.messages.AppendAssistant("message line " + strconv.Itoa(i))
+	}
+	model.messages.HandleKey("end")
+	bottomOffset := model.messages.ViewportOffset()
+
+	next, _ := model.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	got := next.(Model)
+	if got.messages.ViewportOffset() >= bottomOffset {
+		t.Fatalf("mouse wheel up should reduce scroll offset: before=%d after=%d", bottomOffset, got.messages.ViewportOffset())
+	}
+}

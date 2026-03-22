@@ -405,6 +405,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return next, tea.Batch(cmds...)
 		}
 		return m, tea.Batch(cmds...)
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.messages.HandleKey("pgup")
+		case tea.MouseWheelDown:
+			m.messages.HandleKey("pgdown")
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if m.dialog != nil {
 			next, cmd := m.dialog.Update(msg)
@@ -556,6 +564,7 @@ func (m Model) View() tea.View {
 	}
 	view := tea.NewView(content)
 	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
 	view.BackgroundColor = t.Background
 	return view
 }
