@@ -12,6 +12,7 @@ import (
 
 type ToolCall struct {
 	Name   string
+	Input  string
 	Status string
 	Output string
 }
@@ -74,7 +75,19 @@ func renderToolCall(tc ToolCall, width int) string {
 		Padding(0, 1).
 		Render(bodyText)
 
-	content := lipgloss.JoinVertical(lipgloss.Left, header, body)
+	var rows []string
+	rows = append(rows, header)
+	if strings.TrimSpace(tc.Input) != "" {
+		inputText := lipgloss.NewStyle().
+			Background(t.ToolArtifactBody).
+			Foreground(t.TextMuted).
+			Width(innerWidth).
+			Padding(0, 1).
+			Render(tc.Input)
+		rows = append(rows, inputText)
+	}
+	rows = append(rows, body)
+	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
 	style := lipgloss.NewStyle().
 		Background(t.ToolArtifactBody).
 		Border(lipgloss.RoundedBorder()).

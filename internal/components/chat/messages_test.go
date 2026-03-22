@@ -232,6 +232,19 @@ func assertStyleColor(t *testing.T, label string, got *string, want string) {
 	}
 }
 
+func TestToolInputIsDisplayedInToolBlock(t *testing.T) {
+	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	model := NewMessages()
+	model.SetSize(80, 30)
+	model.AppendUser("read the config")
+	model.StartTool("read_file", `{"path": "/etc/smolbot.yaml"}`)
+	model.FinishTool("read_file", "done", "config loaded")
+	view := model.View()
+	if !strings.Contains(view, `"path"`) {
+		t.Fatalf("expected tool input to appear in view, got %q", view)
+	}
+}
+
 func TestProgressAndThinkingBlocksUseSemanticTranscriptColors(t *testing.T) {
 	const themeName = "transcript-color-test"
 	if !theme.Set("nord") { t.Fatal("expected nord theme") }

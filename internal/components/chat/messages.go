@@ -97,8 +97,8 @@ func (m *MessagesModel) ReplaceHistory(history []ChatMessage) {
 	m.sync(true)
 }
 
-func (m *MessagesModel) StartTool(name, _ string) {
-	m.tools = append(m.tools, ToolCall{Name: name, Status: "running"})
+func (m *MessagesModel) StartTool(name, input string) {
+	m.tools = append(m.tools, ToolCall{Name: name, Input: input, Status: "running"})
 	m.sync(m.viewport.AtBottom())
 }
 
