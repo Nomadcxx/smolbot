@@ -6,7 +6,6 @@ type Theme struct {
 	Name        string
 	Background  color.Color
 	Panel       color.Color
-	Surface     color.Color
 	Element     color.Color
 	Border      color.Color
 	BorderFocus color.Color
@@ -15,7 +14,6 @@ type Theme struct {
 	Accent      color.Color
 	Text        color.Color
 	TextMuted   color.Color
-	Subtle      color.Color
 	Error       color.Color
 	Warning     color.Color
 	Success     color.Color

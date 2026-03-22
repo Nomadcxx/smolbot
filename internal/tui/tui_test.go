@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	lipgloss "charm.land/lipgloss/v2"
 	"github.com/Nomadcxx/smolbot/internal/app"
 	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/internal/theme"
@@ -909,44 +908,6 @@ func TestVisualSurfaceIntegration(t *testing.T) {
 	}
 }
 
-func TestOverlayUsesPanelSurface(t *testing.T) {
-	if !theme.Set("nord") {
-		t.Fatal("expected nord theme to be registered")
-	}
-	raw := "Commands"
-	panel := overlayPanelView(raw)
-	if lipgloss.Width(panel) <= lipgloss.Width(raw) {
-		t.Fatalf("expected overlay panel to widen content, raw=%d panel=%d", lipgloss.Width(raw), lipgloss.Width(panel))
-	}
-	if lipgloss.Height(panel) <= lipgloss.Height(raw) {
-		t.Fatalf("expected overlay panel to add vertical padding, raw=%d panel=%d", lipgloss.Height(raw), lipgloss.Height(panel))
-	}
-	if !strings.Contains(panel, "Commands") {
-		t.Fatalf("expected overlay panel to preserve content, got %q", panel)
-	}
-}
-
-func TestOverlayAddsScrimWithoutForcingRootBackground(t *testing.T) {
-	if !theme.Set("nord") {
-		t.Fatal("expected nord theme to be registered")
-	}
-	scrim := overlayScrimView(8, 3)
-	if lipgloss.Width(scrim) != 8 || lipgloss.Height(scrim) != 3 {
-		t.Fatalf("expected scrim to respect requested size, got %dx%d", lipgloss.Width(scrim), lipgloss.Height(scrim))
-	}
-	if !strings.Contains(scrim, "░") {
-		t.Fatalf("expected scrim to contain visible shaded cells, got %q", scrim)
-	}
-
-	model := New(app.Config{})
-	model.width = 80
-	model.height = 24
-	view := model.View()
-	want := fmt.Sprintf("%#v", theme.Current().Background)
-	if got := fmt.Sprintf("%#v", view.BackgroundColor); got != want {
-		t.Fatalf("expected black terminal background, got %s want %s", got, want)
-	}
-}
 
 func TestHelpCommandAddsAssistantMessage(t *testing.T) {
 	model := New(app.Config{})

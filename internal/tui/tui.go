@@ -637,64 +637,6 @@ func formatUsageTokens(value int) string {
 	}
 }
 
-func overlayPanelView(content string) string {
-	t := theme.Current()
-	if t == nil {
-		return content
-	}
-	return lipgloss.NewStyle().
-		Background(t.Panel).
-		Foreground(t.Text).
-		Padding(1, 2).
-		Render(content)
-}
-
-func overlayScrimView(width, height int) string {
-	if width <= 0 || height <= 0 {
-		return ""
-	}
-	rows := make([]string, 0, height)
-	for i := 0; i < height; i++ {
-		rows = append(rows, overlayScrimLine(width))
-	}
-	return strings.Join(rows, "\n")
-}
-
-func overlayView(content string, maxWidth, maxHeight int) string {
-	panel := overlayPanelView(content)
-	width := min(maxWidth, lipgloss.Width(panel)+6)
-	height := min(maxHeight, lipgloss.Height(panel)+2)
-	if width <= 0 || height <= 0 {
-		return panel
-	}
-	panelLines := strings.Split(panel, "\n")
-	topPad := max(0, (height-len(panelLines))/2)
-	bottomPad := max(0, height-len(panelLines)-topPad)
-	leftPad := max(0, (width-lipgloss.Width(panel))/2)
-	rightPad := max(0, width-lipgloss.Width(panel)-leftPad)
-	rows := make([]string, 0, height)
-	for i := 0; i < topPad; i++ {
-		rows = append(rows, overlayScrimLine(width))
-	}
-	for _, line := range panelLines {
-		rows = append(rows, overlayScrimLine(leftPad)+line+overlayScrimLine(rightPad))
-	}
-	for i := 0; i < bottomPad; i++ {
-		rows = append(rows, overlayScrimLine(width))
-	}
-	return strings.Join(rows, "\n")
-}
-
-func overlayScrimLine(width int) string {
-	t := theme.Current()
-	if t == nil || width <= 0 {
-		return ""
-	}
-	return lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Render(strings.Repeat("░", width))
-}
-
 func transcriptSpacer(width int) string {
 	if width <= 0 {
 		return ""
