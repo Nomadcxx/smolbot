@@ -187,8 +187,8 @@ func TestFooterCompressionHighReduction(t *testing.T) {
 		t.Fatal("expected nord theme")
 	}
 
-	t := theme.Current()
-	if t == nil {
+	currentTheme := theme.Current()
+	if currentTheme == nil {
 		t.Fatal("expected theme current")
 	}
 
