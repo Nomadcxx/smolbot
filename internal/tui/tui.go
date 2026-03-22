@@ -417,7 +417,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "f1", "ctrl+m":
 			m.dialog = newMenuDialog()
 			return m, nil
-		case "pgup", "pgdown", "home", "end", "esc", "ctrl+l":
+		case "pgup", "pgdown", "home", "end", "ctrl+l":
 			m.messages.HandleKey(msg.String())
 			return m, nil
 		}

@@ -115,6 +115,10 @@ func (m *MessagesModel) ScrollToBottom() {
 	m.sync(true)
 }
 
+func (m *MessagesModel) ViewportOffset() int {
+	return m.viewport.YOffset()
+}
+
 func (m *MessagesModel) HandleKey(key string) {
 	m.sync(false)
 	switch key {
@@ -124,7 +128,7 @@ func (m *MessagesModel) HandleKey(key string) {
 		m.viewport.PageDown()
 	case "home":
 		m.viewport.GotoTop()
-	case "end", "esc", "ctrl+l":
+	case "end", "ctrl+l":
 		m.viewport.GotoBottom()
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -967,5 +968,28 @@ func TestQuitCommandReturnsQuit(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(tea.QuitMsg); !ok {
 		t.Fatalf("expected quit message, got %T", msg)
+	}
+}
+
+func TestEscKeyDoesNotScrollTranscript(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	model.messages.SetSize(78, 10)
+	for i := 0; i < 20; i++ {
+		model.messages.AppendAssistant("line " + strconv.Itoa(i))
+	}
+	model.messages.HandleKey("home")
+	offsetBefore := model.messages.ViewportOffset()
+
+	next, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	got := next.(Model)
+	offsetAfter := got.messages.ViewportOffset()
+
+	if offsetAfter != offsetBefore {
+		t.Fatalf("esc should not change scroll position: before=%d after=%d", offsetBefore, offsetAfter)
 	}
 }
