@@ -123,6 +123,10 @@ func (m *MessagesModel) ViewportOffset() int {
 	return m.viewport.YOffset()
 }
 
+func (m *MessagesModel) HasContentAbove() bool {
+	return m.viewport.YOffset() > 0
+}
+
 func (m *MessagesModel) HandleKey(key string) {
 	m.sync(false)
 	switch key {

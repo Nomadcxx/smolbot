@@ -232,6 +232,23 @@ func assertStyleColor(t *testing.T, label string, got *string, want string) {
 	}
 }
 
+func TestHasContentAboveReflectsScrollPosition(t *testing.T) {
+	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	model := NewMessages()
+	model.SetSize(80, 10)
+	for i := 0; i < 30; i++ {
+		model.AppendAssistant("message " + strconv.Itoa(i))
+	}
+	model.HandleKey("end")
+	if !model.HasContentAbove() {
+		t.Fatal("expected HasContentAbove() = true after scrolling to bottom (content scrolled above)")
+	}
+	model.HandleKey("home")
+	if model.HasContentAbove() {
+		t.Fatal("expected HasContentAbove() = false at top (nothing scrolled above)")
+	}
+}
+
 func TestToolInputIsDisplayedInToolBlock(t *testing.T) {
 	if !theme.Set("nord") { t.Fatal("expected nord theme") }
 	model := NewMessages()

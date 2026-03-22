@@ -543,7 +543,7 @@ func (m Model) View() tea.View {
 		lipgloss.Left,
 		m.header.View(),
 		transcriptSpacer(m.width),
-		transcriptFrameView(m.messages.View(), m.width),
+		transcriptFrameView(m.messages.View(), m.width, m.messages.HasContentAbove()),
 		m.status.View(),
 		m.editor.View(),
 		m.footer.View(),
@@ -644,7 +644,7 @@ func transcriptSpacer(width int) string {
 	return strings.Repeat(" ", width)
 }
 
-func transcriptFrameView(content string, width int) string {
+func transcriptFrameView(content string, width int, hasContentAbove bool) string {
 	t := theme.Current()
 	if t == nil {
 		return content
@@ -656,5 +656,14 @@ func transcriptFrameView(content string, width int) string {
 	if width > 2 {
 		style = style.Width(width - 2)
 	}
-	return style.Render(content)
+	frame := style.Render(content)
+	if !hasContentAbove {
+		return frame
+	}
+	hint := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Width(max(0, width-2)).
+		Align(lipgloss.Right).
+		Render("↑ PgUp/PgDn")
+	return lipgloss.JoinVertical(lipgloss.Left, hint, frame)
 }
