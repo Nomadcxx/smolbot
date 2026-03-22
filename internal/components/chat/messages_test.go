@@ -232,6 +232,32 @@ func assertStyleColor(t *testing.T, label string, got *string, want string) {
 	}
 }
 
+func TestProgressAndThinkingBlocksUseSemanticTranscriptColors(t *testing.T) {
+	const themeName = "transcript-color-test"
+	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	base := *theme.Current()
+	base.Name = themeName
+	base.TranscriptStreaming = lipgloss.Color("#FF0099")
+	base.TranscriptThinking = lipgloss.Color("#00FF88")
+	theme.Register(&base)
+	if !theme.Set(themeName) { t.Fatalf("could not set test theme %q", themeName) }
+	t.Cleanup(func() { theme.Set("nord") })
+
+	model := NewMessages()
+	model.SetSize(80, 20)
+	model.AppendUser("go")
+	model.SetProgress("streaming text...")
+	model.SetThinking("reasoning...")
+
+	view := model.View()
+	if !strings.Contains(view, ansiFg("#FF0099")) {
+		t.Fatalf("STREAM block should use TranscriptStreaming color #FF0099, got %q", view)
+	}
+	if !strings.Contains(view, ansiFg("#00FF88")) {
+		t.Fatalf("THINKING block should use TranscriptThinking color #00FF88, got %q", view)
+	}
+}
+
 func TestThinkingContentPersistsAfterAssistantResponse(t *testing.T) {
 	if !theme.Set("nord") { t.Fatal("expected nord theme") }
 	model := NewMessages()

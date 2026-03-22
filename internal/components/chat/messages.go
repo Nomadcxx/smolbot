@@ -170,10 +170,10 @@ func (m *MessagesModel) renderContent() string {
 		lines = append(lines, "")
 	}
 	if m.progress != "" {
-		lines = append(lines, renderMessageBlock("STREAM", m.progress, t.Info, m.width))
+		lines = append(lines, renderMessageBlock("STREAM", m.progress, t.TranscriptStreaming, m.width))
 	}
 	if m.thinking != "" {
-		lines = append(lines, renderMessageBlock("THINKING", m.thinking, t.TextMuted, m.width))
+		lines = append(lines, renderMessageBlock("THINKING", m.thinking, t.TranscriptThinking, m.width))
 	}
 	for _, tool := range m.tools {
 		lines = append(lines, renderToolCall(tool, m.width))
