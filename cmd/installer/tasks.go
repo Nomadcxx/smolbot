@@ -175,6 +175,11 @@ func writeConfig(m *model) error {
 				"contextWindowTokens": 128000,
 				"temperature":         0.7,
 				"maxToolIterations":   40,
+				"compression": map[string]interface{}{
+					"enabled":          true,
+					"mode":             "default",
+					"thresholdPercent": 60,
+				},
 			},
 		},
 		"providers":    map[string]interface{}{},

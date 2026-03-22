@@ -6,7 +6,7 @@ import (
 )
 
 func TestCompressorPreservesSystemMessages(t *testing.T) {
-	c := NewCompressor(Config{Mode: ModeAggressive})
+	c := NewCompressor(Config{Enabled: true, Mode: ModeAggressive})
 	messages := []any{
 		map[string]any{"role": "system", "content": "You are helpful"},
 		map[string]any{"role": "user", "content": "Hello"},
@@ -27,7 +27,7 @@ func TestCompressorPreservesSystemMessages(t *testing.T) {
 }
 
 func TestCompressorCompressesLongUserMessage(t *testing.T) {
-	c := NewCompressor(Config{Mode: ModeDefault})
+	c := NewCompressor(Config{Enabled: true, Mode: ModeDefault})
 	longText := strings.Repeat("A", 600)
 	messages := []any{
 		map[string]any{"role": "system", "content": "System prompt"},
@@ -59,7 +59,7 @@ func TestCompressorCompressesLongUserMessage(t *testing.T) {
 }
 
 func TestCompressorKeepsRecentMessages(t *testing.T) {
-	c := NewCompressor(Config{Mode: ModeDefault, KeepRecentMessages: 2})
+	c := NewCompressor(Config{Enabled: true, Mode: ModeDefault, KeepRecentMessages: 2})
 	messages := []any{
 		map[string]any{"role": "user", "content": "First"},
 		map[string]any{"role": "assistant", "content": "Second"},
@@ -80,7 +80,7 @@ func TestCompressorKeepsRecentMessages(t *testing.T) {
 }
 
 func TestCompressorPreservesToolCallStructure(t *testing.T) {
-	c := NewCompressor(Config{Mode: ModeAggressive})
+	c := NewCompressor(Config{Enabled: true, Mode: ModeAggressive})
 	messages := []any{
 		map[string]any{
 			"role": "assistant",
@@ -107,7 +107,7 @@ func TestCompressorPreservesToolCallStructure(t *testing.T) {
 }
 
 func TestCompressorModeAggressive(t *testing.T) {
-	c := NewCompressor(Config{Mode: ModeAggressive})
+	c := NewCompressor(Config{Enabled: true, Mode: ModeAggressive})
 	messages := []any{
 		map[string]any{"role": "system", "content": "System"},
 		map[string]any{"role": "user", "content": strings.Repeat("B", 1000)}, // Will be compressed
@@ -135,7 +135,7 @@ func TestCompressorModeAggressive(t *testing.T) {
 }
 
 func TestCompressorModeConservative(t *testing.T) {
-	c := NewCompressor(Config{Mode: ModeConservative})
+	c := NewCompressor(Config{Enabled: true, Mode: ModeConservative})
 	messages := []any{
 		map[string]any{"role": "assistant", "content": "Normal response without truncation needed"},
 	}
@@ -149,7 +149,7 @@ func TestCompressorModeConservative(t *testing.T) {
 }
 
 func TestCompressorTracksPreservedInfo(t *testing.T) {
-	c := NewCompressor(Config{Mode: ModeDefault})
+	c := NewCompressor(Config{Enabled: true, Mode: ModeDefault})
 	messages := []any{
 		map[string]any{"role": "system", "content": "System"},
 		map[string]any{"role": "user", "content": "Question"},
