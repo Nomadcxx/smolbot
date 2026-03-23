@@ -25,8 +25,8 @@ func TestMessagesModelRendersToolLifecycle(t *testing.T) {
 	model := NewMessages()
 	model.SetSize(80, 20)
 	model.AppendUser("hello")
-	model.StartTool("read_file", "")
-	model.FinishTool("read_file", "done", "loaded config")
+	model.StartTool("tc1", "read_file", "")
+	model.FinishTool("tc1", "read_file", "done", "loaded config")
 
 	view := model.View()
 	if !strings.Contains(view, "read_file") {
@@ -145,9 +145,9 @@ func TestToolBlocksUseSemanticChromeByStatus(t *testing.T) {
 		t.Fatal("expected nord theme to be registered")
 	}
 
-	running := renderToolCall(ToolCall{Name: "search", Status: "running"}, 80)
-	done := renderToolCall(ToolCall{Name: "search", Status: "done"}, 80)
-	failed := renderToolCall(ToolCall{Name: "search", Status: "error"}, 80)
+	running := renderToolCall(ToolCall{Name: "search", Status: "running"}, 80, false)
+	done := renderToolCall(ToolCall{Name: "search", Status: "done"}, 80, false)
+	failed := renderToolCall(ToolCall{Name: "search", Status: "error"}, 80, false)
 
 	current := theme.Current()
 	if current == nil {
@@ -254,8 +254,8 @@ func TestToolInputIsDisplayedInToolBlock(t *testing.T) {
 	model := NewMessages()
 	model.SetSize(80, 30)
 	model.AppendUser("read the config")
-	model.StartTool("read_file", `{"path": "/etc/smolbot.yaml"}`)
-	model.FinishTool("read_file", "done", "config loaded")
+	model.StartTool("tc2", "read_file", `{"path": "/etc/smolbot.yaml"}`)
+	model.FinishTool("tc2", "read_file", "done", "config loaded")
 	view := model.View()
 	if !strings.Contains(view, `"path"`) {
 		t.Fatalf("expected tool input to appear in view, got %q", view)

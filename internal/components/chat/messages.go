@@ -2,6 +2,7 @@ package chat
 
 import (
 	"image/color"
+	"strconv"
 	"strings"
 
 	"charm.land/glamour/v2/ansi"
@@ -29,6 +30,7 @@ type MessagesModel struct {
 	renderer      *glamour.TermRenderer
 	rendererWidth int
 	rendererStyle string
+	expandedTools map[string]bool
 }
 
 func NewMessages() MessagesModel {
@@ -36,8 +38,9 @@ func NewMessages() MessagesModel {
 	vp.SoftWrap = true
 	vp.FillHeight = true
 	return MessagesModel{
-		viewport: vp,
-		dirty:    true,
+		viewport:      vp,
+		dirty:         true,
+		expandedTools: make(map[string]bool),
 	}
 }
 
@@ -130,6 +133,12 @@ func (m *MessagesModel) FinishTool(id, name, status, output string) {
 	m.sync(m.viewport.AtBottom())
 }
 
+func (m *MessagesModel) ToggleToolExpand(index int) {
+	key := strconv.Itoa(index)
+	m.expandedTools[key] = !m.expandedTools[key]
+	m.dirty = true
+}
+
 func (m *MessagesModel) ScrollToBottom() {
 	m.sync(true)
 }
@@ -203,8 +212,9 @@ func (m *MessagesModel) renderContent() string {
 	if m.thinking != "" {
 		lines = append(lines, renderRoleBlock("THINKING", m.thinking, t.TranscriptThinking, m.width))
 	}
-	for _, tool := range m.tools {
-		lines = append(lines, renderToolCall(tool, m.width))
+	for i, tool := range m.tools {
+		expanded := m.expandedTools[strconv.Itoa(i)]
+		lines = append(lines, renderToolCall(tool, m.width, expanded))
 		lines = append(lines, "")
 	}
 	return strings.Join(lines, "\n")

@@ -18,7 +18,9 @@ type ToolCall struct {
 	Output string
 }
 
-func renderToolCall(tc ToolCall, width int) string {
+const maxToolOutputLines = 10
+
+func renderToolCall(tc ToolCall, width int, expanded bool) string {
 	t := theme.Current()
 	if t == nil {
 		return tc.Name
@@ -69,6 +71,17 @@ func renderToolCall(tc ToolCall, width int) string {
 			bodyText = "no output"
 		}
 	}
+
+	truncHint := ""
+	if !expanded {
+		outputLines := strings.Split(bodyText, "\n")
+		if len(outputLines) > maxToolOutputLines {
+			hidden := len(outputLines) - maxToolOutputLines
+			bodyText = strings.Join(outputLines[:maxToolOutputLines], "\n")
+			truncHint = fmt.Sprintf("… (%d lines hidden)", hidden)
+		}
+	}
+
 	body := lipgloss.NewStyle().
 		Background(t.ToolArtifactBody).
 		Foreground(t.Text).
@@ -88,6 +101,16 @@ func renderToolCall(tc ToolCall, width int) string {
 		rows = append(rows, inputText)
 	}
 	rows = append(rows, body)
+	if truncHint != "" {
+		hint := lipgloss.NewStyle().
+			Background(t.ToolArtifactBody).
+			Foreground(t.TextMuted).
+			Italic(true).
+			Width(innerWidth).
+			Padding(0, 1).
+			Render(truncHint)
+		rows = append(rows, hint)
+	}
 	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
 	style := lipgloss.NewStyle().
 		Background(t.ToolArtifactBody).

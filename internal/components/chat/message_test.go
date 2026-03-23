@@ -19,7 +19,7 @@ func TestRenderToolCallIncludesStatusAndOutput(t *testing.T) {
 		Name:   "read_file",
 		Status: "done",
 		Output: "contents loaded",
-	}, 80)
+	}, 80, false)
 
 	if !strings.Contains(rendered, "read_file") {
 		t.Fatalf("expected tool name in render, got %q", rendered)
@@ -37,9 +37,9 @@ func TestToolBlocksUseSemanticStates(t *testing.T) {
 		t.Fatal("expected nord theme to be registered")
 	}
 
-	running := renderToolCall(ToolCall{Name: "search", Status: "running"}, 80)
-	done := renderToolCall(ToolCall{Name: "search", Status: "done"}, 80)
-	failed := renderToolCall(ToolCall{Name: "search", Status: "error"}, 80)
+	running := renderToolCall(ToolCall{Name: "search", Status: "running"}, 80, false)
+	done := renderToolCall(ToolCall{Name: "search", Status: "done"}, 80, false)
+	failed := renderToolCall(ToolCall{Name: "search", Status: "error"}, 80, false)
 
 	if !strings.Contains(running, "RUNNING") {
 		t.Fatalf("expected running state label, got %q", running)
@@ -62,7 +62,7 @@ func TestToolArtifactCardsUseSemanticThemeTokens(t *testing.T) {
 		Name:   "exec_command",
 		Status: "done",
 		Output: "stdout: build complete",
-	}, 80)
+	}, 80, false)
 
 	current := theme.Current()
 	if current == nil {
