@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/glamour/v2/ansi"
 	viewport "charm.land/bubbles/v2/viewport"
@@ -13,24 +14,26 @@ import (
 )
 
 type ChatMessage struct {
-	Role    string
-	Content string
+	Role     string
+	Content  string
+	Duration time.Duration
 }
 
 type MessagesModel struct {
-	messages      []ChatMessage
-	tools         []ToolCall
-	width         int
-	height        int
-	progress      string
-	thinking      string
-	viewport      viewport.Model
-	rendered      string
-	dirty         bool
-	renderer      *glamour.TermRenderer
-	rendererWidth int
-	rendererStyle string
-	expandedTools map[string]bool
+	messages       []ChatMessage
+	tools          []ToolCall
+	width          int
+	height         int
+	progress       string
+	thinking       string
+	thinkingStart  time.Time
+	viewport       viewport.Model
+	rendered       string
+	dirty          bool
+	renderer       *glamour.TermRenderer
+	rendererWidth  int
+	rendererStyle  string
+	expandedTools  map[string]bool
 }
 
 func NewMessages() MessagesModel {
@@ -78,7 +81,12 @@ func (m *MessagesModel) AppendThinking(content string) {
 	if strings.TrimSpace(content) == "" {
 		return
 	}
-	m.messages = append(m.messages, ChatMessage{Role: "thinking", Content: content})
+	dur := time.Duration(0)
+	if !m.thinkingStart.IsZero() {
+		dur = time.Since(m.thinkingStart)
+		m.thinkingStart = time.Time{}
+	}
+	m.messages = append(m.messages, ChatMessage{Role: "thinking", Content: content, Duration: dur})
 	m.sync(m.viewport.AtBottom())
 }
 
@@ -91,6 +99,9 @@ func (m *MessagesModel) SetProgress(content string) {
 // streaming run. It is cleared when the run completes. For finalized thinking
 // content that should persist in the transcript, use AppendThinking instead.
 func (m *MessagesModel) SetThinking(content string) {
+	if m.thinking == "" && content != "" {
+		m.thinkingStart = time.Now()
+	}
 	m.thinking = content
 	m.sync(m.viewport.AtBottom())
 }
@@ -202,7 +213,7 @@ func (m *MessagesModel) renderContent() string {
 		case "error":
 			lines = append(lines, renderMessageBlock("ERROR", msg.Content, t.Error, m.width))
 		case "thinking":
-			lines = append(lines, renderRoleBlock("THINKING", msg.Content, t.TranscriptThinking, m.width))
+			lines = append(lines, renderThinkingBlock(msg.Content, msg.Duration, t.TranscriptThinking, m.width))
 		}
 		lines = append(lines, "")
 	}

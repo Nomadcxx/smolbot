@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+	"time"
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/Nomadcxx/smolbot/internal/theme"
@@ -202,4 +203,80 @@ func toolStateTokens(status string, t *theme.Theme) (icon string, accent color.C
 	default:
 		return "•", t.ToolArtifactBorder, "INFO"
 	}
+}
+
+func renderThinkingBlock(body string, dur time.Duration, accent color.Color, width int) string {
+	t := theme.Current()
+	if t == nil {
+		return "THINKING\n" + body
+	}
+	innerWidth := max(0, width-5)
+	badge := lipgloss.NewStyle().
+		Background(accent).
+		Foreground(t.Background).
+		Bold(true).
+		Padding(0, 1).
+		Render("THINKING")
+
+	header := lipgloss.NewStyle().
+		Background(subtleWash(accent)).
+		Width(innerWidth).
+		Padding(0, 1).
+		Render(badge)
+
+	bodyLines := strings.Split(body, "\n")
+	truncHint := ""
+	if len(bodyLines) > maxToolOutputLines {
+		hidden := len(bodyLines) - maxToolOutputLines
+		body = strings.Join(bodyLines[:maxToolOutputLines], "\n")
+		truncHint = fmt.Sprintf("… (%d lines hidden)", hidden)
+	}
+
+	contentBody := lipgloss.NewStyle().
+		Background(t.Panel).
+		Foreground(t.Text).
+		Width(innerWidth).
+		Padding(0, 1).
+		Render(body)
+
+	var rows []string
+	rows = append(rows, header, contentBody)
+
+	if truncHint != "" {
+		rows = append(rows, lipgloss.NewStyle().
+			Background(t.Panel).
+			Foreground(t.TextMuted).
+			Italic(true).
+			Width(innerWidth).
+			Padding(0, 1).
+			Render(truncHint))
+	}
+
+	if dur > 0 {
+		footer := lipgloss.NewStyle().
+			Background(subtleWash(accent)).
+			Foreground(t.TextMuted).
+			Width(innerWidth).
+			Padding(0, 1).
+			Render("Thought for "+formatDuration(dur))
+		rows = append(rows, footer)
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
+	style := lipgloss.NewStyle().
+		Background(t.Panel).
+		Border(lipgloss.ThickBorder(), false, false, false, true).
+		BorderForeground(accent).
+		Padding(0, 0)
+	if width > 4 {
+		style = style.Width(width - 2)
+	}
+	return style.Render(content)
+}
+
+func formatDuration(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
 }
