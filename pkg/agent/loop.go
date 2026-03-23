@@ -214,6 +214,7 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 				emit(cb, Event{Type: EventToolHint, Content: toolCall.Function.Name})
 				emit(cb, Event{Type: EventToolStart, Content: toolCall.Function.Name, Data: map[string]any{
 					"input": toolCall.Function.Arguments,
+					"id":    toolCall.ID,
 				}})
 
 				result, err := a.tools.Execute(runCtx, toolCall.Function.Name, json.RawMessage(toolCall.Function.Arguments), tool.ToolContext{
@@ -251,6 +252,7 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 					Content: toolCall.Function.Name,
 					Data: map[string]any{
 						"deliveredToRequestTarget": delivered,
+						"id":                      toolCall.ID,
 					},
 				})
 			}

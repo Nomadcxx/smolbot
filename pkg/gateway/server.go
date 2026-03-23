@@ -493,9 +493,11 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 			_ = s.writeEvent(state.owner, "chat.progress", map[string]any{"content": event.Content})
 		case agent.EventToolStart:
 			input, _ := event.Data["input"].(string)
+			toolID, _ := event.Data["id"].(string)
 			_ = s.writeEvent(state.owner, "chat.tool.start", map[string]any{
 				"name":  event.Content,
 				"input": input,
+				"id":    toolID,
 			})
 		case agent.EventToolDone:
 			if flag, ok := event.Data["deliveredToRequestTarget"].(bool); ok && flag {
@@ -503,11 +505,13 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 			}
 			output, _ := event.Data["output"].(string)
 			errStr, _ := event.Data["error"].(string)
+			toolID, _ := event.Data["id"].(string)
 			_ = s.writeEvent(state.owner, "chat.tool.done", map[string]any{
 				"name":                     event.Content,
 				"deliveredToRequestTarget": delivered,
 				"output":                   output,
 				"error":                    errStr,
+				"id":                       toolID,
 			})
 		case agent.EventError:
 			_ = s.writeEvent(state.owner, "chat.error", map[string]any{"message": event.Content})

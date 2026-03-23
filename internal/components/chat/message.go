@@ -11,6 +11,7 @@ import (
 )
 
 type ToolCall struct {
+	ID     string
 	Name   string
 	Input  string
 	Status string

@@ -104,21 +104,29 @@ func (m *MessagesModel) ReplaceHistory(history []ChatMessage) {
 	m.sync(true)
 }
 
-func (m *MessagesModel) StartTool(name, input string) {
-	m.tools = append(m.tools, ToolCall{Name: name, Input: input, Status: "running"})
+func (m *MessagesModel) StartTool(id, name, input string) {
+	m.tools = append(m.tools, ToolCall{ID: id, Name: name, Input: input, Status: "running"})
 	m.sync(m.viewport.AtBottom())
 }
 
-func (m *MessagesModel) FinishTool(name, status, output string) {
+func (m *MessagesModel) FinishTool(id, name, status, output string) {
 	for i := len(m.tools) - 1; i >= 0; i-- {
-		if m.tools[i].Name == name {
+		if m.tools[i].ID == id {
 			m.tools[i].Status = status
 			m.tools[i].Output = output
 			m.sync(m.viewport.AtBottom())
 			return
 		}
 	}
-	m.tools = append(m.tools, ToolCall{Name: name, Status: status, Output: output})
+	for i := len(m.tools) - 1; i >= 0; i-- {
+		if m.tools[i].Name == name && m.tools[i].Status == "running" {
+			m.tools[i].Status = status
+			m.tools[i].Output = output
+			m.sync(m.viewport.AtBottom())
+			return
+		}
+	}
+	m.tools = append(m.tools, ToolCall{ID: id, Name: name, Status: status, Output: output})
 	m.sync(m.viewport.AtBottom())
 }
 

@@ -386,7 +386,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "chat.tool.start":
 			var p client.ToolStartPayload
 			_ = json.Unmarshal(msg.Event.Payload, &p)
-			m.messages.StartTool(p.Name, p.Input)
+			m.messages.StartTool(p.ID, p.Name, p.Input)
 		case "chat.tool.done":
 			var p client.ToolDonePayload
 			_ = json.Unmarshal(msg.Event.Payload, &p)
@@ -394,7 +394,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if p.Error != "" {
 				status = "error"
 			}
-			m.messages.FinishTool(p.Name, status, p.Output)
+			m.messages.FinishTool(p.ID, p.Name, status, p.Output)
 		case "context.compressed":
 			var p client.CompressionInfo
 			_ = json.Unmarshal(msg.Event.Payload, &p)

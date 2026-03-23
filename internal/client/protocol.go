@@ -77,6 +77,7 @@ type ProgressPayload struct {
 type ToolStartPayload struct {
 	Name  string `json:"name"`
 	Input string `json:"input"`
+	ID    string `json:"id"`
 }
 
 type ThinkingPayload struct {
@@ -87,6 +88,7 @@ type ToolDonePayload struct {
 	Name   string `json:"name"`
 	Output string `json:"output"`
 	Error  string `json:"error,omitempty"`
+	ID     string `json:"id"`
 }
 
 type ChatDonePayload struct {
