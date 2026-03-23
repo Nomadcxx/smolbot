@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -132,17 +133,33 @@ func (r *Registry) CancelSession(sessionKey string) {
 func CoerceArgs[T any](input map[string]any) (T, error) {
 	var zero T
 
+	targetTypes := structFieldTypes(zero)
+
 	coerced := make(map[string]any, len(input))
 	for key, value := range input {
 		switch typed := value.(type) {
 		case string:
-			if i, err := strconv.Atoi(typed); err == nil {
-				coerced[key] = i
-				continue
-			}
-			if b, err := strconv.ParseBool(typed); err == nil {
-				coerced[key] = b
-				continue
+			expected := targetTypes[key]
+			switch expected {
+			case "bool":
+				if b, ok := parseBoolLoose(typed); ok {
+					coerced[key] = b
+					continue
+				}
+			case "int":
+				if i, err := strconv.Atoi(typed); err == nil {
+					coerced[key] = i
+					continue
+				}
+			default:
+				if i, err := strconv.Atoi(typed); err == nil {
+					coerced[key] = i
+					continue
+				}
+				if b, err := strconv.ParseBool(typed); err == nil {
+					coerced[key] = b
+					continue
+				}
 			}
 			coerced[key] = typed
 		default:
@@ -160,4 +177,42 @@ func CoerceArgs[T any](input map[string]any) (T, error) {
 		return zero, fmt.Errorf("unmarshal args: %w", err)
 	}
 	return out, nil
+}
+
+func parseBoolLoose(s string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "true", "1", "yes", "on":
+		return true, true
+	case "false", "0", "no", "off":
+		return false, true
+	}
+	return false, false
+}
+
+func structFieldTypes(v any) map[string]string {
+	t := reflect.TypeOf(v)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	m := make(map[string]string, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		jsonTag := f.Tag.Get("json")
+		name := strings.Split(jsonTag, ",")[0]
+		if name == "" || name == "-" {
+			name = f.Name
+		}
+		switch f.Type.Kind() {
+		case reflect.Bool:
+			m[name] = "bool"
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			m[name] = "int"
+		default:
+			m[name] = "string"
+		}
+	}
+	return m
 }
