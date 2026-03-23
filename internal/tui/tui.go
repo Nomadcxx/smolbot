@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -219,7 +220,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		compact := m.height <= 16
+		compact := m.height <= 30
 		m.header.SetCompact(compact)
 		m.editor.SetCompact(compact)
 		headerH := m.header.Height()
@@ -246,6 +247,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reconnectWait = 0
 		m.status.SetConnected(true)
 		m.status.SetReconnecting(false)
+		if cwd, err := os.Getwd(); err == nil {
+			m.header.SetWorkDir(cwd)
+		}
 		return m, tea.Batch(m.loadHistoryCmd(), m.syncModelCmd(), m.syncStatusCmd(false))
 	case CtrlCMsg:
 		return m.handleCtrlC()
@@ -286,6 +290,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.app.Model = msg.Payload.Model
 		}
 		m.footer.SetUsage(msg.Payload.Usage)
+		m.header.SetModel(m.app.Model)
+		if msg.Payload.Usage.ContextWindow > 0 && msg.Payload.Usage.TotalTokens > 0 {
+			pct := int((float64(msg.Payload.Usage.TotalTokens) / float64(msg.Payload.Usage.ContextWindow)) * 100 + 0.5)
+			m.header.SetContextPercent(pct)
+		}
 		if msg.Echo {
 			m.messages.AppendAssistant(formatStatusSummary(msg.Payload))
 		}
@@ -408,6 +417,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				TotalTokens:      p.TotalTokens,
 				ContextWindow:    p.ContextWindow,
 			})
+			if p.ContextWindow > 0 && p.TotalTokens > 0 {
+				pct := int((float64(p.TotalTokens) / float64(p.ContextWindow)) * 100 + 0.5)
+				m.header.SetContextPercent(pct)
+			}
 		}
 		if mapped != nil {
 			nextModel, cmd := m.Update(mapped)
@@ -559,7 +572,17 @@ func (m Model) View() tea.View {
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		m.header.View(),
-		transcriptSpacer(m.width),
+	)
+	if !m.header.IsCompact() {
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			content,
+			transcriptSpacer(m.width),
+		)
+	}
+	content = lipgloss.JoinVertical(
+		lipgloss.Left,
+		content,
 		transcriptFrameView(m.messages.View(), m.width, m.messages.HasContentAbove()),
 		m.status.View(),
 		m.editor.View(),
