@@ -92,6 +92,10 @@ func (m *MessagesModel) SetThinking(content string) {
 	m.sync(m.viewport.AtBottom())
 }
 
+func (m *MessagesModel) GetThinking() string {
+	return m.thinking
+}
+
 func (m *MessagesModel) ReplaceHistory(history []ChatMessage) {
 	m.messages = append([]ChatMessage(nil), history...)
 	m.tools = nil

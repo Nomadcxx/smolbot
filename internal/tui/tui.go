@@ -375,6 +375,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var p client.ChatErrorPayload
 			_ = json.Unmarshal(msg.Event.Payload, &p)
 			mapped = ChatErrorMsg{Message: p.Message}
+		case "chat.thinking":
+			var p client.ThinkingPayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			m.messages.SetThinking(m.messages.GetThinking() + p.Content)
 		case "chat.thinking.done":
 			var p client.ThinkingDonePayload
 			_ = json.Unmarshal(msg.Event.Payload, &p)

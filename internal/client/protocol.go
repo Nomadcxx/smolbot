@@ -79,6 +79,10 @@ type ToolStartPayload struct {
 	Input string `json:"input"`
 }
 
+type ThinkingPayload struct {
+	Content string `json:"content"`
+}
+
 type ToolDonePayload struct {
 	Name   string `json:"name"`
 	Output string `json:"output"`

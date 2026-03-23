@@ -182,7 +182,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"methods": []string{
 				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set",
 			},
-			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking.done", "context.compressed"},
+			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "context.compressed"},
 		}, nil
 	case "status":
 		var channels []string
@@ -488,6 +488,7 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 		switch event.Type {
 		case agent.EventThinking:
 			thinking.WriteString(event.Content)
+			_ = s.writeEvent(state.owner, "chat.thinking", map[string]any{"content": event.Content})
 		case agent.EventProgress:
 			_ = s.writeEvent(state.owner, "chat.progress", map[string]any{"content": event.Content})
 		case agent.EventToolStart:
