@@ -403,7 +403,7 @@ func TestSlashDoesNotOpenMenu(t *testing.T) {
 
 func TestF1OpensCenteredMenu(t *testing.T) {
 	model := New(app.Config{})
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 35})
 	got := updated.(Model)
 
 	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF1}))
@@ -420,7 +420,7 @@ func TestF1OpensCenteredMenu(t *testing.T) {
 func TestF1MenuRendersCenteredAwayFromTopLeft(t *testing.T) {
 	model := New(app.Config{})
 
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 35})
 	got := updated.(Model)
 	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF1}))
 	got = updated.(Model)
@@ -482,7 +482,7 @@ func TestF1MenuDoesNotExtendLayoutHeight(t *testing.T) {
 func TestMenuOverlayKeepsTranscriptFrameVisible(t *testing.T) {
 	model := New(app.Config{})
 
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 35})
 	got := updated.(Model)
 	got.messages.AppendUser("hello")
 	got.messages.AppendAssistant("world")
@@ -504,7 +504,7 @@ func TestMenuOverlayKeepsTranscriptFrameVisible(t *testing.T) {
 
 func TestTranscriptFrameAddsSpacerBelowHeader(t *testing.T) {
 	model := New(app.Config{})
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 35})
 	got := updated.(Model)
 	got.messages.AppendUser("hello")
 
@@ -529,7 +529,7 @@ func TestTranscriptFrameAddsSpacerBelowHeader(t *testing.T) {
 
 func TestTranscriptAreaHasOwnBorder(t *testing.T) {
 	model := New(app.Config{})
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 35})
 	got := updated.(Model)
 	got.messages.AppendUser("hello")
 	got.messages.AppendAssistant("world")
@@ -777,7 +777,7 @@ func TestCompactLayoutOnShortTerminals(t *testing.T) {
 	if strings.Contains(view, "▄▄▄▄▄▄") {
 		t.Fatalf("expected compact header treatment on short terminal, got %q", view)
 	}
-	if !strings.Contains(strings.ToLower(view), "nanobot") {
+	if !strings.Contains(strings.ToLower(view), "smolbot") {
 		t.Fatalf("expected compact layout to keep app identity visible, got %q", view)
 	}
 	if lines := strings.Count(view, "\n") + 1; lines > 8 {
@@ -788,7 +788,7 @@ func TestCompactLayoutOnShortTerminals(t *testing.T) {
 func TestHeaderArtIsCenteredAcrossViewport(t *testing.T) {
 	model := New(app.Config{})
 
-	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 35})
 	got := updated.(Model)
 
 	lines := strings.Split(plain(got.View().Content), "\n")
