@@ -103,6 +103,13 @@ type ThinkingDonePayload struct {
 	Content string `json:"content"`
 }
 
+type UsagePayload struct {
+	PromptTokens     int `json:"promptTokens"`
+	CompletionTokens int `json:"completionTokens"`
+	TotalTokens      int `json:"totalTokens"`
+	ContextWindow    int `json:"contextWindow"`
+}
+
 type SessionInfo struct {
 	Key       string `json:"key"`
 	UpdatedAt string `json:"updatedAt,omitempty"`

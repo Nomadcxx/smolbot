@@ -200,6 +200,14 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 			return "", errors.New("provider returned error finish")
 		}
 
+		if resp.Usage.TotalTokens > 0 {
+			emit(cb, Event{Type: EventUsage, Data: map[string]any{
+				"promptTokens":     resp.Usage.PromptTokens,
+				"completionTokens": resp.Usage.CompletionTokens,
+				"totalTokens":      resp.Usage.TotalTokens,
+			}})
+		}
+
 		if len(resp.ToolCalls) > 0 {
 			assistantMsg := provider.Message{
 				Role:             "assistant",

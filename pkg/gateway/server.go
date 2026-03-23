@@ -52,6 +52,11 @@ type Server struct {
 	wsTasks           map[*websocket.Conn]map[string]struct{}
 	completedDelivery map[string]bool
 	clients           map[*websocket.Conn]*clientState
+	lastUsage         struct {
+		PromptTokens     int
+		CompletionTokens int
+		TotalTokens      int
+	}
 }
 
 type clientState struct {
@@ -182,7 +187,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"methods": []string{
 				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set",
 			},
-			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "context.compressed"},
+			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "context.compressed"},
 		}, nil
 	case "status":
 		var channels []string
@@ -203,6 +208,12 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"channels":         channels,
 			"channelStates":    channelStates,
 			"connectedClients": s.connectedClients.Load(),
+			"usage": map[string]any{
+				"promptTokens":     s.lastUsage.PromptTokens,
+				"completionTokens": s.lastUsage.CompletionTokens,
+				"totalTokens":      s.lastUsage.TotalTokens,
+				"contextWindow":    s.config.Agents.Defaults.ContextWindowTokens,
+			},
 		}, nil
 	case "chat.history":
 		params := struct {
@@ -482,6 +493,11 @@ func (s *Server) startRun(req agent.Request, client *clientState) (string, error
 
 func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Request) {
 	var thinking strings.Builder
+	var lastUsage struct {
+		PromptTokens     int
+		CompletionTokens int
+		TotalTokens      int
+	}
 	delivered := false
 
 	result, err := s.agent.ProcessDirect(ctx, req, func(event agent.Event) {
@@ -516,7 +532,6 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 		case agent.EventError:
 			_ = s.writeEvent(state.owner, "chat.error", map[string]any{"message": event.Content})
 		case agent.EventDone:
-			// handled after ProcessDirect returns
 		case agent.EventContextCompressed:
 			originalTokens, _ := event.Data["originalTokens"].(int)
 			compressedTokens, _ := event.Data["compressedTokens"].(int)
@@ -526,6 +541,19 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 				"originalTokens":   originalTokens,
 				"compressedTokens": compressedTokens,
 				"reductionPercent": reductionPercent,
+			})
+		case agent.EventUsage:
+			pt, _ := event.Data["promptTokens"].(int)
+			ct, _ := event.Data["completionTokens"].(int)
+			tt, _ := event.Data["totalTokens"].(int)
+			lastUsage.PromptTokens = pt
+			lastUsage.CompletionTokens = ct
+			lastUsage.TotalTokens = tt
+			_ = s.writeEvent(state.owner, "chat.usage", map[string]any{
+				"promptTokens":     pt,
+				"completionTokens": ct,
+				"totalTokens":      tt,
+				"contextWindow":    s.config.Agents.Defaults.ContextWindowTokens,
 			})
 		}
 	})
@@ -544,6 +572,9 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 	delete(s.sessionRuns, state.sessionKey)
 	delete(s.wsTasks[state.owner.conn], state.runID)
 	s.completedDelivery[state.runID] = delivered
+	if lastUsage.TotalTokens > 0 {
+		s.lastUsage = lastUsage
+	}
 	s.mu.Unlock()
 }
 

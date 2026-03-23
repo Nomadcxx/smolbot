@@ -25,12 +25,13 @@ type Event struct {
 type EventType string
 
 const (
-	EventThinking        EventType = "thinking"
-	EventProgress        EventType = "progress"
-	EventToolHint        EventType = "tool.hint"
-	EventToolStart       EventType = "tool.start"
-	EventToolDone        EventType = "tool.done"
-	EventDone            EventType = "done"
-	EventError           EventType = "error"
+	EventThinking          EventType = "thinking"
+	EventProgress          EventType = "progress"
+	EventToolHint          EventType = "tool.hint"
+	EventToolStart         EventType = "tool.start"
+	EventToolDone          EventType = "tool.done"
+	EventDone              EventType = "done"
+	EventError             EventType = "error"
 	EventContextCompressed EventType = "context.compressed"
+	EventUsage             EventType = "usage"
 )

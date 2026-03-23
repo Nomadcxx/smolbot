@@ -399,6 +399,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var p client.CompressionInfo
 			_ = json.Unmarshal(msg.Event.Payload, &p)
 			m.footer.SetCompression(&p)
+		case "chat.usage":
+			var p client.UsagePayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			m.footer.SetUsage(client.UsageInfo{
+				PromptTokens:     p.PromptTokens,
+				CompletionTokens: p.CompletionTokens,
+				TotalTokens:      p.TotalTokens,
+				ContextWindow:    p.ContextWindow,
+			})
 		}
 		if mapped != nil {
 			nextModel, cmd := m.Update(mapped)
