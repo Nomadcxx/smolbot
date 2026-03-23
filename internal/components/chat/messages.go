@@ -279,9 +279,7 @@ func renderMessageBlock(label, body string, accent color.Color, width int) strin
 		Border(lipgloss.NormalBorder(), false, false, false, true).
 		BorderForeground(accent).
 		Padding(0, 1)
-	if width > 4 {
-		style = style.Width(width - 2)
-	}
+	style = style.Width(cappedWidth(width))
 	return style.Render(content)
 }
 

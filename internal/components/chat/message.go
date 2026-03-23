@@ -11,6 +11,19 @@ import (
 	"github.com/Nomadcxx/smolbot/internal/theme"
 )
 
+const maxTextWidth = 120
+
+func cappedWidth(available int) int {
+	if available <= 0 {
+		return maxTextWidth
+	}
+	w := available - 2
+	if w > maxTextWidth {
+		return maxTextWidth
+	}
+	return max(20, w)
+}
+
 type ToolCall struct {
 	ID     string
 	Name   string
@@ -28,7 +41,7 @@ func renderToolCall(tc ToolCall, width int, expanded bool) string {
 	}
 
 	icon, stateColor, statusLabel := toolStateTokens(tc.Status, t)
-	innerWidth := max(0, width-5)
+	innerWidth := cappedWidth(width)
 
 	label := lipgloss.NewStyle().
 		Foreground(t.TextMuted).
@@ -132,7 +145,7 @@ func renderRoleBlock(label, body string, accent color.Color, width int) string {
 	if semanticAccent := transcriptRoleAccent(label, t); semanticAccent != nil {
 		accent = semanticAccent
 	}
-	innerWidth := max(0, width-5)
+	innerWidth := cappedWidth(width)
 	badge := lipgloss.NewStyle().
 		Background(accent).
 		Foreground(t.Background).
@@ -210,7 +223,7 @@ func renderThinkingBlock(body string, dur time.Duration, accent color.Color, wid
 	if t == nil {
 		return "THINKING\n" + body
 	}
-	innerWidth := max(0, width-5)
+	innerWidth := cappedWidth(width)
 	badge := lipgloss.NewStyle().
 		Background(accent).
 		Foreground(t.Background).
