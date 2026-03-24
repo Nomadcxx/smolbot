@@ -66,7 +66,8 @@ func (m Model) Height() int {
 	if m.compact {
 		return 1
 	}
-	return strings.Count(strings.TrimRight(assets.Header, "\n"), "\n") + 1
+	artLines := strings.Count(strings.TrimRight(assets.Header, "\n"), "\n") + 1
+	return artLines + 1
 }
 
 func (m *Model) View() string {
@@ -86,17 +87,20 @@ func (m *Model) View() string {
 
 	lines := strings.Split(strings.TrimRight(assets.Header, "\n"), "\n")
 	var out strings.Builder
+	artStyle := lipgloss.NewStyle().Foreground(t.Primary)
 	for i, line := range lines {
-		style := lipgloss.NewStyle().Foreground(t.Primary)
-		if m.width > 0 {
-			style = style.Width(m.width).Align(lipgloss.Center)
-		}
-		styled := style.Render(line)
-		out.WriteString(styled)
+		out.WriteString(artStyle.Render(line))
 		if i < len(lines)-1 {
 			out.WriteByte('\n')
 		}
 	}
+
+	info := m.renderInfoLine(t)
+	if info != "" {
+		out.WriteByte('\n')
+		out.WriteString(info)
+	}
+
 	m.cached = out.String()
 	return m.cached
 }
@@ -151,6 +155,31 @@ func (m *Model) renderCompact(t *theme.Theme) string {
 			Render(line)
 	}
 	return line
+}
+
+func (m *Model) renderInfoLine(t *theme.Theme) string {
+	var parts []string
+	sep := lipgloss.NewStyle().Foreground(t.TextMuted).Render(" • ")
+
+	if m.model != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(t.Secondary).Render(m.model))
+	}
+	if m.contextPct > 0 {
+		pctStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+		if m.contextPct >= 90 {
+			pctStyle = lipgloss.NewStyle().Foreground(t.Error).Bold(true)
+		} else if m.contextPct >= 60 {
+			pctStyle = lipgloss.NewStyle().Foreground(t.Warning)
+		}
+		parts = append(parts, pctStyle.Render(fmt.Sprintf("%d%%", m.contextPct)))
+	}
+	if m.workDir != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(t.TextMuted).Render(trimWorkDir(m.workDir, 4)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " " + strings.Join(parts, sep)
 }
 
 func trimWorkDir(path string, segments int) string {

@@ -40,49 +40,35 @@ func renderToolCall(tc ToolCall, width int, expanded bool) string {
 		return tc.Name
 	}
 
-	icon, stateColor, statusLabel := toolStateTokens(tc.Status, t)
 	innerWidth := cappedWidth(width)
+	indent := "    "
 
-	label := lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Bold(true).
-		Render("TOOL")
-	name := lipgloss.NewStyle().
-		Foreground(t.ToolName).
-		Bold(true).
-		Render(tc.Name)
-	state := lipgloss.NewStyle().
-		Background(stateColor).
-		Foreground(t.Background).
-		Bold(true).
-		Padding(0, 1).
-		Render(statusLabel)
-	headerContent := lipgloss.JoinHorizontal(
-		lipgloss.Left,
-		lipgloss.NewStyle().Foreground(stateColor).Bold(true).Render(icon),
-		" ",
-		label,
-		"  ",
-		name,
-		" ",
-		state,
-	)
-	header := lipgloss.NewStyle().
-		Background(t.ToolArtifactHeader).
-		Foreground(t.Text).
-		Width(innerWidth).
-		Padding(0, 1).
-		Render(headerContent)
+	icon, iconColor := toolIcon(tc.Status, t)
+	iconStr := lipgloss.NewStyle().Foreground(iconColor).Bold(true).Render(icon)
+
+	nameStr := lipgloss.NewStyle().Foreground(t.ToolName).Bold(true).Render(tc.Name)
+
+	params := ""
+	if strings.TrimSpace(tc.Input) != "" {
+		params = tc.Input
+		maxParams := innerWidth - lipgloss.Width(icon) - lipgloss.Width(tc.Name) - 6
+		if maxParams > 0 && len(params) > maxParams {
+			params = params[:maxParams] + "…"
+		}
+	}
+	paramsStr := ""
+	if params != "" {
+		paramsStr = "  " + lipgloss.NewStyle().Foreground(t.TextMuted).Render(params)
+	}
+
+	header := "  " + iconStr + " " + nameStr + paramsStr
 
 	bodyText := tc.Output
 	if strings.TrimSpace(bodyText) == "" {
-		switch tc.Status {
-		case "running":
-			bodyText = "waiting for tool output..."
-		case "error":
-			bodyText = "tool execution failed"
-		default:
-			bodyText = "no output"
+		if tc.Status == "running" {
+			bodyText = "running…"
+		} else {
+			return header
 		}
 	}
 
@@ -96,45 +82,29 @@ func renderToolCall(tc ToolCall, width int, expanded bool) string {
 		}
 	}
 
-	body := lipgloss.NewStyle().
-		Background(t.ToolArtifactBody).
-		Foreground(t.Text).
-		Width(innerWidth).
-		Padding(0, 1).
-		Render(bodyText)
-
-	var rows []string
-	rows = append(rows, header)
-	if strings.TrimSpace(tc.Input) != "" {
-		inputText := lipgloss.NewStyle().
-			Background(t.ToolArtifactBody).
-			Foreground(t.TextMuted).
-			Width(innerWidth).
-			Padding(0, 1).
-			Render(tc.Input)
-		rows = append(rows, inputText)
+	bodyStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	var lines []string
+	lines = append(lines, header)
+	for _, line := range strings.Split(bodyText, "\n") {
+		lines = append(lines, bodyStyle.Render(indent+line))
 	}
-	rows = append(rows, body)
 	if truncHint != "" {
-		hint := lipgloss.NewStyle().
-			Background(t.ToolArtifactBody).
-			Foreground(t.TextMuted).
-			Italic(true).
-			Width(innerWidth).
-			Padding(0, 1).
-			Render(truncHint)
-		rows = append(rows, hint)
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render(indent+truncHint))
 	}
-	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	style := lipgloss.NewStyle().
-		Background(t.ToolArtifactBody).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.ToolArtifactBorder).
-		Padding(0, 0)
-	if width > 4 {
-		style = style.Width(width - 2)
+	return strings.Join(lines, "\n")
+}
+
+func toolIcon(status string, t *theme.Theme) (string, color.Color) {
+	switch status {
+	case "running":
+		return "●", t.ToolStateRunning
+	case "done":
+		return "✓", t.ToolStateDone
+	case "error":
+		return "✗", t.ToolStateError
+	default:
+		return "•", t.TextMuted
 	}
-	return style.Render(content)
 }
 
 func renderRoleBlock(label, body string, accent color.Color, width int) string {
@@ -159,14 +129,12 @@ func renderRoleBlock(label, body string, accent color.Color, width int) string {
 		Padding(0, 1).
 		Render(badge)
 	contentBody := lipgloss.NewStyle().
-		Background(t.Panel).
 		Foreground(t.Text).
 		Width(innerWidth).
 		Padding(0, 1).
 		Render(body)
 	content := lipgloss.JoinVertical(lipgloss.Left, header, contentBody)
 	style := lipgloss.NewStyle().
-		Background(t.Panel).
 		Border(lipgloss.ThickBorder(), false, false, false, true).
 		BorderForeground(accent).
 		Padding(0, 0)
@@ -205,19 +173,6 @@ func colorHex(value color.Color) string {
 	return fmt.Sprintf("#%02X%02X%02X", uint8(r>>8), uint8(g>>8), uint8(b>>8))
 }
 
-func toolStateTokens(status string, t *theme.Theme) (icon string, accent color.Color, label string) {
-	switch status {
-	case "running":
-		return "●", t.ToolStateRunning, "RUNNING"
-	case "done":
-		return "✓", t.ToolStateDone, "DONE"
-	case "error":
-		return "✗", t.ToolStateError, "ERROR"
-	default:
-		return "•", t.ToolArtifactBorder, "INFO"
-	}
-}
-
 func renderThinkingBlock(body string, dur time.Duration, accent color.Color, width int) string {
 	t := theme.Current()
 	if t == nil {
@@ -246,7 +201,6 @@ func renderThinkingBlock(body string, dur time.Duration, accent color.Color, wid
 	}
 
 	contentBody := lipgloss.NewStyle().
-		Background(t.Panel).
 		Foreground(t.Text).
 		Width(innerWidth).
 		Padding(0, 1).
@@ -257,7 +211,6 @@ func renderThinkingBlock(body string, dur time.Duration, accent color.Color, wid
 
 	if truncHint != "" {
 		rows = append(rows, lipgloss.NewStyle().
-			Background(t.Panel).
 			Foreground(t.TextMuted).
 			Italic(true).
 			Width(innerWidth).
@@ -277,7 +230,6 @@ func renderThinkingBlock(body string, dur time.Duration, accent color.Color, wid
 
 	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
 	style := lipgloss.NewStyle().
-		Background(t.Panel).
 		Border(lipgloss.ThickBorder(), false, false, false, true).
 		BorderForeground(accent).
 		Padding(0, 0)

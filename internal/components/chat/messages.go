@@ -172,7 +172,6 @@ func (m *MessagesModel) IsDirty() bool {
 }
 
 func (m *MessagesModel) HandleKey(key string) {
-	m.sync(false)
 	switch key {
 	case "pgup":
 		m.viewport.PageUp()
@@ -275,7 +274,6 @@ func renderMessageBlock(label, body string, accent color.Color, width int) strin
 		Render(label)
 	content := lipgloss.JoinVertical(lipgloss.Left, head, body)
 	style := lipgloss.NewStyle().
-		Background(t.Panel).
 		Border(lipgloss.NormalBorder(), false, false, false, true).
 		BorderForeground(accent).
 		Padding(0, 1)
@@ -430,7 +428,7 @@ func (m *MessagesModel) View() string {
 	if strings.TrimSpace(m.rendered) == "" {
 		return strings.Repeat("\n", max(0, m.height-1))
 	}
-	return lipgloss.NewStyle().Width(m.width).Height(m.height).Render(m.viewport.View())
+	return m.viewport.View()
 }
 
 func headingBlock(prefix string, color *string) ansi.StyleBlock {

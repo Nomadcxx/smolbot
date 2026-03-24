@@ -573,13 +573,6 @@ func (m Model) View() tea.View {
 		lipgloss.Left,
 		m.header.View(),
 	)
-	if !m.header.IsCompact() {
-		content = lipgloss.JoinVertical(
-			lipgloss.Left,
-			content,
-			transcriptSpacer(m.width),
-		)
-	}
 	content = lipgloss.JoinVertical(
 		lipgloss.Left,
 		content,
@@ -588,17 +581,15 @@ func (m Model) View() tea.View {
 		m.editor.View(),
 		m.footer.View(),
 	)
-	if m.width > 0 && m.height > 0 {
+	if m.width > 0 && m.height > 0 && m.dialog != nil {
 		canvas := lipgloss.NewCanvas(m.width, m.height)
 		layers := []*lipgloss.Layer{
 			lipgloss.NewLayer(content).X(0).Y(0),
 		}
-		if m.dialog != nil {
-			dialogView := m.dialog.View()
-			layers = append(layers, lipgloss.NewLayer(dialogView).
-				X(max(0, (m.width-lipgloss.Width(dialogView))/2)).
-				Y(max(0, (m.height-lipgloss.Height(dialogView))/2)))
-		}
+		dialogView := m.dialog.View()
+		layers = append(layers, lipgloss.NewLayer(dialogView).
+			X(max(0, (m.width-lipgloss.Width(dialogView))/2)).
+			Y(max(0, (m.height-lipgloss.Height(dialogView))/2)))
 		canvas.Compose(lipgloss.NewCompositor(layers...))
 		content = canvas.Render()
 	}
@@ -677,33 +668,18 @@ func formatUsageTokens(value int) string {
 	}
 }
 
-func transcriptSpacer(width int) string {
-	if width <= 0 {
-		return ""
-	}
-	return strings.Repeat(" ", width)
-}
-
 func transcriptFrameView(content string, width int, hasContentAbove bool) string {
+	if !hasContentAbove {
+		return content
+	}
 	t := theme.Current()
 	if t == nil {
 		return content
 	}
-	style := lipgloss.NewStyle().
-		Background(t.Panel).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Border)
-	if width > 2 {
-		style = style.Width(width - 2)
-	}
-	frame := style.Render(content)
-	if !hasContentAbove {
-		return frame
-	}
 	hint := lipgloss.NewStyle().
 		Foreground(t.TextMuted).
-		Width(max(0, width-2)).
+		Width(max(0, width)).
 		Align(lipgloss.Right).
-		Render("↑ PgUp/PgDn")
-	return lipgloss.JoinVertical(lipgloss.Left, hint, frame)
+		Render("scroll ↑↓")
+	return hint + "\n" + content
 }

@@ -494,9 +494,6 @@ func TestMenuOverlayKeepsTranscriptFrameVisible(t *testing.T) {
 	if !strings.Contains(view, "//// MENU ////") {
 		t.Fatalf("expected menu overlay in view, got %q", view)
 	}
-	if strings.Count(view, "╭") < 3 || strings.Count(view, "╰") < 2 {
-		t.Fatalf("expected transcript frame to remain visible under menu overlay, got %q", view)
-	}
 	if !strings.Contains(view, "USER") || !strings.Contains(view, "ASSISTANT") {
 		t.Fatalf("expected transcript content to remain visible around overlay, got %q", view)
 	}
@@ -510,20 +507,20 @@ func TestTranscriptFrameAddsSpacerBelowHeader(t *testing.T) {
 
 	lines := strings.Split(plain(got.View().Content), "\n")
 	headerRow := -1
-	frameRow := -1
+	contentRow := -1
 	for i, line := range lines {
-		if headerRow == -1 && strings.Contains(line, "▄▄▄▄▄▄") {
+		if headerRow == -1 && strings.Contains(line, "▄▄   ▄▄") {
 			headerRow = i
 		}
-		if frameRow == -1 && strings.Contains(line, "╭") && strings.Contains(line, "╮") {
-			frameRow = i
+		if contentRow == -1 && strings.Contains(line, "┃  USER") {
+			contentRow = i
 		}
 	}
-	if headerRow == -1 || frameRow == -1 {
-		t.Fatalf("expected both header art and transcript frame in view %q", plain(got.View().Content))
+	if headerRow == -1 || contentRow == -1 {
+		t.Fatalf("expected both header art and user message in view %q", plain(got.View().Content))
 	}
-	if frameRow-headerRow < 2 {
-		t.Fatalf("expected spacer row between header and transcript frame, header row=%d frame row=%d view=%q", headerRow, frameRow, plain(got.View().Content))
+	if contentRow-headerRow < 3 {
+		t.Fatalf("expected info line + blank row between header and content, header row=%d content row=%d view=%q", headerRow, contentRow, plain(got.View().Content))
 	}
 }
 
@@ -535,11 +532,11 @@ func TestTranscriptAreaHasOwnBorder(t *testing.T) {
 	got.messages.AppendAssistant("world")
 
 	view := plain(got.View().Content)
-	if strings.Count(view, "╭") < 2 {
-		t.Fatalf("expected separate transcript and editor borders, got %q", view)
+	if !strings.Contains(view, "●") {
+		t.Fatalf("expected status row visible, got %q", view)
 	}
-	if !strings.Contains(view, "● ") {
-		t.Fatalf("expected status row outside transcript frame, got %q", view)
+	if !strings.Contains(view, "USER") || !strings.Contains(view, "ASSISTANT") {
+		t.Fatalf("expected transcript content visible, got %q", view)
 	}
 }
 
@@ -794,7 +791,7 @@ func TestHeaderArtIsCenteredAcrossViewport(t *testing.T) {
 	lines := strings.Split(plain(got.View().Content), "\n")
 	artLine := ""
 	for _, line := range lines {
-		if strings.Contains(line, "▄▄▄▄▄▄") {
+		if strings.Contains(line, "▄▄   ▄▄") {
 			artLine = line
 			break
 		}
@@ -802,8 +799,8 @@ func TestHeaderArtIsCenteredAcrossViewport(t *testing.T) {
 	if artLine == "" {
 		t.Fatalf("expected ascii header line in view %q", plain(got.View().Content))
 	}
-	if col := strings.Index(artLine, "▄▄▄▄▄▄"); col < 6 {
-		t.Fatalf("expected centered header art, got col %d in %q", col, artLine)
+	if !strings.HasPrefix(strings.TrimSpace(artLine), "██") {
+		t.Fatalf("expected left-aligned header art, got %q", artLine)
 	}
 }
 

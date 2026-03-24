@@ -149,19 +149,14 @@ func TestToolBlocksUseSemanticChromeByStatus(t *testing.T) {
 	done := renderToolCall(ToolCall{Name: "search", Status: "done"}, 80, false)
 	failed := renderToolCall(ToolCall{Name: "search", Status: "error"}, 80, false)
 
-	current := theme.Current()
-	if current == nil {
-		t.Fatal("expected a current theme")
+	if !strings.Contains(running, "●") {
+		t.Fatalf("expected running icon, got %q", running)
 	}
-
-	if !strings.Contains(running, ansiBg(colorHex(current.ToolStateRunning))) {
-		t.Fatalf("expected running tool block to use semantic running chrome, got %q", running)
+	if !strings.Contains(done, "✓") {
+		t.Fatalf("expected done icon, got %q", done)
 	}
-	if !strings.Contains(done, ansiBg(colorHex(current.ToolStateDone))) {
-		t.Fatalf("expected done tool block to use semantic done chrome, got %q", done)
-	}
-	if !strings.Contains(failed, ansiBg(colorHex(current.ToolStateError))) {
-		t.Fatalf("expected error tool block to use semantic error chrome, got %q", failed)
+	if !strings.Contains(failed, "✗") {
+		t.Fatalf("expected error icon, got %q", failed)
 	}
 }
 
@@ -176,16 +171,12 @@ func TestRoleBlocksLimitAccentWashToHeaderBand(t *testing.T) {
 		t.Fatalf("expected multi-line role block, got %q", block)
 	}
 	headerBg := ansiBg(colorHex(subtleWash(theme.Current().Primary)))
-	panelBg := ansiBg(colorHex(theme.Current().Panel))
 
 	if !strings.Contains(lines[0], headerBg) {
 		t.Fatalf("expected header band to use subtle role tint, got %q", lines[0])
 	}
 	if strings.Contains(lines[1], headerBg) {
 		t.Fatalf("expected body row to avoid role tint background, got %q", lines[1])
-	}
-	if !strings.Contains(lines[1], panelBg) {
-		t.Fatalf("expected body row to stay on black panel background, got %q", lines[1])
 	}
 }
 
