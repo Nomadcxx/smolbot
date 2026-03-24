@@ -90,8 +90,8 @@ func (m *Model) View() string {
 	artStyle := lipgloss.NewStyle().Foreground(t.Primary)
 	diagStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
 	artWidth := lipgloss.Width(lines[0])
-	fillChars := "╱╱╱╱╱╱"
-	fillLen := lipgloss.Width(fillChars)
+	fillChars := "////"
+	fillLen := 4
 
 	for i, line := range lines {
 		rendered := artStyle.Render(line)
@@ -152,7 +152,7 @@ func (m *Model) renderCompact(t *theme.Theme) string {
 
 	diag := lipgloss.NewStyle().
 		Foreground(t.TextMuted).
-		Render(" ╱╱╱ ")
+		Render(" //// ")
 
 	sep := lipgloss.NewStyle().
 		Foreground(t.TextMuted).
