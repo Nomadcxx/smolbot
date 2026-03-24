@@ -88,8 +88,22 @@ func (m *Model) View() string {
 	lines := strings.Split(strings.TrimRight(assets.Header, "\n"), "\n")
 	var out strings.Builder
 	artStyle := lipgloss.NewStyle().Foreground(t.Primary)
+	diagStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	artWidth := lipgloss.Width(lines[0])
+	fillChars := "╱╱╱╱╱╱"
+	fillLen := lipgloss.Width(fillChars)
+
 	for i, line := range lines {
-		out.WriteString(artStyle.Render(line))
+		rendered := artStyle.Render(line)
+		out.WriteString(rendered)
+		if m.width > artWidth {
+			padWidth := m.width - artWidth
+			for padWidth > 0 {
+				chunkLen := min(fillLen, padWidth)
+				out.WriteString(diagStyle.Render(fillChars[:chunkLen]))
+				padWidth -= chunkLen
+			}
+		}
 		if i < len(lines)-1 {
 			out.WriteByte('\n')
 		}

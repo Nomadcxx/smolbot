@@ -40,28 +40,11 @@ func renderToolCall(tc ToolCall, width int, expanded bool) string {
 		return tc.Name
 	}
 
-	innerWidth := cappedWidth(width)
-	indent := "    "
-
 	icon, iconColor := toolIcon(tc.Status, t)
 	iconStr := lipgloss.NewStyle().Foreground(iconColor).Bold(true).Render(icon)
-
 	nameStr := lipgloss.NewStyle().Foreground(t.ToolName).Bold(true).Render(tc.Name)
 
-	params := ""
-	if strings.TrimSpace(tc.Input) != "" {
-		params = tc.Input
-		maxParams := innerWidth - lipgloss.Width(icon) - lipgloss.Width(tc.Name) - 6
-		if maxParams > 0 && len(params) > maxParams {
-			params = params[:maxParams] + "…"
-		}
-	}
-	paramsStr := ""
-	if params != "" {
-		paramsStr = "  " + lipgloss.NewStyle().Foreground(t.TextMuted).Render(params)
-	}
-
-	header := "  " + iconStr + " " + nameStr + paramsStr
+	header := "  " + iconStr + " " + nameStr
 
 	bodyText := tc.Output
 	if strings.TrimSpace(bodyText) == "" {
@@ -83,8 +66,14 @@ func renderToolCall(tc ToolCall, width int, expanded bool) string {
 	}
 
 	bodyStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+	indent := "    "
 	var lines []string
 	lines = append(lines, header)
+
+	if strings.TrimSpace(tc.Input) != "" {
+		lines = append(lines, bodyStyle.Render(indent+tc.Input))
+	}
+
 	for _, line := range strings.Split(bodyText, "\n") {
 		lines = append(lines, bodyStyle.Render(indent+line))
 	}
