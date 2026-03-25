@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"sync"
@@ -305,7 +306,9 @@ func (a *AgentLoop) handleSlashCommand(ctx context.Context, req Request) (string
 		return "/help, /new, /stop", nil
 	case "/new":
 		if a.memory != nil {
-			_ = a.memory.MaybeConsolidate(ctx, req.SessionKey)
+			if err := a.memory.MaybeConsolidate(ctx, req.SessionKey); err != nil {
+				log.Printf("[agent] memory consolidation failed on /new for session %s: %v", req.SessionKey, err)
+			}
 		}
 		if err := a.sessions.ClearSession(req.SessionKey); err != nil {
 			return "", err

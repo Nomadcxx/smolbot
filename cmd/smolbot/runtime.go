@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -521,6 +522,12 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	if err := ensureRuntimePaths(paths); err != nil {
 		return nil, err
 	}
+
+	// Validate heartbeat config
+	if cfg.Gateway.Heartbeat.Enabled && cfg.Gateway.Heartbeat.Interval <= 0 {
+		return nil, fmt.Errorf("heartbeat enabled but interval is %d (must be > 0)", cfg.Gateway.Heartbeat.Interval)
+	}
+
 	if err := agent.SyncWorkspaceTemplates(paths.Workspace()); err != nil {
 		return nil, err
 	}
@@ -968,11 +975,7 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 					return
 				case now := <-ticker.C:
 					if err := app.runCron(ctx, now); err != nil {
-						select {
-						case errCh <- err:
-						default:
-						}
-						return
+						log.Printf("[runtime] cron run failed: %v", err)
 					}
 				}
 			}
@@ -988,11 +991,7 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 					return
 				case <-ticker.C:
 					if err := app.runBeat(ctx); err != nil {
-						select {
-						case errCh <- err:
-						default:
-						}
-						return
+						log.Printf("[runtime] heartbeat run failed: %v", err)
 					}
 				}
 			}
