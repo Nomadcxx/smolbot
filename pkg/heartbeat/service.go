@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/Nomadcxx/smolbot/pkg/agent"
@@ -113,6 +114,7 @@ func (s *Service) RunOnce(ctx context.Context) error {
 	if s.decider != nil {
 		value, err := s.decider.Decide(ctx)
 		if err != nil {
+			log.Printf("[heartbeat] decider failed: %v", err)
 			return nil
 		}
 		decision = strings.ToLower(strings.TrimSpace(value))

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -527,13 +528,13 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 		switch event.Type {
 		case agent.EventThinking:
 			thinking.WriteString(event.Content)
-			_ = s.writeEvent(state.owner, "chat.thinking", map[string]any{"content": event.Content})
+			s.emitEvent(state.owner, "chat.thinking", map[string]any{"content": event.Content})
 		case agent.EventProgress:
-			_ = s.writeEvent(state.owner, "chat.progress", map[string]any{"content": event.Content})
+			s.emitEvent(state.owner, "chat.progress", map[string]any{"content": event.Content})
 		case agent.EventToolStart:
 			input, _ := event.Data["input"].(string)
 			toolID, _ := event.Data["id"].(string)
-			_ = s.writeEvent(state.owner, "chat.tool.start", map[string]any{
+			s.emitEvent(state.owner, "chat.tool.start", map[string]any{
 				"name":  event.Content,
 				"input": input,
 				"id":    toolID,
@@ -545,7 +546,7 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 			output, _ := event.Data["output"].(string)
 			errStr, _ := event.Data["error"].(string)
 			toolID, _ := event.Data["id"].(string)
-			_ = s.writeEvent(state.owner, "chat.tool.done", map[string]any{
+			s.emitEvent(state.owner, "chat.tool.done", map[string]any{
 				"name":                     event.Content,
 				"deliveredToRequestTarget": delivered,
 				"output":                   output,
@@ -553,13 +554,13 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 				"id":                       toolID,
 			})
 		case agent.EventError:
-			_ = s.writeEvent(state.owner, "chat.error", map[string]any{"message": event.Content})
+			s.emitEvent(state.owner, "chat.error", map[string]any{"message": event.Content})
 		case agent.EventDone:
 		case agent.EventContextCompressed:
 			originalTokens, _ := event.Data["originalTokens"].(int)
 			compressedTokens, _ := event.Data["compressedTokens"].(int)
 			reductionPercent, _ := event.Data["reductionPercent"].(float64)
-			_ = s.writeEvent(state.owner, "context.compressed", map[string]any{
+			s.emitEvent(state.owner, "context.compressed", map[string]any{
 				"enabled":          true,
 				"originalTokens":   originalTokens,
 				"compressedTokens": compressedTokens,
@@ -572,7 +573,7 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 			lastUsage.PromptTokens = pt
 			lastUsage.CompletionTokens = ct
 			lastUsage.TotalTokens = tt
-			_ = s.writeEvent(state.owner, "chat.usage", map[string]any{
+			s.emitEvent(state.owner, "chat.usage", map[string]any{
 				"promptTokens":     pt,
 				"completionTokens": ct,
 				"totalTokens":      tt,
@@ -582,12 +583,12 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 	})
 
 	if thinking.Len() > 0 {
-		_ = s.writeEvent(state.owner, "chat.thinking.done", map[string]any{"content": thinking.String()})
+		s.emitEvent(state.owner, "chat.thinking.done", map[string]any{"content": thinking.String()})
 	}
 	if err != nil {
-		_ = s.writeEvent(state.owner, "chat.error", map[string]any{"message": err.Error()})
+		s.emitEvent(state.owner, "chat.error", map[string]any{"message": err.Error()})
 	} else {
-		_ = s.writeEvent(state.owner, "chat.done", map[string]any{"content": result})
+		s.emitEvent(state.owner, "chat.done", map[string]any{"content": result})
 	}
 
 	s.mu.Lock()
@@ -679,6 +680,12 @@ func (s *Server) writeEvent(client *clientState, name string, payload any) error
 		return err
 	}
 	return client.write(frame)
+}
+
+func (s *Server) emitEvent(client *clientState, name string, payload map[string]any) {
+	if err := s.writeEvent(client, name, payload); err != nil {
+		log.Printf("[gateway] write %s event failed: %v", name, err)
+	}
 }
 
 func (c *clientState) write(frame []byte) error {

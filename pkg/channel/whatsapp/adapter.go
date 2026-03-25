@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -336,10 +337,12 @@ func (s *whatsmeowSeam) handleEvent(evt any, handle func(rawInboundMessage) erro
 		if strings.TrimSpace(content) == "" {
 			return
 		}
-		_ = handle(rawInboundMessage{
+		if err := handle(rawInboundMessage{
 			ChatID:  typed.Info.Chat.String(),
 			Content: content,
-		})
+		}); err != nil {
+			log.Printf("[whatsapp] handle event: %v", err)
+		}
 	}
 }
 
