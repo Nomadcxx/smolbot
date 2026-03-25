@@ -69,6 +69,9 @@ func newModel() model {
 		selectedOption:   0,
 		providerIndex:    0,
 		tickerIndex:      0,
+		channelIndex:     0,
+		signalEnabled:    signalEnabled,
+		whatsappEnabled:  whatsappEnabled,
 		beams:            beams,
 		ticker:           ticker,
 	}
@@ -305,9 +308,13 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
+		signalEnabled = m.signalEnabled
+		whatsappEnabled = m.whatsappEnabled
 		m.step = stepService
 		return m, nil
 	case "esc":
+		signalEnabled = m.signalEnabled
+		whatsappEnabled = m.whatsappEnabled
 		m.step = stepConfiguration
 		return m, nil
 	}
