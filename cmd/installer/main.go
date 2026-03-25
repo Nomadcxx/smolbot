@@ -110,6 +110,9 @@ func tickerCmd() tea.Cmd {
 type tickerMsg struct{}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		fmt.Printf("DEBUG Update: step=%v, key=%s\n", m.step, keyMsg.String())
+	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Handle quit
