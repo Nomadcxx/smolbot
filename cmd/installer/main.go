@@ -391,27 +391,28 @@ func (m model) startWhatsAppLink() tea.Cmd {
 		}
 
 		// Run linking in goroutine and send messages via program
+		prog := m.program
 		go func() {
 			onQR := func(code string) {
-				if m.program != nil {
-					m.program.Send(whatsappQRMsg{code: code})
+				if prog != nil {
+					prog.Send(whatsappQRMsg{code: code})
 				}
 			}
 			onStatus := func(status string) {
-				if m.program != nil {
-					m.program.Send(whatsappStatusMsg{text: status})
+				if prog != nil {
+					prog.Send(whatsappStatusMsg{text: status})
 				}
 			}
 
 			err := linker.StartLinking(onQR, onStatus)
 			if err != nil {
-				if m.program != nil {
-					m.program.Send(whatsappLoginResult{success: false, message: err.Error()})
+				if prog != nil {
+					prog.Send(whatsappLoginResult{success: false, message: err.Error()})
 				}
 				return
 			}
-			if m.program != nil {
-				m.program.Send(whatsappLoginResult{success: true})
+			if prog != nil {
+				prog.Send(whatsappLoginResult{success: true})
 			}
 		}()
 
