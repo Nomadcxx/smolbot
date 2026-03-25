@@ -417,9 +417,12 @@ func (m model) handleWhatsAppPoll(msg whatsappPollMsg) (tea.Model, tea.Cmd) {
 		m.whatsappDone = true
 		if err != nil {
 			m.whatsappError = err.Error()
+			m.whatsappLinker.Cleanup()
+			m.whatsappLinker = nil
 		}
-		m.whatsappLinker.Cleanup()
-		m.whatsappLinker = nil
+		// On success, keep connection alive — the phone needs it to
+		// complete the pairing handshake (key sync). The connection
+		// closes naturally when the process exits.
 		return m, nil
 	}
 
