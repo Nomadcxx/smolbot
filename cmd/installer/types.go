@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Install steps in the wizard flow
@@ -109,6 +110,9 @@ type model struct {
 	tasks            []installTask
 	currentTaskIndex int
 	width, height    int
+
+	// Tea program reference (for sending messages from goroutines)
+	program *tea.Program
 
 	// Visual elements
 	spinner        spinner.Model

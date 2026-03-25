@@ -3,9 +3,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -186,6 +184,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.whatsappStatus = "Scan the QR code with your phone"
 		return m, nil
 
+	case whatsappStatusMsg:
+		m.whatsappStatus = msg.text
+		return m, nil
+
 	case whatsappLoginResult:
 		m.whatsappDone = true
 		if msg.success {
@@ -349,7 +351,7 @@ func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		if !m.whatsappDone && m.whatsappQRCode == "" {
-			return m, m.startWhatsAppLogin()
+			return m, m.startWhatsAppLink()
 		}
 		m.step = stepService
 		return m, nil
@@ -363,64 +365,83 @@ func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) startWhatsAppLogin() tea.Cmd {
+func (m model) startWhatsAppLink() tea.Cmd {
 	return func() tea.Msg {
-		smolbotPath, err := findSmolbotBinary()
+		storePath := filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db")
+		
+		linker, err := NewWhatsAppLinker(storePath)
 		if err != nil {
 			return whatsappLoginResult{success: false, message: err.Error()}
 		}
 
-		cmd := exec.Command(smolbotPath, "channels", "login", "whatsapp", "--json")
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			return whatsappLoginResult{success: false, message: err.Error()}
-		}
-		stderr, err := cmd.StderrPipe()
-		if err != nil {
-			return whatsappLoginResult{success: false, message: err.Error()}
-		}
-		if err := cmd.Start(); err != nil {
-			return whatsappLoginResult{success: false, message: err.Error()}
+		if linker.IsLinked() {
+			m.whatsappDone = true
+			m.whatsappQRCode = ""
+			m.whatsappStatus = "Already linked!"
+			m.whatsappError = ""
+			return whatsappLoginResult{success: true}
 		}
 
-		decoder := json.NewDecoder(stdout)
-		for {
-			var evt loginEventJSON
-			if err := decoder.Decode(&evt); err != nil {
-				break
+		// Run linking in goroutine and send messages via program
+		go func() {
+			onQR := func(code string) {
+				if m.program != nil {
+					m.program.Send(whatsappQRMsg{code: code})
+				}
 			}
-			switch evt.Type {
-			case "qr":
-				return whatsappQRMsg{code: evt.Code}
-			case "connected":
-				cmd.Process.Kill()
-				return whatsappLoginResult{success: true}
-			case "error":
-				cmd.Process.Kill()
-				return whatsappLoginResult{success: false, message: evt.Message}
+			onStatus := func(status string) {
+				if m.program != nil {
+					m.program.Send(whatsappStatusMsg{text: status})
+				}
 			}
-		}
 
-		// Check stderr for any error output
-		errBytes, _ := io.ReadAll(stderr)
-		cmd.Wait()
+			err := linker.StartLinking(onQR, onStatus)
+			if err != nil {
+				if m.program != nil {
+					m.program.Send(whatsappLoginResult{success: false, message: err.Error()})
+				}
+				return
+			}
+			if m.program != nil {
+				m.program.Send(whatsappLoginResult{success: true})
+			}
+		}()
 
-		if len(errBytes) > 0 {
-			return whatsappLoginResult{success: false, message: string(errBytes)}
-		}
-		return whatsappLoginResult{success: false, message: "login process ended unexpectedly"}
+		return whatsappLoginResult{success: true}
 	}
 }
 
-type loginEventJSON struct {
-	Type    string `json:"type"`
-	Code    string `json:"code,omitempty"`
-	State   string `json:"state,omitempty"`
-	Detail  string `json:"detail,omitempty"`
-	Message string `json:"message,omitempty"`
+func (m model) startWhatsAppLogin() tea.Cmd {
+	return func() tea.Msg {
+		// Use direct linking instead of subprocess
+		storePath := filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db")
+		linker, err := NewWhatsAppLinker(storePath)
+		if err != nil {
+			return whatsappLoginResult{success: false, message: err.Error()}
+		}
+
+		if linker.IsLinked() {
+			return whatsappLoginResult{success: true}
+		}
+
+		// QR callback - send to model
+		onQR := func(code string) {
+		}
+
+		// Status callback - update model
+		onStatus := func(status string) {
+		}
+
+		err = linker.StartLinking(onQR, onStatus)
+		if err != nil {
+			return whatsappLoginResult{success: false, message: err.Error()}
+		}
+		return whatsappLoginResult{success: true}
+	}
 }
 
 type whatsappQRMsg struct{ code string }
+type whatsappStatusMsg struct{ text string }
 type whatsappLoginResult struct {
 	success bool
 	message string
@@ -532,6 +553,7 @@ func startFirstTask(m *model) tea.Cmd {
 func main() {
 	m := newModel()
 	p := tea.NewProgram(m, tea.WithAltScreen())
+	m.program = p
 
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
