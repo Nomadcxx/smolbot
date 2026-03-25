@@ -348,8 +348,10 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	fmt.Printf("DEBUG handleWhatsAppSetupKeys: msg=%s, whatsappDone=%v, whatsappQRCode=%q\n", msg.String(), m.whatsappDone, m.whatsappQRCode)
 	switch msg.String() {
 	case "enter":
+		fmt.Printf("DEBUG: enter pressed, condition=%v\n", !m.whatsappDone && m.whatsappQRCode == "")
 		if !m.whatsappDone && m.whatsappQRCode == "" {
 			return m, m.startWhatsAppLink()
 		}
