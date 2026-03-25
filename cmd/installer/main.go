@@ -130,6 +130,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleConfigurationKeys(msg)
 		case stepChannels:
 			return m.handleChannelsKeys(msg)
+		case stepWhatsAppSetup:
+			return m.handleWhatsAppSetupKeys(msg)
 		case stepService:
 			return m.handleServiceKeys(msg)
 		case stepInstalling:
@@ -300,7 +302,7 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.channelIndex++
 		}
 		return m, nil
-	case "left", "h", "right", "l":
+	case " ":
 		if m.channelIndex == 0 {
 			m.signalEnabled = !m.signalEnabled
 		} else if m.channelIndex == 1 {
@@ -310,12 +312,25 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		signalEnabled = m.signalEnabled
 		whatsappEnabled = m.whatsappEnabled
+		if m.whatsappEnabled {
+			m.step = stepWhatsAppSetup
+			return m, nil
+		}
 		m.step = stepService
 		return m, nil
 	case "esc":
 		signalEnabled = m.signalEnabled
 		whatsappEnabled = m.whatsappEnabled
 		m.step = stepConfiguration
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter", "esc":
+		m.step = stepService
 		return m, nil
 	}
 	return m, nil

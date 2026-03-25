@@ -20,6 +20,7 @@ const (
 	stepProvider
 	stepConfiguration
 	stepChannels
+	stepWhatsAppSetup
 	stepService
 	stepInstalling
 	stepComplete

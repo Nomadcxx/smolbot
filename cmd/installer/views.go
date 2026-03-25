@@ -62,6 +62,8 @@ func (m model) View() string {
 		mainContent = m.renderConfiguration()
 	case stepChannels:
 		mainContent = m.renderChannels()
+	case stepWhatsAppSetup:
+		mainContent = m.renderWhatsAppSetup()
 	case stepService:
 		mainContent = m.renderService()
 	case stepInstalling:
@@ -129,7 +131,9 @@ func (m model) getHelpText() string {
 	case stepConfiguration:
 		return "↑/↓: Select model  •  Enter: Confirm  •  Esc: Back"
 	case stepChannels:
-		return "←/→: Toggle  •  Enter: Continue  •  Esc: Back"
+		return "↑/↓: Navigate  •  Space: Toggle  •  Enter: Continue  •  Esc: Back"
+	case stepWhatsAppSetup:
+		return "Enter: Continue without WhatsApp  •  Esc: Back"
 	case stepService:
 		return "Tab: Next option  •  ←/→: Toggle  •  Enter: Install  •  Esc: Back"
 	case stepInstalling:
@@ -343,7 +347,20 @@ func (m model) renderChannels() string {
 	return b.String()
 }
 
-// Service screen
+func (m model) renderWhatsAppSetup() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render("WhatsApp Setup"))
+	b.WriteString("\n\n")
+
+	b.WriteString("Scan the QR code with your WhatsApp app to link your device.\n\n")
+	b.WriteString("  Press Enter to continue without WhatsApp setup.\n")
+	b.WriteString("  Or run 'smolbot channels login whatsapp' later.\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Note: Can be configured later"))
+
+	return b.String()
+}
+
 func (m model) renderService() string {
 	var b strings.Builder
 
