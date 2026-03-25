@@ -101,9 +101,6 @@ func renderRoleBlock(label, body string, accent color.Color, width int) string {
 	if t == nil {
 		return label + "\n" + body
 	}
-	if semanticAccent := transcriptRoleAccent(label, t); semanticAccent != nil {
-		accent = semanticAccent
-	}
 	innerWidth := cappedWidth(width)
 	badge := lipgloss.NewStyle().
 		Background(accent).
@@ -133,18 +130,6 @@ func renderRoleBlock(label, body string, accent color.Color, width int) string {
 	return style.Render(content)
 }
 
-func transcriptRoleAccent(label string, t *theme.Theme) color.Color {
-	switch label {
-	case "USER":
-		return t.TranscriptUserAccent
-	case "ASSISTANT":
-		return t.TranscriptAssistantAccent
-	case "THINKING":
-		return t.TranscriptThinking
-	default:
-		return nil
-	}
-}
 
 func subtleWash(accent color.Color) color.Color {
 	hex := colorHex(accent)

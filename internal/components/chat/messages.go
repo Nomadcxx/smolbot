@@ -206,9 +206,9 @@ func (m *MessagesModel) renderContent() string {
 	for _, msg := range m.messages {
 		switch msg.Role {
 		case "user":
-			lines = append(lines, renderRoleBlock("USER", msg.Content, t.Primary, m.width))
+			lines = append(lines, renderRoleBlock("USER", msg.Content, t.TranscriptUserAccent, m.width))
 		case "assistant":
-			lines = append(lines, renderRoleBlock("ASSISTANT", m.renderAssistant(msg.Content), t.Secondary, m.width))
+			lines = append(lines, renderRoleBlock("ASSISTANT", m.renderAssistant(msg.Content), t.TranscriptAssistantAccent, m.width))
 		case "error":
 			lines = append(lines, renderMessageBlock("ERROR", msg.Content, t.Error, m.width))
 		case "thinking":
@@ -217,7 +217,7 @@ func (m *MessagesModel) renderContent() string {
 		lines = append(lines, "")
 	}
 	if m.progress != "" {
-		lines = append(lines, renderMessageBlock("STREAM", m.progress, t.TranscriptStreaming, m.width))
+		lines = append(lines, renderRoleBlock("ASSISTANT", m.renderAssistant(m.progress), t.TranscriptStreaming, m.width))
 	}
 	if m.thinking != "" {
 		lines = append(lines, renderRoleBlock("THINKING", m.thinking, t.TranscriptThinking, m.width))

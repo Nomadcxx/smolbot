@@ -126,10 +126,10 @@ func TestMessagesModelRendersReadableProgressAndThinkingRows(t *testing.T) {
 	model.SetThinking("Reviewing files")
 
 	view := model.View()
-	if !strings.Contains(view, "STREAM") {
-		t.Fatalf("expected progress row label, got %q", view)
+	if !strings.Contains(view, "ASSISTANT") {
+		t.Fatalf("expected progress rendered as ASSISTANT block, got %q", view)
 	}
-	if !strings.Contains(view, "Streaming response chunks") {
+	if !strings.Contains(stripANSI(view), "Streaming response chunks") {
 		t.Fatalf("expected progress content, got %q", view)
 	}
 	if !strings.Contains(view, "THINKING") {
@@ -272,7 +272,7 @@ func TestProgressAndThinkingBlocksUseSemanticTranscriptColors(t *testing.T) {
 
 	view := model.View()
 	if !strings.Contains(view, ansiFg("#FF0099")) {
-		t.Fatalf("STREAM block should use TranscriptStreaming color #FF0099, got %q", view)
+		t.Fatalf("streaming ASSISTANT block should use TranscriptStreaming color #FF0099, got %q", view)
 	}
 	if !strings.Contains(view, ansiFg("#00FF88")) {
 		t.Fatalf("THINKING block should use TranscriptThinking color #00FF88, got %q", view)

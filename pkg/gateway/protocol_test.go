@@ -117,16 +117,18 @@ func TestChatHistoryResponseShape(t *testing.T) {
 		t.Fatalf("unexpected response: %#v", frame)
 	}
 
-	var items []map[string]any
-	if err := json.Unmarshal(frame.Response.Result, &items); err != nil {
+	var envelope struct {
+		Messages []map[string]any `json:"messages"`
+	}
+	if err := json.Unmarshal(frame.Response.Result, &envelope); err != nil {
 		t.Fatalf("Unmarshal result: %v", err)
 	}
 
-	if len(items) > 2 {
-		t.Fatalf("chat.history with limit=2 returned %d items, want at most 2", len(items))
+	if len(envelope.Messages) > 2 {
+		t.Fatalf("chat.history with limit=2 returned %d items, want at most 2", len(envelope.Messages))
 	}
 
-	for _, item := range items {
+	for _, item := range envelope.Messages {
 		if item["role"] == nil || item["content"] == nil {
 			t.Fatalf("history item missing role or content: %#v", item)
 		}
