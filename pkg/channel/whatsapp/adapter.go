@@ -217,7 +217,12 @@ type whatsmeowSeam struct {
 	mu        sync.Mutex
 	started   bool
 	handlerID uint32
+
+	recentMessages map[string]time.Time
+	recentMu      sync.Mutex
 }
+
+const dedupWindow = 5 * time.Minute
 
 func newWhatsmeowSeam(cfg config.WhatsAppChannelConfig) (*whatsmeowSeam, error) {
 	storePath := strings.TrimSpace(cfg.StorePath)
@@ -243,7 +248,10 @@ func newWhatsmeowSeam(cfg config.WhatsAppChannelConfig) (*whatsmeowSeam, error) 
 	client := whatsmeow.NewClient(deviceStore, waLog.Noop)
 	client.EnableAutoReconnect = true
 
-	return &whatsmeowSeam{client: client}, nil
+	return &whatsmeowSeam{
+		client:         client,
+		recentMessages: make(map[string]time.Time),
+	}, nil
 }
 
 func (s *whatsmeowSeam) Send(ctx context.Context, chatID, content string) error {
@@ -378,8 +386,30 @@ func (s *whatsmeowSeam) handleEvent(evt any, handle func(rawInboundMessage) erro
 		if typed == nil || typed.Info.IsFromMe {
 			return
 		}
+
+		msgID := string(typed.Info.ID)
+		if msgID == "" {
+			return
+		}
+
+		s.recentMu.Lock()
+		if recvTime, ok := s.recentMessages[msgID]; ok {
+			if time.Since(recvTime) < dedupWindow {
+				s.recentMu.Unlock()
+				return
+			}
+		}
+		s.recentMessages[msgID] = time.Now()
+		now := time.Now()
+		for k, v := range s.recentMessages {
+			if now.Sub(v) > dedupWindow {
+				delete(s.recentMessages, k)
+			}
+		}
+		s.recentMu.Unlock()
+
 		content := extractMessageText(typed.Message)
-		if strings.TrimSpace(content) == "" {
+		if content == "" {
 			return
 		}
 		if err := handle(rawInboundMessage{
