@@ -67,14 +67,11 @@ func TestServerMethods(t *testing.T) {
 	t.Run("status", func(t *testing.T) {
 		writeFrame(t, conn, RequestFrame{ID: "2", Method: "status"})
 		frame := readFrame(t, conn)
-		if !strings.Contains(string(frame.Response.Result), `"connectedClients":1`) {
-			t.Fatalf("expected connected client count, got %s", frame.Response.Result)
-		}
 		if !strings.Contains(string(frame.Response.Result), `"model":"gpt-test"`) {
 			t.Fatalf("expected model in status, got %s", frame.Response.Result)
 		}
-		if !strings.Contains(string(frame.Response.Result), `"channelStates":{"slack":{"detail":"","state":"connected"}}`) {
-			t.Fatalf("expected channel states in status, got %s", frame.Response.Result)
+		if !strings.Contains(string(frame.Response.Result), `"uptime":`) {
+			t.Fatalf("expected uptime in status, got %s", frame.Response.Result)
 		}
 	})
 

@@ -214,24 +214,19 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "context.compressed"},
 		}, nil
 	case "status":
-		var channels []string
-		channelStates := map[string]map[string]string{}
+		var channels []map[string]string
 		if s.channels != nil {
-			channels = s.channels.ChannelNames()
 			for name, status := range s.channels.Statuses(ctx) {
-				channelStates[name] = map[string]string{
-					"state":  status.State,
-					"detail": status.Detail,
-				}
+				channels = append(channels, map[string]string{
+					"name":   name,
+					"status": status.State,
+				})
 			}
 		}
 		return map[string]any{
-			"model":            s.currentModel(),
-			"provider":         s.currentProvider(),
-			"uptimeSeconds":    int(time.Since(s.started).Seconds()),
-			"channels":         channels,
-			"channelStates":    channelStates,
-			"connectedClients": s.connectedClients.Load(),
+			"model":  s.currentModel(),
+			"uptime": int(time.Since(s.started).Seconds()),
+			"channels": channels,
 			"usage": map[string]any{
 				"promptTokens":     s.lastUsage.PromptTokens,
 				"completionTokens": s.lastUsage.CompletionTokens,

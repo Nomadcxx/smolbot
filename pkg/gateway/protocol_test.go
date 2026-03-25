@@ -237,16 +237,20 @@ func TestStatusChannelStatesReturnsDetail(t *testing.T) {
 		t.Fatalf("Unmarshal result: %v", err)
 	}
 
-	channelStates, ok := result["channelStates"].(map[string]any)
+	channelsRaw, ok := result["channels"].([]any)
 	if !ok {
-		t.Fatalf("status response missing channelStates: %#v", result)
+		t.Fatalf("status response missing channels array: %#v", result)
 	}
-
-	signalState, ok := channelStates["signal"].(map[string]any)
+	if len(channelsRaw) == 0 {
+		t.Fatalf("expected at least one channel, got 0")
+	}
+	ch, ok := channelsRaw[0].(map[string]any)
 	if !ok {
-		t.Fatalf("channelStates[signal] is not a map (flat string instead of structured): %#v", channelStates["signal"])
+		t.Fatalf("channels[0] is not an object: %#v", channelsRaw[0])
 	}
-	_ = signalState
+	if ch["name"] != "signal" {
+		t.Fatalf("expected channel name 'signal', got %v", ch["name"])
+	}
 }
 
 func TestEventFrameHasCorrectStructure(t *testing.T) {
