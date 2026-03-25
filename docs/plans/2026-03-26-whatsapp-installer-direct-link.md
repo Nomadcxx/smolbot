@@ -1,12 +1,30 @@
 # WhatsApp Direct Linking in Installer - Implementation Plan
 
-> **For Claude:** Use executing-plans to implement this plan.
+> **Status: IMPLEMENTED** (2026-03-26). Bugs fixed in follow-up session.
 
 **Goal:** Allow installer to link WhatsApp directly using Go (whatsmeow library) without requiring smolbot binary to exist. Creates handshake file at `~/.smolbot/whatsapp.db`.
 
 **Architecture:** The installer already has access to `github.com/Nomadcxx/smolbot/pkg/channel/whatsapp` via QR renderer import. We will use the same package to perform WhatsApp linking directly in the installer process. No subprocess needed.
 
 **Tech Stack:** Go, whatsmeow, bubblesTea (already in installer), lipgloss (already in installer)
+
+## Implementation Notes (actual vs plan)
+
+The plan described a callback-based `StartLinking(onQR, onStatus)` API. The actual implementation uses a **polling architecture** instead:
+
+- `WhatsAppLinker.Start()` — non-blocking, starts background goroutine to process QR channel
+- `WhatsAppLinker.Poll()` — returns current `(qr, status, done, err)` under mutex
+- `WhatsAppLinker.Cleanup()` — cancels context and disconnects client
+- `whatsappPollCmd()` — tea.Tick at 200ms returning `whatsappPollMsg`
+- `handleWhatsAppSetupKeys` — creates linker, calls `Start()`, returns `whatsappPollCmd()`
+- `handleWhatsAppPoll` — reads poll state, re-schedules poll until done
+
+### Bugs fixed (2026-03-26 follow-up):
+1. Model mutations in `startWhatsAppLink()` were lost (value receiver copy)
+2. No `whatsappPollMsg` was ever sent (`tickCmd()` sends `tickMsg`)
+3. Poll handler re-scheduled `tickCmd()` instead of `whatsappPollCmd()`
+4. Deadlock: `Poll()` called `Start()` while both acquire same mutex
+5. `Start()` was never called — relied on deadlocking `Poll()` auto-start
 
 ---
 

@@ -20,7 +20,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	go.mau.fi/whatsmeow v0.0.0-20260305215846-fc65416c22c4
+	go.mau.fi/whatsmeow v0.0.0-20260322133016-ce4daa5e5a86
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )

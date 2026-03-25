@@ -155,6 +155,7 @@ type model struct {
 	whatsappStatus  string
 	whatsappDone    bool
 	whatsappError   string
+	whatsappLinker  *WhatsAppLinker
 
 	// Service options
 	enableService bool

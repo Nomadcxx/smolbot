@@ -164,6 +164,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ticker messages cycle handled internally by TypewriterTicker
 		return m, tickerCmd()
 
+	case whatsappPollMsg:
+		return m.handleWhatsAppPoll(msg)
+
 	case taskCompleteMsg:
 		return m.handleTaskComplete(msg)
 
@@ -179,25 +182,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case whatsappQRMsg:
-		m.whatsappQRCode = msg.code
-		m.whatsappStatus = "Scan the QR code with your phone"
-		return m, nil
-
-	case whatsappStatusMsg:
-		m.whatsappStatus = msg.text
-		return m, nil
-
-	case whatsappLoginResult:
-		m.whatsappDone = true
-		if msg.success {
-			m.whatsappStatus = "Device linked successfully!"
-			m.whatsappError = ""
-		} else {
-			m.whatsappStatus = "Setup failed"
-			m.whatsappError = msg.message
-		}
-		return m, nil
 	}
 
 	// Update spinner
@@ -347,117 +331,82 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func whatsappPollCmd() tea.Cmd {
+	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
+		return whatsappPollMsg{}
+	})
+}
+
 func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.logFile != nil {
-		fmt.Fprintf(m.logFile, "[WhatsAppSetup] key=%s step=%v done=%v qr=%q\n", msg.String(), m.step, m.whatsappDone, m.whatsappQRCode)
-	}
 	switch msg.String() {
 	case "enter":
-		if m.logFile != nil {
-			fmt.Fprintf(m.logFile, "[WhatsAppSetup] Enter pressed, condition=%v\n", !m.whatsappDone && m.whatsappQRCode == "")
+		if m.whatsappDone {
+			m.step = stepService
+			return m, nil
 		}
-		if !m.whatsappDone && m.whatsappQRCode == "" {
-			return m, m.startWhatsAppLink()
+		if m.whatsappLinker != nil {
+			return m, nil
 		}
-		m.step = stepService
-		return m, nil
+		storePath := filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db")
+		linker, err := NewWhatsAppLinker(storePath)
+		if err != nil {
+			m.whatsappError = err.Error()
+			m.whatsappDone = true
+			return m, nil
+		}
+		if linker.IsLinked() {
+			m.whatsappDone = true
+			m.whatsappStatus = "Already linked!"
+			return m, nil
+		}
+		if err := linker.Start(); err != nil {
+			m.whatsappError = err.Error()
+			m.whatsappDone = true
+			return m, nil
+		}
+		m.whatsappLinker = linker
+		m.whatsappStatus = "Connecting..."
+		return m, whatsappPollCmd()
 	case "esc":
+		if m.whatsappLinker != nil {
+			m.whatsappLinker.Cleanup()
+			m.whatsappLinker = nil
+		}
 		m.whatsappDone = false
 		m.whatsappQRCode = ""
 		m.whatsappStatus = ""
+		m.whatsappError = ""
 		m.step = stepService
 		return m, nil
 	}
 	return m, nil
 }
 
-func (m model) startWhatsAppLink() tea.Cmd {
-	return func() tea.Msg {
-		if m.logFile != nil {
-			fmt.Fprintf(m.logFile, "[WhatsAppSetup] startWhatsAppLink called\n")
-		}
-		storePath := filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db")
-		
-		linker, err := NewWhatsAppLinker(storePath)
-		if m.logFile != nil {
-			fmt.Fprintf(m.logFile, "[WhatsAppSetup] NewWhatsAppLinker err=%v\n", err)
-		}
-		if err != nil {
-			return whatsappLoginResult{success: false, message: err.Error()}
-		}
+type whatsappPollMsg struct{}
 
-		if linker.IsLinked() {
-			m.whatsappDone = true
-			m.whatsappQRCode = ""
-			m.whatsappStatus = "Already linked!"
-			m.whatsappError = ""
-			return whatsappLoginResult{success: true}
-		}
-
-		// Run linking in goroutine and send messages via program
-		prog := m.program
-		go func() {
-			onQR := func(code string) {
-				if prog != nil {
-					prog.Send(whatsappQRMsg{code: code})
-				}
-			}
-			onStatus := func(status string) {
-				if prog != nil {
-					prog.Send(whatsappStatusMsg{text: status})
-				}
-			}
-
-			err := linker.StartLinking(onQR, onStatus)
-			if err != nil {
-				if prog != nil {
-					prog.Send(whatsappLoginResult{success: false, message: err.Error()})
-				}
-				return
-			}
-			if prog != nil {
-				prog.Send(whatsappLoginResult{success: true})
-			}
-		}()
-
-		return whatsappLoginResult{success: true}
+func (m model) handleWhatsAppPoll(msg whatsappPollMsg) (tea.Model, tea.Cmd) {
+	if m.whatsappLinker == nil {
+		return m, nil
 	}
-}
 
-func (m model) startWhatsAppLogin() tea.Cmd {
-	return func() tea.Msg {
-		// Use direct linking instead of subprocess
-		storePath := filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db")
-		linker, err := NewWhatsAppLinker(storePath)
-		if err != nil {
-			return whatsappLoginResult{success: false, message: err.Error()}
-		}
-
-		if linker.IsLinked() {
-			return whatsappLoginResult{success: true}
-		}
-
-		// QR callback - send to model
-		onQR := func(code string) {
-		}
-
-		// Status callback - update model
-		onStatus := func(status string) {
-		}
-
-		err = linker.StartLinking(onQR, onStatus)
-		if err != nil {
-			return whatsappLoginResult{success: false, message: err.Error()}
-		}
-		return whatsappLoginResult{success: true}
+	qr, status, done, err := m.whatsappLinker.Poll()
+	if qr != "" {
+		m.whatsappQRCode = qr
 	}
-}
+	if status != "" {
+		m.whatsappStatus = status
+	}
+	if done {
+		m.whatsappDone = true
+		if err != nil {
+			m.whatsappError = err.Error()
+		}
+		m.whatsappLinker.Cleanup()
+		m.whatsappLinker = nil
+		return m, nil
+	}
 
-type whatsappQRMsg struct{ code string }
-type whatsappStatusMsg struct{ text string }
-type whatsappLoginResult struct {
-	success bool
-	message string
+	return m, whatsappPollCmd()
 }
 
 func findSmolbotBinary() (string, error) {
