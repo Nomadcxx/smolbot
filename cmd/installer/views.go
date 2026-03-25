@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Nomadcxx/smolbot/pkg/channel/whatsapp"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -353,10 +354,30 @@ func (m model) renderWhatsAppSetup() string {
 	b.WriteString(headerStyle.Render("WhatsApp Setup"))
 	b.WriteString("\n\n")
 
-	b.WriteString("Scan the QR code with your WhatsApp app to link your device.\n\n")
-	b.WriteString("  Press Enter to continue without WhatsApp setup.\n")
-	b.WriteString("  Or run 'smolbot channels login whatsapp' later.\n\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Note: Can be configured later"))
+	if m.whatsappDone {
+		if strings.Contains(m.whatsappStatus, "Error") {
+			b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  %s\n\n", m.whatsappStatus)))
+			b.WriteString("  Press Enter to continue.\n")
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render(fmt.Sprintf("  ✓ %s\n\n", m.whatsappStatus)))
+			b.WriteString("  Press Enter to continue.\n")
+		}
+		return b.String()
+	}
+
+	if m.whatsappQRCode != "" {
+		renderer := whatsapp.NewQRRenderer(256)
+		ascii, _ := renderer.RenderToASCII(m.whatsappQRCode)
+		b.WriteString("  Scan this QR code with your WhatsApp app:\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(ascii))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(fmt.Sprintf("  %s\n", m.whatsappStatus)))
+		b.WriteString("  Press Esc to skip.\n")
+	} else {
+		b.WriteString(fmt.Sprintf("  %s %s\n\n", m.spinner.View(), m.whatsappStatus))
+		b.WriteString("  Press Enter to start WhatsApp setup.\n")
+		b.WriteString("  Press Esc to skip.\n")
+	}
 
 	return b.String()
 }

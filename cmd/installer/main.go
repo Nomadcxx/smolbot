@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -178,6 +179,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+
+	case whatsappQRMsg:
+		m.whatsappQRCode = msg.code
+		m.whatsappStatus = "Scan the QR code with your phone"
+		return m, nil
+
+	case whatsappLoginResult:
+		if msg.success {
+			m.whatsappDone = true
+			m.whatsappStatus = "Device linked successfully!"
+		} else {
+			m.whatsappDone = true
+			m.whatsappStatus = fmt.Sprintf("Error: %s", msg.message)
+		}
+		return m, nil
 	}
 
 	// Update spinner
@@ -329,11 +345,86 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "enter", "esc":
+	case "enter":
+		if !m.whatsappDone && m.whatsappQRCode == "" {
+			return m, m.startWhatsAppLogin()
+		}
+		m.step = stepService
+		return m, nil
+	case "esc":
+		m.whatsappDone = false
+		m.whatsappQRCode = ""
+		m.whatsappStatus = ""
 		m.step = stepService
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m model) startWhatsAppLogin() tea.Cmd {
+	return func() tea.Msg {
+		smolbotPath, err := findSmolbotBinary()
+		if err != nil {
+			return whatsappLoginResult{success: false, message: err.Error()}
+		}
+
+		cmd := exec.Command(smolbotPath, "channels", "login", "whatsapp", "--json")
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return whatsappLoginResult{success: false, message: err.Error()}
+		}
+		if err := cmd.Start(); err != nil {
+			return whatsappLoginResult{success: false, message: err.Error()}
+		}
+
+		decoder := json.NewDecoder(stdout)
+		for {
+			var evt loginEventJSON
+			if err := decoder.Decode(&evt); err != nil {
+				break
+			}
+			switch evt.Type {
+			case "qr":
+				return whatsappQRMsg{code: evt.Code}
+			case "connected":
+				cmd.Process.Kill()
+				return whatsappLoginResult{success: true}
+			case "error":
+				cmd.Process.Kill()
+				return whatsappLoginResult{success: false, message: evt.Message}
+			}
+		}
+
+		cmd.Wait()
+		return whatsappLoginResult{success: false, message: "login process ended"}
+	}
+}
+
+type loginEventJSON struct {
+	Type    string `json:"type"`
+	Code    string `json:"code,omitempty"`
+	State   string `json:"state,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type whatsappQRMsg struct{ code string }
+type whatsappLoginResult struct {
+	success bool
+	message string
+}
+
+func findSmolbotBinary() (string, error) {
+	paths := []string{
+		filepath.Join(os.Getenv("HOME"), ".local", "bin", "smolbot"),
+		"./smolbot",
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("smolbot binary not found")
 }
 
 func (m model) handleServiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

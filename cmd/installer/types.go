@@ -146,6 +146,11 @@ type model struct {
 	signalCLIPath   string
 	whatsappDBPath  string
 
+	// WhatsApp setup state
+	whatsappQRCode  string
+	whatsappStatus  string
+	whatsappDone    bool
+
 	// Service options
 	enableService bool
 	startNow      bool

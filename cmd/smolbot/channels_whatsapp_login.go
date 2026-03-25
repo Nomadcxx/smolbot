@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -219,6 +220,64 @@ func runWhatsAppLogin(ctx context.Context, opts rootOptions) error {
 
 	if model.err != nil {
 		return model.err
+	}
+
+	return nil
+}
+
+type loginEvent struct {
+	Type    string `json:"type"`
+	Code    string `json:"code,omitempty"`
+	State   string `json:"state,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+func runWhatsAppLoginJSON(ctx context.Context, opts rootOptions) error {
+	configPath := opts.configPath
+	if configPath == "" {
+		configPath = defaultConfigPath(opts)
+	}
+
+	cfg, _, err := loadRuntimeConfig(configPath, opts.workspace, 0)
+	if err != nil {
+		return err
+	}
+
+	waCfg := cfg.Channels.WhatsApp
+	adapter, err := whatsapp.NewProductionAdapter(waCfg)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, loginTimeout)
+	defer cancel()
+
+	err = adapter.LoginWithUpdates(ctx, func(status channel.Status) error {
+		evt := loginEvent{Type: status.State}
+		switch status.State {
+		case "qr":
+			evt.Type = "qr"
+			evt.Code = status.Detail
+		case "connected":
+			evt.Type = "connected"
+		case "device-link":
+			evt.Type = "status"
+		}
+		if status.Detail != "" && status.State != "qr" {
+			evt.Detail = status.Detail
+		}
+
+		data, _ := json.Marshal(evt)
+		fmt.Println(string(data))
+		return nil
+	})
+
+	if err != nil {
+		evt := loginEvent{Type: "error", Message: err.Error()}
+		data, _ := json.Marshal(evt)
+		fmt.Println(string(data))
+		return err
 	}
 
 	return nil
