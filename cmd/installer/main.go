@@ -287,18 +287,21 @@ func (m model) handleConfigurationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "left", "h":
-		if m.channelIndex == 0 {
-			signalEnabled = !signalEnabled
-		} else if m.channelIndex == 1 {
-			whatsappEnabled = !whatsappEnabled
+	case "up", "k":
+		if m.channelIndex > 0 {
+			m.channelIndex--
 		}
 		return m, nil
-	case "right", "l":
+	case "down", "j":
+		if m.channelIndex < 1 {
+			m.channelIndex++
+		}
+		return m, nil
+	case "left", "h", "right", "l":
 		if m.channelIndex == 0 {
-			signalEnabled = !signalEnabled
+			m.signalEnabled = !m.signalEnabled
 		} else if m.channelIndex == 1 {
-			whatsappEnabled = !whatsappEnabled
+			m.whatsappEnabled = !m.whatsappEnabled
 		}
 		return m, nil
 	case "enter":

@@ -307,21 +307,35 @@ func (m model) renderChannels() string {
 	b.WriteString("\n\n")
 
 	// Signal
+	signalMarker := "○"
+	signalStyle := lipgloss.NewStyle()
+	if m.channelIndex == 0 {
+		signalMarker = "●"
+		signalStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	}
 	signalStatus := "[ ] Disabled"
 	if m.signalEnabled {
 		signalStatus = "[✓] Enabled"
 	}
-	b.WriteString(fmt.Sprintf("Signal Integration  %s\n", signalStatus))
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Requires signal-cli"))
+	b.WriteString(signalStyle.Render(fmt.Sprintf("  %s Signal Integration  %s", signalMarker, signalStatus)))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Requires signal-cli"))
 	b.WriteString("\n\n")
 
 	// WhatsApp
+	waStyle := lipgloss.NewStyle()
+	waMarker := "○"
+	if m.channelIndex == 1 {
+		waMarker = "●"
+		waStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	}
 	whatsappStatus := "[ ] Disabled"
 	if m.whatsappEnabled {
 		whatsappStatus = "[✓] Enabled"
 	}
-	b.WriteString(fmt.Sprintf("WhatsApp Integration  %s\n", whatsappStatus))
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Requires QR code scan"))
+	b.WriteString(waStyle.Render(fmt.Sprintf("  %s WhatsApp Integration  %s", waMarker, whatsappStatus)))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Requires QR code scan"))
 	b.WriteString("\n\n")
 
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Note: Can be configured later"))
