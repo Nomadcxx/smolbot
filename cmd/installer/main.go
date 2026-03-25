@@ -110,9 +110,6 @@ func tickerCmd() tea.Cmd {
 type tickerMsg struct{}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		fmt.Printf("DEBUG Update: step=%v, key=%s\n", m.step, keyMsg.String())
-	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Handle quit
@@ -351,10 +348,14 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	fmt.Printf("DEBUG handleWhatsAppSetupKeys: msg=%s, whatsappDone=%v, whatsappQRCode=%q\n", msg.String(), m.whatsappDone, m.whatsappQRCode)
+	if m.logFile != nil {
+		fmt.Fprintf(m.logFile, "[WhatsAppSetup] key=%s step=%v done=%v qr=%q\n", msg.String(), m.step, m.whatsappDone, m.whatsappQRCode)
+	}
 	switch msg.String() {
 	case "enter":
-		fmt.Printf("DEBUG: enter pressed, condition=%v\n", !m.whatsappDone && m.whatsappQRCode == "")
+		if m.logFile != nil {
+			fmt.Fprintf(m.logFile, "[WhatsAppSetup] Enter pressed, condition=%v\n", !m.whatsappDone && m.whatsappQRCode == "")
+		}
 		if !m.whatsappDone && m.whatsappQRCode == "" {
 			return m, m.startWhatsAppLink()
 		}
@@ -372,12 +373,15 @@ func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) startWhatsAppLink() tea.Cmd {
 	return func() tea.Msg {
-		fmt.Printf("DEBUG: startWhatsAppLink called\n")
+		if m.logFile != nil {
+			fmt.Fprintf(m.logFile, "[WhatsAppSetup] startWhatsAppLink called\n")
+		}
 		storePath := filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db")
-		fmt.Printf("DEBUG: storePath=%s\n", storePath)
 		
 		linker, err := NewWhatsAppLinker(storePath)
-		fmt.Printf("DEBUG: NewWhatsAppLinker err=%v\n", err)
+		if m.logFile != nil {
+			fmt.Fprintf(m.logFile, "[WhatsAppSetup] NewWhatsAppLinker err=%v\n", err)
+		}
 		if err != nil {
 			return whatsappLoginResult{success: false, message: err.Error()}
 		}
