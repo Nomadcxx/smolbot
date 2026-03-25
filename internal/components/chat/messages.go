@@ -110,6 +110,10 @@ func (m *MessagesModel) GetThinking() string {
 	return m.thinking
 }
 
+func (m *MessagesModel) GetProgress() string {
+	return m.progress
+}
+
 func (m *MessagesModel) ReplaceHistory(history []ChatMessage) {
 	m.messages = append([]ChatMessage(nil), history...)
 	m.tools = nil

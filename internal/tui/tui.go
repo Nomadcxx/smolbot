@@ -207,7 +207,7 @@ func (m Model) syncStatusCmd(echo bool) tea.Cmd {
 	return func() tea.Msg {
 		payload, err := m.client.Status(m.app.Session)
 		if err != nil {
-			return ChatErrorMsg{Message: err.Error()}
+			return StatusLoadedMsg{Echo: echo}
 		}
 		return StatusLoadedMsg{Payload: payload, Echo: echo}
 	}
@@ -263,7 +263,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages.AppendAssistant(msg.Content)
 		return m, m.syncStatusCmd(false)
 	case ChatProgressMsg:
-		m.messages.SetProgress(msg.Content)
+		m.messages.SetProgress(m.messages.GetProgress() + msg.Content)
 		return m, nil
 	case ThinkingDoneMsg:
 		m.messages.AppendThinking(msg.Content)
