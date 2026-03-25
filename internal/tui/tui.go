@@ -37,6 +37,16 @@ type CompressionStatusMsg struct {
 	Info client.CompressionInfo
 }
 type SessionsLoadedMsg struct{ Sessions []client.SessionInfo }
+type ChannelInboundMsg struct {
+	Channel string
+	ChatID  string
+	Content string
+}
+type ChannelOutboundMsg struct {
+	Channel string
+	ChatID  string
+	Content string
+}
 type SessionResetDoneMsg struct{ Key string }
 type ModelsLoadedMsg struct {
 	Models  []client.ModelInfo
@@ -274,6 +284,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status.SetStreaming(false)
 		m.messages.AppendError(msg.Message)
 		return m, nil
+	case ChannelInboundMsg:
+		label := "[" + msg.Channel + "] " + msg.Content
+		m.messages.AppendUser(label)
+		return m, nil
+	case ChannelOutboundMsg:
+		m.messages.AppendAssistant(msg.Content)
+		return m, nil
 	case HistoryLoadedMsg:
 		history := make([]chat.ChatMessage, 0, len(msg.Messages))
 		for _, hm := range msg.Messages {
@@ -421,6 +438,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				pct := int((float64(p.TotalTokens) / float64(p.ContextWindow)) * 100 + 0.5)
 				m.header.SetContextPercent(pct)
 			}
+		case "channel.inbound":
+			var p client.ChannelMessagePayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			mapped = ChannelInboundMsg{Channel: p.Channel, ChatID: p.ChatID, Content: p.Content}
+		case "channel.outbound":
+			var p client.ChannelMessagePayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			mapped = ChannelOutboundMsg{Channel: p.Channel, ChatID: p.ChatID, Content: p.Content}
+		case "channel.progress":
+			var p client.ChannelMessagePayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			m.messages.SetProgress(m.messages.GetProgress() + p.Content)
+		case "channel.error":
+			var p client.ChannelErrorPayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			m.messages.AppendError("[" + p.Channel + "] " + p.Error)
 		}
 		if mapped != nil {
 			nextModel, cmd := m.Update(mapped)

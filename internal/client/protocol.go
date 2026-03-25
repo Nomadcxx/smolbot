@@ -128,6 +128,20 @@ type HistoryMessage struct {
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
+// ChannelMessagePayload represents an inbound or outbound channel message.
+type ChannelMessagePayload struct {
+	Channel string `json:"channel"`
+	ChatID  string `json:"chatID"`
+	Content string `json:"content"`
+}
+
+// ChannelErrorPayload represents an error from channel processing.
+type ChannelErrorPayload struct {
+	Channel string `json:"channel"`
+	ChatID  string `json:"chatID"`
+	Error   string `json:"error"`
+}
+
 // CompressionInfo contains context compression state for UI display
 type CompressionInfo struct {
 	Enabled            bool    `json:"enabled"`

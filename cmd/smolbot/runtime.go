@@ -946,19 +946,79 @@ func (a *runtimeApp) handleInbound(ctx context.Context, msg channel.InboundMessa
 	if a == nil || a.agent == nil || a.channels == nil {
 		return
 	}
+	log.Printf("[channel] inbound from %s/%s: %s", msg.Channel, msg.ChatID, truncateLog(msg.Content, 120))
+	if a.gateway != nil {
+		a.gateway.BroadcastEvent("channel.inbound", map[string]any{
+			"channel": msg.Channel,
+			"chatID":  msg.ChatID,
+			"content": msg.Content,
+		})
+	}
 	go func() {
 		sessionKey := firstNonEmpty(msg.Channel+":"+msg.ChatID, msg.ChatID, "channel:unknown")
+		cb := a.channelEventCallback(msg.Channel, msg.ChatID)
 		response, err := a.agent.ProcessDirect(ctx, agent.Request{
 			Content:    msg.Content,
 			SessionKey: sessionKey,
 			Channel:    msg.Channel,
 			ChatID:     msg.ChatID,
-		}, nil)
-		if err != nil || strings.TrimSpace(response) == "" {
+		}, cb)
+		if err != nil {
+			log.Printf("[channel] agent error for %s/%s: %v", msg.Channel, msg.ChatID, err)
+			if a.gateway != nil {
+				a.gateway.BroadcastEvent("channel.error", map[string]any{
+					"channel": msg.Channel,
+					"chatID":  msg.ChatID,
+					"error":   err.Error(),
+				})
+			}
 			return
 		}
-		_ = a.channels.Route(ctx, msg.Channel, msg.ChatID, response)
+		if strings.TrimSpace(response) == "" {
+			log.Printf("[channel] empty response for %s/%s", msg.Channel, msg.ChatID)
+			return
+		}
+		if a.gateway != nil {
+			a.gateway.BroadcastEvent("channel.outbound", map[string]any{
+				"channel": msg.Channel,
+				"chatID":  msg.ChatID,
+				"content": response,
+			})
+		}
+		if err := a.channels.Route(ctx, msg.Channel, msg.ChatID, response); err != nil {
+			log.Printf("[channel] route error for %s/%s: %v", msg.Channel, msg.ChatID, err)
+		}
 	}()
+}
+
+func (a *runtimeApp) channelEventCallback(ch, chatID string) agent.EventCallback {
+	if a.gateway == nil {
+		return nil
+	}
+	return func(event agent.Event) {
+		switch event.Type {
+		case agent.EventProgress:
+			a.gateway.BroadcastEvent("channel.progress", map[string]any{
+				"channel": ch,
+				"chatID":  chatID,
+				"content": event.Content,
+			})
+		case agent.EventThinking:
+			a.gateway.BroadcastEvent("channel.thinking", map[string]any{
+				"channel": ch,
+				"chatID":  chatID,
+				"content": event.Content,
+			})
+		}
+	}
+}
+
+func truncateLog(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
 }
 
 func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error) {

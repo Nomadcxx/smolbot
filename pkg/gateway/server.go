@@ -683,6 +683,19 @@ func (s *Server) emitEvent(client *clientState, name string, payload map[string]
 	}
 }
 
+// BroadcastEvent sends an event to all connected WebSocket clients.
+func (s *Server) BroadcastEvent(name string, payload map[string]any) {
+	s.mu.Lock()
+	snapshot := make([]*clientState, 0, len(s.clients))
+	for _, cs := range s.clients {
+		snapshot = append(snapshot, cs)
+	}
+	s.mu.Unlock()
+	for _, cs := range snapshot {
+		s.emitEvent(cs, name, payload)
+	}
+}
+
 func (c *clientState) write(frame []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
