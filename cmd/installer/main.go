@@ -164,6 +164,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ticker messages cycle handled internally by TypewriterTicker
 		return m, tickerCmd()
 
+	case whatsappInitResult:
+		if msg.err != nil {
+			m.whatsappError = msg.err.Error()
+			m.whatsappDone = true
+			return m, nil
+		}
+		if msg.linked {
+			m.whatsappDone = true
+			m.whatsappStatus = "Already linked!"
+			return m, nil
+		}
+		m.whatsappLinker = msg.linker
+		m.whatsappStatus = "Waiting for QR code..."
+		return m, whatsappPollCmd()
+
 	case whatsappPollMsg:
 		return m.handleWhatsAppPoll(msg)
 
@@ -318,7 +333,8 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		whatsappEnabled = m.whatsappEnabled
 		if m.whatsappEnabled {
 			m.step = stepWhatsAppSetup
-			return m, nil
+			m.whatsappStatus = "Connecting to WhatsApp..."
+			return m, startWhatsAppLinkCmd()
 		}
 		m.step = stepService
 		return m, nil
@@ -337,6 +353,29 @@ func whatsappPollCmd() tea.Cmd {
 	})
 }
 
+type whatsappInitResult struct {
+	linker  *WhatsAppLinker
+	err     error
+	linked  bool
+}
+
+func startWhatsAppLinkCmd() tea.Cmd {
+	return func() tea.Msg {
+		storePath := filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db")
+		linker, err := NewWhatsAppLinker(storePath)
+		if err != nil {
+			return whatsappInitResult{err: err}
+		}
+		if linker.IsLinked() {
+			return whatsappInitResult{linked: true}
+		}
+		if err := linker.Start(); err != nil {
+			return whatsappInitResult{err: err}
+		}
+		return whatsappInitResult{linker: linker}
+	}
+}
+
 func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
@@ -344,29 +383,7 @@ func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.step = stepService
 			return m, nil
 		}
-		if m.whatsappLinker != nil {
-			return m, nil
-		}
-		storePath := filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db")
-		linker, err := NewWhatsAppLinker(storePath)
-		if err != nil {
-			m.whatsappError = err.Error()
-			m.whatsappDone = true
-			return m, nil
-		}
-		if linker.IsLinked() {
-			m.whatsappDone = true
-			m.whatsappStatus = "Already linked!"
-			return m, nil
-		}
-		if err := linker.Start(); err != nil {
-			m.whatsappError = err.Error()
-			m.whatsappDone = true
-			return m, nil
-		}
-		m.whatsappLinker = linker
-		m.whatsappStatus = "Connecting..."
-		return m, whatsappPollCmd()
+		return m, nil
 	case "esc":
 		if m.whatsappLinker != nil {
 			m.whatsappLinker.Cleanup()

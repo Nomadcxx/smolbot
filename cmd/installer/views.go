@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Nomadcxx/smolbot/pkg/channel/whatsapp"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/skip2/go-qrcode"
 )
 
 // View renders the UI
@@ -374,16 +374,14 @@ func (m model) renderWhatsAppSetup() string {
 	}
 
 	if m.whatsappQRCode != "" {
-		renderer := whatsapp.NewQRRenderer(256)
-		ascii, _ := renderer.RenderToASCII(m.whatsappQRCode)
+		ascii := renderQRForTerminal(m.whatsappQRCode)
 		b.WriteString("  Scan this QR code with your WhatsApp app:\n\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(ascii))
-		b.WriteString("\n\n")
+		b.WriteString(ascii)
+		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(fmt.Sprintf("  %s\n", m.whatsappStatus)))
-		b.WriteString("  Press Esc to skip.\n")
+		b.WriteString("\n  Press Enter when done  •  Esc to skip\n")
 	} else {
 		b.WriteString(fmt.Sprintf("  %s %s\n\n", m.spinner.View(), m.whatsappStatus))
-		b.WriteString("  Press Enter to start WhatsApp setup.\n")
 		b.WriteString("  Press Esc to skip.\n")
 	}
 
@@ -518,4 +516,39 @@ func (m model) renderUninstall() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("Warning: This action cannot be undone!"))
 
 	return b.String()
+}
+
+func renderQRForTerminal(data string) string {
+	q, err := qrcode.New(data, qrcode.Medium)
+	if err != nil {
+		return fmt.Sprintf("  QR error: %v\n", err)
+	}
+	bitmap := q.Bitmap()
+	if len(bitmap) == 0 {
+		return "  QR error: empty bitmap\n"
+	}
+
+	var buf strings.Builder
+	for y := 0; y < len(bitmap); y += 2 {
+		buf.WriteString("  ")
+		for x := 0; x < len(bitmap[y]); x++ {
+			top := bitmap[y][x]
+			bot := false
+			if y+1 < len(bitmap) {
+				bot = bitmap[y+1][x]
+			}
+			switch {
+			case top && bot:
+				buf.WriteString("\u2588") // █ full block
+			case top:
+				buf.WriteString("\u2580") // ▀ upper half
+			case bot:
+				buf.WriteString("\u2584") // ▄ lower half
+			default:
+				buf.WriteString(" ")
+			}
+		}
+		buf.WriteString("\n")
+	}
+	return buf.String()
 }
