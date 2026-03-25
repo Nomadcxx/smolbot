@@ -145,6 +145,29 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}()
 
+	// Enable ping/pong keepalive
+	conn.SetPongHandler(func(string) error {
+		return nil
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start ping goroutine to keep connection alive
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
