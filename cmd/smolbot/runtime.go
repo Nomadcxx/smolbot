@@ -522,6 +522,12 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	if err := ensureRuntimePaths(paths); err != nil {
 		return nil, err
 	}
+
+	// Validate heartbeat config
+	if cfg.Gateway.Heartbeat.Enabled && cfg.Gateway.Heartbeat.Interval <= 0 {
+		return nil, fmt.Errorf("heartbeat enabled but interval is %d (must be > 0)", cfg.Gateway.Heartbeat.Interval)
+	}
+
 	if err := agent.SyncWorkspaceTemplates(paths.Workspace()); err != nil {
 		return nil, err
 	}
