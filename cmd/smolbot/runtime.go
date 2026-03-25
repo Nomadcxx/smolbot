@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -968,11 +969,7 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 					return
 				case now := <-ticker.C:
 					if err := app.runCron(ctx, now); err != nil {
-						select {
-						case errCh <- err:
-						default:
-						}
-						return
+						log.Printf("[runtime] cron run failed: %v", err)
 					}
 				}
 			}
