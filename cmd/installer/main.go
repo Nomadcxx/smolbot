@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -186,12 +187,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case whatsappLoginResult:
+		m.whatsappDone = true
 		if msg.success {
-			m.whatsappDone = true
 			m.whatsappStatus = "Device linked successfully!"
+			m.whatsappError = ""
 		} else {
-			m.whatsappDone = true
-			m.whatsappStatus = fmt.Sprintf("Error: %s", msg.message)
+			m.whatsappStatus = "Setup failed"
+			m.whatsappError = msg.message
 		}
 		return m, nil
 	}
@@ -373,6 +375,10 @@ func (m model) startWhatsAppLogin() tea.Cmd {
 		if err != nil {
 			return whatsappLoginResult{success: false, message: err.Error()}
 		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return whatsappLoginResult{success: false, message: err.Error()}
+		}
 		if err := cmd.Start(); err != nil {
 			return whatsappLoginResult{success: false, message: err.Error()}
 		}
@@ -395,8 +401,14 @@ func (m model) startWhatsAppLogin() tea.Cmd {
 			}
 		}
 
+		// Check stderr for any error output
+		errBytes, _ := io.ReadAll(stderr)
 		cmd.Wait()
-		return whatsappLoginResult{success: false, message: "login process ended"}
+
+		if len(errBytes) > 0 {
+			return whatsappLoginResult{success: false, message: string(errBytes)}
+		}
+		return whatsappLoginResult{success: false, message: "login process ended unexpectedly"}
 	}
 }
 

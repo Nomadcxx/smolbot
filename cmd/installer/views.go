@@ -355,8 +355,10 @@ func (m model) renderWhatsAppSetup() string {
 	b.WriteString("\n\n")
 
 	if m.whatsappDone {
-		if strings.Contains(m.whatsappStatus, "Error") {
-			b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  %s\n\n", m.whatsappStatus)))
+		if m.whatsappError != "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  ✗ %s\n", m.whatsappStatus)))
+			b.WriteString("\n")
+			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(fmt.Sprintf("  Error: %s\n\n", m.whatsappError)))
 			b.WriteString("  Press Enter to continue.\n")
 		} else {
 			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render(fmt.Sprintf("  ✓ %s\n\n", m.whatsappStatus)))

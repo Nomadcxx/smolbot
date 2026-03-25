@@ -150,6 +150,7 @@ type model struct {
 	whatsappQRCode  string
 	whatsappStatus  string
 	whatsappDone    bool
+	whatsappError   string
 
 	// Service options
 	enableService bool
