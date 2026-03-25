@@ -87,14 +87,18 @@ func (a *Adapter) Start(ctx context.Context, handler channel.Handler) error {
 		return errors.New("whatsapp client seam is required")
 	}
 	a.updateStatus("connecting", "")
+	log.Printf("[whatsapp] adapter starting...")
 	err := a.seam.Start(ctx, func(raw rawInboundMessage) error {
+		log.Printf("[whatsapp] raw inbound: chatID=%q content=%q", raw.ChatID, raw.Content)
 		handler(ctx, raw.normalize())
 		return nil
 	})
 	if err != nil {
+		log.Printf("[whatsapp] adapter start failed: %v", err)
 		a.updateStatus("error", strings.TrimSpace(err.Error()))
 		return err
 	}
+	log.Printf("[whatsapp] adapter started successfully")
 	a.updateStatus("connected", "")
 	return nil
 }
@@ -367,6 +371,14 @@ func (s *whatsmeowSeam) Login(ctx context.Context, report func(loginUpdate) erro
 	}
 }
 
+func (s *whatsmeowSeam) isOwnDevice(sender waTypes.JID) bool {
+	ownID := s.client.Store.ID
+	if ownID == nil {
+		return false
+	}
+	return sender.User == ownID.User && sender.Device == ownID.Device
+}
+
 func (s *whatsmeowSeam) ensureConnected(ctx context.Context) error {
 	if s.client.Store.ID == nil {
 		return errors.New("whatsapp login required; run `smolbot channels login whatsapp`")
@@ -404,7 +416,15 @@ func categorizeError(err error) (category string, retryable bool) {
 func (s *whatsmeowSeam) handleEvent(evt any, handle func(rawInboundMessage) error) {
 	switch typed := evt.(type) {
 	case *waEvents.Message:
-		if typed == nil || typed.Info.IsFromMe {
+		if typed == nil {
+			return
+		}
+		log.Printf("[whatsapp] message event: from=%s device=%d isFromMe=%v chat=%s",
+			typed.Info.Sender.String(), typed.Info.Sender.Device, typed.Info.IsFromMe, typed.Info.Chat.String())
+		// Only filter messages from the bot's own device to prevent echo loops.
+		// IsFromMe=true from OTHER devices (user's phone) should be processed
+		// so the user can chat with the bot via WhatsApp.
+		if typed.Info.IsFromMe && s.isOwnDevice(typed.Info.Sender) {
 			return
 		}
 
