@@ -19,13 +19,14 @@ type Client struct {
 	nextID  atomic.Int64
 	pending sync.Map
 	lastSeq int
+	done    chan struct{}
 
 	OnEvent func(Event)
 	OnClose func()
 }
 
 func New(url string) *Client {
-	c := &Client{url: url}
+	c := &Client{url: url, done: make(chan struct{})}
 	c.nextID.Store(0)
 	return c
 }
@@ -47,6 +48,7 @@ func (c *Client) Connect() (*HelloPayload, error) {
 	c.mu.Lock()
 	c.conn = conn
 	c.lastSeq = 0
+	c.done = make(chan struct{})
 	c.mu.Unlock()
 
 	helloReq := Request{
@@ -96,6 +98,29 @@ func (c *Client) Connect() (*HelloPayload, error) {
 	}
 
 	go c.readLoop()
+
+	// Start ping goroutine to keep connection alive
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-c.done:
+				return
+			case <-ticker.C:
+				c.mu.Lock()
+				conn := c.conn
+				c.mu.Unlock()
+				if conn == nil {
+					return
+				}
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	return &payload, nil
 }
 
@@ -107,6 +132,10 @@ func (c *Client) Close() {
 		c.conn = nil
 	}
 	c.lastSeq = 0
+	if c.done != nil {
+		close(c.done)
+		c.done = nil
+	}
 }
 
 func (c *Client) allocID() string {
