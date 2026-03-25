@@ -375,9 +375,30 @@ func (s *whatsmeowSeam) ensureConnected(ctx context.Context) error {
 		return nil
 	}
 	if err := s.client.Connect(); err != nil {
-		return fmt.Errorf("whatsapp connect: %w", err)
+		category, retryable := categorizeError(err)
+		log.Printf("[whatsapp] connect failed (category=%s, retryable=%v): %v", category, retryable, err)
+		return fmt.Errorf("whatsapp connect [%s]: %w", category, err)
 	}
 	return nil
+}
+
+func categorizeError(err error) (category string, retryable bool) {
+	if err == nil {
+		return "unknown", false
+	}
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "logged out"), strings.Contains(errStr, "auth"):
+		return "auth", false
+	case strings.Contains(errStr, "connection"), strings.Contains(errStr, "disconnected"):
+		return "connection", true
+	case strings.Contains(errStr, "timeout"):
+		return "timeout", true
+	case strings.Contains(errStr, "rate limit"):
+		return "rate", true
+	default:
+		return "unknown", true
+	}
 }
 
 func (s *whatsmeowSeam) handleEvent(evt any, handle func(rawInboundMessage) error) {
