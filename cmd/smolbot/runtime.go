@@ -985,11 +985,7 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 					return
 				case <-ticker.C:
 					if err := app.runBeat(ctx); err != nil {
-						select {
-						case errCh <- err:
-						default:
-						}
-						return
+						log.Printf("[runtime] heartbeat run failed: %v", err)
 					}
 				}
 			}
