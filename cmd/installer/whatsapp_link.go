@@ -108,13 +108,22 @@ func (l *WhatsAppLinker) processQRChannel() {
 			return
 		case item, ok := <-l.qrChan:
 			if !ok {
+				// QR channel closed — wait for handshake to complete.
+				// Store.ID is set once pairing finishes, but there may
+				// be a brief delay after the channel closes.
+				for i := 0; i < 25; i++ {
+					if l.client.Store.ID != nil {
+						break
+					}
+					time.Sleep(200 * time.Millisecond)
+				}
 				l.mu.Lock()
-				if l.client.IsLoggedIn() {
-					l.status = "Linked!"
+				if l.client.Store.ID != nil {
+					l.status = "Linked successfully!"
 					l.done = true
 				} else {
 					l.status = "QR channel closed"
-					l.linkErr = fmt.Errorf("qr channel closed")
+					l.linkErr = fmt.Errorf("qr channel closed without completing link")
 					l.done = true
 				}
 				l.mu.Unlock()
@@ -127,14 +136,14 @@ func (l *WhatsAppLinker) processQRChannel() {
 				l.qrCode = item.Code
 				l.status = "Scan QR with WhatsApp"
 			case whatsmeow.QRChannelSuccess.Event:
-				l.status = "Linked successfully!"
-				l.done = true
-				l.client.Disconnect()
+				l.status = "Completing handshake..."
+				// Do NOT disconnect here — the client needs to stay
+				// connected for the pairing handshake to finish and
+				// Store.ID to be persisted. Cleanup() handles disconnect.
 			case whatsmeow.QRChannelTimeout.Event:
 				l.status = "QR timed out"
 				l.linkErr = fmt.Errorf("qr timed out")
 				l.done = true
-				l.client.Disconnect()
 			case whatsmeow.QRChannelEventError:
 				if item.Error != nil {
 					l.status = fmt.Sprintf("Error: %v", item.Error)
@@ -144,7 +153,6 @@ func (l *WhatsAppLinker) processQRChannel() {
 					l.linkErr = fmt.Errorf("link error")
 				}
 				l.done = true
-				l.client.Disconnect()
 			}
 			l.mu.Unlock()
 		}
