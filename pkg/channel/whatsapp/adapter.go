@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	"github.com/Nomadcxx/smolbot/pkg/config"
@@ -32,10 +33,14 @@ type clientSeam interface {
 }
 
 type Adapter struct {
-	seam clientSeam
+	seam   clientSeam
 
 	mu     sync.RWMutex
 	status channel.Status
+
+	lastConnectedAt time.Time
+	lastMessageAt  time.Time
+	reconnectCount int
 }
 
 type rawInboundMessage struct {
@@ -81,16 +86,16 @@ func (a *Adapter) Start(ctx context.Context, handler channel.Handler) error {
 	if a.seam == nil {
 		return errors.New("whatsapp client seam is required")
 	}
-	a.setStatus(channel.Status{State: "connecting"})
+	a.updateStatus("connecting", "")
 	err := a.seam.Start(ctx, func(raw rawInboundMessage) error {
 		handler(ctx, raw.normalize())
 		return nil
 	})
 	if err != nil {
-		a.setStatus(channel.Status{State: "error", Detail: strings.TrimSpace(err.Error())})
+		a.updateStatus("error", strings.TrimSpace(err.Error()))
 		return err
 	}
-	a.setStatus(channel.Status{State: "connected"})
+	a.updateStatus("connected", "")
 	return nil
 }
 
@@ -100,10 +105,10 @@ func (a *Adapter) Stop(ctx context.Context) error {
 	}
 	err := a.seam.Stop(ctx)
 	if err != nil {
-		a.setStatus(channel.Status{State: "error", Detail: strings.TrimSpace(err.Error())})
+		a.updateStatus("error", strings.TrimSpace(err.Error()))
 		return err
 	}
-	a.setStatus(channel.Status{State: "disconnected"})
+	a.updateStatus("disconnected", "")
 	return nil
 }
 
@@ -123,6 +128,46 @@ func (a *Adapter) Status(context.Context) (channel.Status, error) {
 	return a.status, nil
 }
 
+func (a *Adapter) LastConnectedAt() time.Time {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.lastConnectedAt
+}
+
+func (a *Adapter) ReconnectCount() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.reconnectCount
+}
+
+func (a *Adapter) LastMessageAt() time.Time {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.lastMessageAt
+}
+
+func (a *Adapter) recordMessage() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.lastMessageAt = time.Now()
+}
+
+func (a *Adapter) recordReconnect() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.reconnectCount++
+}
+
+func (a *Adapter) updateStatus(state, detail string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.status = channel.Status{State: state, Detail: detail}
+	if state == "connected" {
+		a.lastConnectedAt = time.Now()
+		a.reconnectCount = 0
+	}
+}
+
 func (a *Adapter) Login(ctx context.Context) error {
 	return a.LoginWithUpdates(ctx, nil)
 }
@@ -133,14 +178,14 @@ func (a *Adapter) LoginWithUpdates(ctx context.Context, report func(channel.Stat
 	}
 	err := a.seam.Login(ctx, func(update loginUpdate) error {
 		status := update.normalize()
-		a.setStatus(status)
+		a.updateStatus(status.State, status.Detail)
 		if report != nil {
 			return report(status)
 		}
 		return nil
 	})
 	if err != nil {
-		a.setStatus(channel.Status{State: "error", Detail: strings.TrimSpace(err.Error())})
+		a.updateStatus("error", strings.TrimSpace(err.Error()))
 	}
 	return err
 }
