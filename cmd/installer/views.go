@@ -134,7 +134,13 @@ func (m model) getHelpText() string {
 	case stepChannels:
 		return "↑/↓: Navigate  •  Space: Toggle  •  Enter: Continue  •  Esc: Back"
 	case stepWhatsAppSetup:
-		return "Enter: Continue without WhatsApp  •  Esc: Back"
+		if m.whatsappDone {
+			return "Enter: Continue  •  Esc: Back"
+		}
+		if m.whatsappQRCode != "" {
+			return "Scan QR with WhatsApp  •  Enter: Done  •  Esc: Skip"
+		}
+		return "Enter: Start  •  Esc: Skip"
 	case stepService:
 		return "Tab: Next option  •  ←/→: Toggle  •  Enter: Install  •  Esc: Back"
 	case stepInstalling:

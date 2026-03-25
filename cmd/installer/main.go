@@ -367,9 +367,12 @@ func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) startWhatsAppLink() tea.Cmd {
 	return func() tea.Msg {
+		fmt.Printf("DEBUG: startWhatsAppLink called\n")
 		storePath := filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db")
+		fmt.Printf("DEBUG: storePath=%s\n", storePath)
 		
 		linker, err := NewWhatsAppLinker(storePath)
+		fmt.Printf("DEBUG: NewWhatsAppLinker err=%v\n", err)
 		if err != nil {
 			return whatsappLoginResult{success: false, message: err.Error()}
 		}
