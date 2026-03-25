@@ -429,14 +429,21 @@ type whatsappLoginResult struct {
 func findSmolbotBinary() (string, error) {
 	paths := []string{
 		filepath.Join(os.Getenv("HOME"), ".local", "bin", "smolbot"),
+		filepath.Join(os.Getenv("HOME"), ".local", "bin", "smolbot-tui"),
 		"./smolbot",
+		"smolbot",
 	}
+	// First try direct paths
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("smolbot binary not found")
+	// Fall back to PATH lookup
+	if smolbotPath, err := exec.LookPath("smolbot"); err == nil {
+		return smolbotPath, nil
+	}
+	return "", fmt.Errorf("smolbot binary not found in ~/.local/bin or PATH")
 }
 
 func (m model) handleServiceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
