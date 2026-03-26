@@ -221,6 +221,49 @@ func TestFooterCompressionDisabled(t *testing.T) {
 	require.NotContains(t, view, "↓")
 }
 
+func TestFooterShowsCompactingSpinner(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
+
+	a := app.New(app.Config{})
+	footer := NewFooter(a)
+	footer.SetWidth(100)
+	footer.SetCompacting(true)
+	footer.SetCompactionFrame(2)
+
+	view := stripANSIStatus(footer.View())
+	require.Contains(t, view, "compacting...")
+	require.Contains(t, view, "⣻")
+}
+
+func TestFooterCriticalUsageWarnings(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
+
+	a := app.New(app.Config{})
+	footer := NewFooter(a)
+	footer.SetWidth(100)
+
+	footer.SetUsage(client.UsageInfo{
+		TotalTokens:   9000,
+		ContextWindow: 10000,
+	})
+	view := stripANSIStatus(footer.View())
+	require.Contains(t, view, "90%")
+	require.Contains(t, view, "⚠")
+	require.NotContains(t, view, "/compact")
+
+	footer.SetUsage(client.UsageInfo{
+		TotalTokens:   9500,
+		ContextWindow: 10000,
+	})
+	view = stripANSIStatus(footer.View())
+	require.Contains(t, view, "95%")
+	require.Contains(t, view, "⚠ /compact")
+}
+
 func TestFooterTokenUsageColorCoding(t *testing.T) {
 	if !theme.Set("nord") {
 		t.Fatal("expected nord theme")

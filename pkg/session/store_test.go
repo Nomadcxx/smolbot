@@ -137,6 +137,36 @@ func TestClearSession(t *testing.T) {
 	}
 }
 
+func TestReplaceMessages_RollsBackOnInsertError(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.GetOrCreateSession("s1"); err != nil {
+		t.Fatalf("GetOrCreateSession: %v", err)
+	}
+	if err := store.SaveMessages("s1", []provider.Message{{Role: "user", Content: "keep me"}}); err != nil {
+		t.Fatalf("SaveMessages: %v", err)
+	}
+
+	err = store.ReplaceMessages("s1", []provider.Message{
+		{Role: "user", Content: make(chan int)},
+	})
+	if err == nil {
+		t.Fatal("expected ReplaceMessages to fail on unsupported content")
+	}
+
+	msgs, err := store.GetHistory("s1", 10)
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].StringContent() != "keep me" {
+		t.Fatalf("history was mutated on failed replace: %#v", msgs)
+	}
+}
+
 func TestListSessions(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

@@ -3,10 +3,13 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/Nomadcxx/smolbot/internal/app"
+	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/internal/tui"
+	cfgpkg "github.com/Nomadcxx/smolbot/pkg/config"
 	flag "github.com/spf13/pflag"
 )
 
@@ -18,10 +21,11 @@ func main() {
 	flag.Parse()
 
 	cfg := app.Config{
-		Host:    *host,
-		Port:    *port,
-		Theme:   *theme,
-		Session: *session,
+		Host:       *host,
+		Port:       *port,
+		Theme:      *theme,
+		Session:    *session,
+		MCPServers: loadSidebarMCPServers(),
 	}
 
 	model := tui.New(cfg)
@@ -30,4 +34,36 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func loadSidebarMCPServers() []client.MCPServerInfo {
+	loaded, err := cfgpkg.Load(cfgpkg.DefaultPaths().ConfigFile())
+	if err != nil {
+		return nil
+	}
+
+	names := make([]string, 0, len(loaded.Tools.MCPServers))
+	for name := range loaded.Tools.MCPServers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	servers := make([]client.MCPServerInfo, 0, len(names))
+	for _, name := range names {
+		server := loaded.Tools.MCPServers[name]
+		tools := 0
+		for _, enabled := range server.EnabledTools {
+			if enabled == "*" {
+				tools = 0
+				break
+			}
+			tools++
+		}
+		servers = append(servers, client.MCPServerInfo{
+			Name:   name,
+			Status: "configured",
+			Tools:  tools,
+		})
+	}
+	return servers
 }

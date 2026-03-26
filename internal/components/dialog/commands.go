@@ -20,10 +20,15 @@ type CommandsModel struct {
 }
 
 var commandDescriptions = map[string]string{
+	"/compact":       "compress context to free tokens",
 	"/session":       "switch sessions",
 	"/session new":   "start a fresh session",
 	"/session reset": "reset the current session transcript",
 	"/model":         "choose the active model",
+	"/skills":        "browse available skills",
+	"/mcps":          "show configured MCP servers",
+	"/providers":     "show provider and model context",
+	"/keybindings":   "show keyboard shortcuts",
 	"/clear":         "clear the visible transcript",
 	"/status":        "show gateway status",
 	"/help":          "list available slash commands",
@@ -31,6 +36,7 @@ var commandDescriptions = map[string]string{
 }
 
 var commandAliases = map[string][]string{
+	"/compact":       {"compress"},
 	"/session new":   {"new session"},
 	"/session reset": {"wipe", "restart"},
 	"/clear":         {"cls"},

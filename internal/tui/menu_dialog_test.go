@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	dialogcmp "github.com/Nomadcxx/smolbot/internal/components/dialog"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 )
@@ -60,4 +62,55 @@ func TestMenuDialogKeepsItemsLeftAligned(t *testing.T) {
 	if themesCol >= titleCol {
 		t.Fatalf("expected menu items to stay left aligned beneath centered title, title col=%d item col=%d view=%q", titleCol, themesCol, view)
 	}
+}
+
+func TestMenuDialogShowsExpandedRootItems(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+
+	view := plain(newMenuDialog().View())
+	for _, label := range []string{"Context & Compaction", "Skills", "MCP Servers", "Providers"} {
+		if !strings.Contains(view, label) {
+			t.Fatalf("expected %q in menu, got %q", label, view)
+		}
+	}
+	if !strings.Contains(view, "▼ More below ▼") {
+		t.Fatalf("expected overflow cue for remaining items, got %q", view)
+	}
+}
+
+func TestMenuDialogNavigatesToContextSubmenuAndEmitsCompactCommand(t *testing.T) {
+	dialog := newMenuDialog()
+	for _, key := range []string{"j", "j", "j", "j"} {
+		next, _ := dialog.Update(keyMsg(key))
+		dialog = next.(menuDialog)
+	}
+
+	next, _ := dialog.Update(keyMsg("enter"))
+	dialog = next.(menuDialog)
+	if dialog.page != menuPageContext {
+		t.Fatalf("expected context submenu, got %v", dialog.page)
+	}
+
+	next, _ = dialog.Update(keyMsg("j"))
+	dialog = next.(menuDialog)
+	next, cmd := dialog.Update(keyMsg("enter"))
+	dialog = next.(menuDialog)
+	if cmd == nil {
+		t.Fatal("expected compact item to emit command")
+	}
+	msg := cmd()
+	chosen, ok := msg.(dialogcmp.CommandChosenMsg)
+	if !ok {
+		t.Fatalf("expected command chosen msg, got %T", msg)
+	}
+	if chosen.Command != "/compact" {
+		t.Fatalf("expected /compact command, got %q", chosen.Command)
+	}
+}
+
+func keyMsg(key string) tea.KeyMsg {
+	r := []rune(key)[0]
+	return tea.KeyPressMsg(tea.Key{Code: r, Text: key})
 }

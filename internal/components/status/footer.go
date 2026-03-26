@@ -11,11 +11,13 @@ import (
 )
 
 type FooterModel struct {
-	app         *app.App
-	width       int
-	metadata    string
-	usage       client.UsageInfo
-	compression *client.CompressionInfo
+	app          *app.App
+	width        int
+	metadata     string
+	usage        client.UsageInfo
+	compression  *client.CompressionInfo
+	compacting   bool
+	compactFrame int
 }
 
 func NewFooter(a *app.App) FooterModel {
@@ -38,7 +40,30 @@ func (m *FooterModel) SetCompression(info *client.CompressionInfo) {
 	m.compression = info
 }
 
+func (m *FooterModel) SetCompacting(v bool) {
+	m.compacting = v
+	if !v {
+		m.compactFrame = 0
+	}
+}
+
+func (m *FooterModel) IsCompacting() bool {
+	return m.compacting
+}
+
+func (m *FooterModel) SetCompactionFrame(frame int) {
+	m.compactFrame = frame
+}
+
 func (m FooterModel) renderCompression(t *theme.Theme) string {
+	if m.compacting {
+		frames := []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
+		frame := frames[m.compactFrame%len(frames)]
+		return lipgloss.NewStyle().
+			Foreground(t.Primary).
+			Bold(true).
+			Render(frame + " compacting...")
+	}
 	if m.compression == nil || !m.compression.Enabled {
 		return ""
 	}
@@ -165,15 +190,29 @@ func (m FooterModel) renderUsage(t *theme.Theme, compact bool) string {
 	}
 
 	percentText := percentStyle.Render(fmt.Sprintf("%d%%", int(percentage+0.5)))
+	warning := ""
+	switch {
+	case percentage >= 95:
+		warning = lipgloss.NewStyle().
+			Foreground(t.TokenHighUsage).
+			Bold(true).
+			Blink(true).
+			Render(" ⚠ /compact")
+	case percentage >= 90:
+		warning = lipgloss.NewStyle().
+			Foreground(t.Warning).
+			Bold(true).
+			Render(" ⚠")
+	}
 
 	if compact {
-		return percentText + " " + lipgloss.NewStyle().
+		return percentText + warning + " " + lipgloss.NewStyle().
 			Background(t.Panel).
 			Foreground(t.TextMuted).
 			Render("("+formatUsageTokens(m.usage.TotalTokens)+")")
 	}
 
-	return percentText + " " + lipgloss.NewStyle().
+	return percentText + warning + " " + lipgloss.NewStyle().
 		Background(t.Panel).
 		Foreground(t.TextMuted).
 		Render(fmt.Sprintf("(%s/%s)", formatUsageTokens(m.usage.TotalTokens), formatUsageTokens(m.usage.ContextWindow)))

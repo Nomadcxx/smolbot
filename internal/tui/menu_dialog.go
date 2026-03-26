@@ -15,6 +15,7 @@ const (
 	menuPageRoot menuPage = iota
 	menuPageThemes
 	menuPageSessions
+	menuPageContext
 )
 
 type menuItem struct {
@@ -36,6 +37,7 @@ func newMenuDialog() menuDialog {
 			menuPageRoot:     0,
 			menuPageThemes:   0,
 			menuPageSessions: 0,
+			menuPageContext:  0,
 		},
 	}
 }
@@ -155,6 +157,8 @@ func (d menuDialog) title() string {
 		return "Themes"
 	case menuPageSessions:
 		return "Sessions"
+	case menuPageContext:
+		return "Context & Compaction"
 	default:
 		return "//// MENU ////"
 	}
@@ -191,14 +195,27 @@ func (d menuDialog) items() []menuItem {
 			{label: "Switch Session", command: "/session"},
 			{label: "Reset Current Session", command: "/session reset"},
 		}
+	case menuPageContext:
+		return []menuItem{
+			{label: "← Back"},
+			{label: "Compact Now", command: "/compact"},
+			{label: "Mode: Conservative (soon)"},
+			{label: "Mode: Default (soon)"},
+			{label: "Mode: Aggressive (soon)"},
+		}
 	default:
 		return []menuItem{
 			{label: "Close Menu", command: "/menu.close"},
 			{label: "Themes", page: menuPageThemes},
 			{label: "Sessions", page: menuPageSessions},
 			{label: "Models", command: "/model"},
+			{label: "Context & Compaction", page: menuPageContext},
+			{label: "Skills", command: "/skills"},
+			{label: "MCP Servers", command: "/mcps"},
+			{label: "Providers", command: "/providers"},
 			{label: "Clear Transcript", command: "/clear"},
 			{label: "Status", command: "/status"},
+			{label: "Keybindings", command: "/keybindings"},
 			{label: "Help", command: "/help"},
 			{label: "Quit", command: "/quit"},
 		}
