@@ -646,10 +646,10 @@ func (s *Server) contextWindowTokens(ctx context.Context) int {
 
 	client := provider.NewOllamaClient(s.ollamaBaseURL())
 	window, err := client.ContextWindow(lookupCtx, model)
-	s.storeOllamaContextWindow(model, window, err == nil && window.Found && window.Value > 0)
 	if err != nil || !window.Found || window.Value <= 0 {
 		return fallback
 	}
+	s.storeOllamaContextWindow(model, window)
 	return window.Value
 }
 
@@ -673,11 +673,11 @@ func (s *Server) cachedOllamaContextWindow(model string) (ollamaContextCacheEntr
 	return entry, true
 }
 
-func (s *Server) storeOllamaContextWindow(model string, window provider.OllamaContextWindow, found bool) {
+func (s *Server) storeOllamaContextWindow(model string, window provider.OllamaContextWindow) {
 	key := s.ollamaCacheKey(model)
 	entry := ollamaContextCacheEntry{
 		value:     window.Value,
-		found:     found,
+		found:     true,
 		expiresAt: time.Now().Add(ollamaContextCacheTTL),
 	}
 

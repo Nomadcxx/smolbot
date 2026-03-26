@@ -419,9 +419,27 @@ func TestServerOllamaContextWindow(t *testing.T) {
 
 func TestServerOllamaContextWindowTimeoutFallsBackQuickly(t *testing.T) {
 	var requestCount atomic.Int32
+	var firstRequest atomic.Bool
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount.Add(1)
-		<-r.Context().Done()
+		if firstRequest.CompareAndSwap(false, true) {
+			<-r.Context().Done()
+			return
+		}
+		switch r.URL.Path {
+		case "/api/ps":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"models": []map[string]any{
+					{
+						"name":           "qwen3:8b",
+						"model":          "qwen3:8b",
+						"context_length": 131072,
+					},
+				},
+			})
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
 	}))
 	defer ollama.Close()
 
@@ -452,13 +470,32 @@ func TestServerOllamaContextWindowTimeoutFallsBackQuickly(t *testing.T) {
 		t.Fatalf("unexpected usage payload type %T", payload["usage"])
 	}
 	if got := usage["contextWindow"]; got != cfg.Agents.Defaults.ContextWindowTokens {
-		t.Fatalf("expected fallback context window %d, got %#v", cfg.Agents.Defaults.ContextWindowTokens, got)
+		t.Fatalf("expected fallback context window %d after timeout, got %#v", cfg.Agents.Defaults.ContextWindowTokens, got)
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("expected bounded Ollama lookup, took %s", elapsed)
 	}
-	if got := requestCount.Load(); got != 1 {
-		t.Fatalf("expected a single timed-out lookup, got %d", got)
+
+	resp, err = server.handleRequest(context.Background(), &clientState{}, RequestFrame{
+		ID:     "2",
+		Method: "status",
+	})
+	if err != nil {
+		t.Fatalf("handleRequest status retry: %v", err)
+	}
+	payload, ok = resp.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected status payload type %T", resp)
+	}
+	usage, ok = payload["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected usage payload type %T", payload["usage"])
+	}
+	if got := usage["contextWindow"]; got != 131072 {
+		t.Fatalf("expected recovery to detected context window, got %#v", got)
+	}
+	if got := requestCount.Load(); got != 2 {
+		t.Fatalf("expected failure not to be cached, got %d requests", got)
 	}
 }
 
