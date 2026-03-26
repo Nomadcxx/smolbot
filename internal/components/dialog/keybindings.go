@@ -32,6 +32,8 @@ func (m KeybindingsModel) View() string {
 		"Global",
 		"  F1 / Ctrl+M    Open menu",
 		"  Ctrl+C         Stop / Quit",
+		"  Esc / i        Leave / enter insert mode",
+		"  y / c          Copy last assistant reply",
 		"  PgUp/PgDn      Scroll transcript",
 		"  Home/End       Top/Bottom of transcript",
 		"  Ctrl+L         Jump to latest",

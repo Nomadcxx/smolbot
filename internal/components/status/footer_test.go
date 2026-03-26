@@ -72,6 +72,29 @@ func TestStatusKeepsReconnectingAndStreamingExplicit(t *testing.T) {
 	}
 }
 
+func TestStatusShowsFlashMessage(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
+
+	a := app.New(app.Config{})
+	model := New(a)
+	model.SetWidth(80)
+	model.SetConnected(true)
+	model.SetFlash("Copied to clipboard")
+
+	view := stripANSIStatus(model.View())
+	if !strings.Contains(view, "Copied to clipboard") {
+		t.Fatalf("expected flash message in status row, got %q", view)
+	}
+
+	model.ClearFlash()
+	view = stripANSIStatus(model.View())
+	if strings.Contains(view, "Copied to clipboard") {
+		t.Fatalf("expected flash message to clear, got %q", view)
+	}
+}
+
 func TestFooterShowsPersistentMetadata(t *testing.T) {
 	if !theme.Set("nord") {
 		t.Fatal("expected nord theme")

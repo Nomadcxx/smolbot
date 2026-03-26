@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/Nomadcxx/smolbot/internal/app"
 	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/internal/components/chat"
+	"github.com/Nomadcxx/smolbot/internal/components/common"
 	dialogcmp "github.com/Nomadcxx/smolbot/internal/components/dialog"
 	"github.com/Nomadcxx/smolbot/internal/components/header"
 	sidebarcmp "github.com/Nomadcxx/smolbot/internal/components/sidebar"
@@ -78,6 +80,10 @@ type CompactDoneMsg struct {
 }
 type CompactErrorMsg struct{ Err error }
 type CompactionTickMsg struct{}
+type ClipboardCopiedMsg struct{}
+type ClipboardErrorMsg struct{ Err error }
+type flashClearMsg struct{ Seq int }
+type flushProgressMsg struct{ Seq int }
 
 type Dialog interface {
 	Update(tea.Msg) (Dialog, tea.Cmd)
@@ -104,34 +110,39 @@ type gatewayClient interface {
 }
 
 type Model struct {
-	width, height   int
-	app             *app.App
-	providerConfig  *cfgpkg.Config
-	client          gatewayClient
-	header          header.Model
-	messages        chat.MessagesModel
-	editor          chat.EditorModel
-	status          status.Model
-	footer          status.FooterModel
-	dialog          Dialog
-	eventCh         chan tea.Msg
-	connected       bool
-	reconnectWait   time.Duration
-	streaming       bool
-	currentRunID    string
-	contextWarned   bool
-	compactionFrame int
-	sidebarVisible  bool
-	compactMode     bool
-	detailsOpen     bool
-	mainWidth       int
-	sidebarWidth    int
-	overlayHeight   int
-	headerWidth     int
-	statusWidth     int
-	footerWidth     int
-	messagesWidth   int
-	sidebar         sidebarcmp.Model
+	width, height        int
+	app                  *app.App
+	providerConfig       *cfgpkg.Config
+	client               gatewayClient
+	header               header.Model
+	messages             chat.MessagesModel
+	editor               chat.EditorModel
+	status               status.Model
+	footer               status.FooterModel
+	dialog               Dialog
+	eventCh              chan tea.Msg
+	clipboardOut         io.Writer
+	connected            bool
+	reconnectWait        time.Duration
+	streaming            bool
+	currentRunID         string
+	contextWarned        bool
+	flashSeq             int
+	compactionFrame      int
+	progressBuffer       string
+	progressFlushPending bool
+	progressFlushSeq     int
+	sidebarVisible       bool
+	compactMode          bool
+	detailsOpen          bool
+	mainWidth            int
+	sidebarWidth         int
+	overlayHeight        int
+	headerWidth          int
+	statusWidth          int
+	footerWidth          int
+	messagesWidth        int
+	sidebar              sidebarcmp.Model
 }
 
 func New(cfg app.Config) Model {
@@ -154,6 +165,7 @@ func New(cfg app.Config) Model {
 		status:         status.New(a),
 		footer:         status.NewFooter(a),
 		eventCh:        eventCh,
+		clipboardOut:   os.Stdout,
 		sidebarVisible: a.SidebarVisible,
 		sidebar:        newSidebar(a, cfg.MCPServers),
 	}
@@ -297,6 +309,34 @@ func (m Model) compactCmd() tea.Cmd {
 func (m Model) compactTickCmd() tea.Cmd {
 	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return CompactionTickMsg{} })
 }
+
+func (m Model) flashClearCmd(seq int) tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return flashClearMsg{Seq: seq} })
+}
+
+func (m Model) copyLastAssistantCmd() tea.Cmd {
+	content := m.messages.LastAssistantContent()
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		if err := common.WriteOSC52(m.clipboardOut, content); err != nil {
+			return ClipboardErrorMsg{Err: err}
+		}
+		return ClipboardCopiedMsg{}
+	}
+}
+
+func (m Model) progressFlushCmd(seq int) tea.Cmd {
+	return tea.Tick(16*time.Millisecond, func(time.Time) tea.Msg { return flushProgressMsg{Seq: seq} })
+}
+
+func (m *Model) resetProgressFlush() {
+	m.progressBuffer = ""
+	m.progressFlushPending = false
+	m.progressFlushSeq++
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -323,6 +363,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.sidebar.SetSession(m.app.Session)
 		m.sidebar.SetModel(m.app.Model)
+		m.footer.SetSession(m.app.Session)
+		m.footer.SetModel(m.app.Model)
 		m.recalcLayout()
 		return m, tea.Batch(
 			m.loadHistoryCmd(),
@@ -336,6 +378,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentRunID = msg.RunID
 		return m, nil
 	case ChatDoneMsg:
+		m.resetProgressFlush()
 		m.streaming = false
 		m.currentRunID = ""
 		m.status.SetStreaming(false)
@@ -378,16 +421,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.footer.SetCompactionFrame(m.compactionFrame)
 		return m, m.compactTickCmd()
 	case ChatProgressMsg:
-		m.messages.SetProgress(m.messages.GetProgress() + msg.Content)
-		return m, nil
+		m.progressBuffer += msg.Content
+		if m.progressFlushPending {
+			return m, nil
+		}
+		m.progressFlushPending = true
+		m.progressFlushSeq++
+		return m, m.progressFlushCmd(m.progressFlushSeq)
 	case ThinkingDoneMsg:
 		m.messages.AppendThinking(msg.Content)
 		return m, nil
 	case ChatErrorMsg:
+		m.resetProgressFlush()
 		m.streaming = false
 		m.currentRunID = ""
 		m.status.SetStreaming(false)
 		m.messages.AppendError(msg.Message)
+		return m, nil
+	case flushProgressMsg:
+		if msg.Seq != m.progressFlushSeq {
+			return m, nil
+		}
+		m.progressFlushPending = false
+		if m.progressBuffer == "" {
+			return m, nil
+		}
+		m.messages.SetProgress(m.messages.GetProgress() + m.progressBuffer)
+		m.progressBuffer = ""
+		return m, nil
+	case ClipboardCopiedMsg:
+		m.flashSeq++
+		m.status.SetFlash("Copied to clipboard")
+		return m, m.flashClearCmd(m.flashSeq)
+	case ClipboardErrorMsg:
+		if msg.Err != nil {
+			m.messages.AppendError("Clipboard copy failed: " + msg.Err.Error())
+		}
+		return m, nil
+	case flashClearMsg:
+		if msg.Seq == m.flashSeq {
+			m.status.ClearFlash()
+		}
 		return m, nil
 	case ChannelInboundMsg:
 		label := "[" + msg.Channel + "] " + msg.Content
@@ -410,7 +484,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StatusLoadedMsg:
 		if msg.Payload.Model != "" {
 			m.app.Model = msg.Payload.Model
+			m.footer.SetModel(msg.Payload.Model)
 		}
+		m.footer.SetSession(firstNonEmpty(msg.Payload.Session, m.app.Session))
 		m.footer.SetUsage(msg.Payload.Usage)
 		m.header.SetModel(m.app.Model)
 		m.sidebar.SetSession(firstNonEmpty(msg.Payload.Session, m.app.Session))
@@ -433,6 +509,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ModelCurrentMsg:
 		if msg.Current != "" {
 			m.app.Model = msg.Current
+			m.footer.SetModel(msg.Current)
 			m.header.SetModel(msg.Current)
 			m.sidebar.SetModel(msg.Current)
 		}
@@ -447,8 +524,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SessionResetDoneMsg:
 		m.app.Session = msg.Key
 		m.sidebar.SetSession(msg.Key)
+		m.footer.SetSession(msg.Key)
 		m.messages = chat.NewMessages()
 		m.contextWarned = false
+		m.resetProgressFlush()
 		m.recalcLayout()
 		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
 	case ModelsLoadedMsg:
@@ -465,23 +544,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ModelSetMsg:
 		m.app.Model = msg.ID
+		m.footer.SetModel(msg.ID)
 		m.sidebar.SetModel(msg.ID)
 		m.recalcLayout()
 		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
 	case dialogcmp.SessionChosenMsg:
 		m.app.Session = msg.Key
 		m.sidebar.SetSession(msg.Key)
+		m.footer.SetSession(msg.Key)
 		m.messages = chat.NewMessages()
 		m.dialog = nil
 		m.contextWarned = false
+		m.resetProgressFlush()
 		m.recalcLayout()
 		return m, tea.Batch(m.loadHistoryCmd(), m.persistStateCmd(), m.syncStatusCmd(false))
 	case dialogcmp.SessionNewMsg:
 		m.app.Session = "tui:" + time.Now().Format("20060102-150405")
 		m.sidebar.SetSession(m.app.Session)
+		m.footer.SetSession(m.app.Session)
 		m.messages = chat.NewMessages()
 		m.dialog = nil
 		m.contextWarned = false
+		m.resetProgressFlush()
 		m.recalcLayout()
 		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
 	case dialogcmp.SessionResetMsg:
@@ -512,6 +596,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dialog = nil
 		return m, nil
 	case DisconnectedMsg:
+		m.resetProgressFlush()
 		m.connected = false
 		m.streaming = false
 		m.currentRunID = ""
@@ -603,7 +688,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "channel.progress":
 			var p client.ChannelMessagePayload
 			_ = json.Unmarshal(msg.Event.Payload, &p)
-			m.messages.SetProgress(m.messages.GetProgress() + p.Content)
+			mapped = ChatProgressMsg{Content: p.Content}
 		case "channel.error":
 			var p client.ChannelErrorPayload
 			_ = json.Unmarshal(msg.Event.Payload, &p)
@@ -647,6 +732,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return m.handleCtrlC()
+		case "esc":
+			if m.editor.Focused() {
+				m.editor.Blur()
+				return m, nil
+			}
+		case "i":
+			if !m.editor.Focused() {
+				return m, m.editor.Focus()
+			}
 		case "ctrl+d":
 			if m.width < 80 {
 				return m, nil
@@ -663,15 +757,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "f1", "ctrl+m":
 			m.dialog = newMenuDialog()
 			return m, nil
+		case "c", "y":
+			if !m.editor.Focused() {
+				if cmd := m.copyLastAssistantCmd(); cmd != nil {
+					return m, cmd
+				}
+				return m, nil
+			}
 		case "pgup", "pgdown", "home", "end", "ctrl+l":
 			m.messages.HandleKey(msg.String())
 			return m, nil
 		}
 	}
 	var editorCmd tea.Cmd
-	m.editor, editorCmd = m.editor.Update(msg)
-	if editorCmd != nil {
-		cmds = append(cmds, editorCmd)
+	if m.editor.Focused() {
+		m.editor, editorCmd = m.editor.Update(msg)
+		if editorCmd != nil {
+			cmds = append(cmds, editorCmd)
+		}
 	}
 	if submitted := m.editor.Submitted(); submitted != "" {
 		if strings.HasPrefix(submitted, "/") {
@@ -689,6 +792,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleCtrlC() (tea.Model, tea.Cmd) {
 	if m.streaming {
 		_ = m.client.ChatAbort(m.app.Session, m.currentRunID)
+		m.resetProgressFlush()
 		m.streaming = false
 		m.currentRunID = ""
 		m.status.SetStreaming(false)
@@ -710,8 +814,10 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	switch cmd {
 	case "/session":
 		if args == "new" {
+			m.resetProgressFlush()
 			m.app.Session = "tui:" + time.Now().Format("20060102-150405")
 			m.sidebar.SetSession(m.app.Session)
+			m.footer.SetSession(m.app.Session)
 			m.messages = chat.NewMessages()
 			m.contextWarned = false
 			m.recalcLayout()
@@ -751,6 +857,7 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			return ModelsLoadedMsg{Models: models, Current: current}
 		}
 	case "/clear":
+		m.resetProgressFlush()
 		m.messages = chat.NewMessages()
 		m.contextWarned = false
 	case "/help":
@@ -772,6 +879,7 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "/status":
 		return m, m.syncStatusCmd(true)
 	case "/compact", "/compress":
+		m.resetProgressFlush()
 		m.footer.SetCompacting(true)
 		m.compactionFrame = 0
 		m.footer.SetCompactionFrame(0)

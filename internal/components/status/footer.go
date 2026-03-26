@@ -11,17 +11,30 @@ import (
 )
 
 type FooterModel struct {
-	app          *app.App
-	width        int
-	metadata     string
-	usage        client.UsageInfo
-	compression  *client.CompressionInfo
-	compacting   bool
-	compactFrame int
+	app               *app.App
+	width             int
+	metadata          string
+	usage             client.UsageInfo
+	compression       *client.CompressionInfo
+	compacting        bool
+	compactFrame      int
+	modelText         string
+	modelWidth        int
+	sessionText       string
+	sessionWidth      int
+	metadataText      string
+	metadataWidth     int
+	usageFullWidth    int
+	usageCompactWidth int
 }
 
 func NewFooter(a *app.App) FooterModel {
-	return FooterModel{app: a}
+	model := FooterModel{app: a}
+	if a != nil {
+		model.SetModel(a.Model)
+		model.SetSession(a.Session)
+	}
+	return model
 }
 
 func (m *FooterModel) SetWidth(w int) {
@@ -30,10 +43,23 @@ func (m *FooterModel) SetWidth(w int) {
 
 func (m *FooterModel) SetMetadata(value string) {
 	m.metadata = value
+	m.metadataText = strings.TrimSpace(value)
+	m.metadataWidth = lipgloss.Width(m.metadataText)
+}
+
+func (m *FooterModel) SetModel(value string) {
+	m.modelText = "model " + footerValue(value, "connecting...")
+	m.modelWidth = lipgloss.Width(m.modelText)
+}
+
+func (m *FooterModel) SetSession(value string) {
+	m.sessionText = "session " + footerValue(value, "none")
+	m.sessionWidth = lipgloss.Width(m.sessionText)
 }
 
 func (m *FooterModel) SetUsage(value client.UsageInfo) {
 	m.usage = value
+	m.syncUsageLayout()
 }
 
 func (m *FooterModel) SetCompression(info *client.CompressionInfo) {
@@ -53,6 +79,29 @@ func (m *FooterModel) IsCompacting() bool {
 
 func (m *FooterModel) SetCompactionFrame(frame int) {
 	m.compactFrame = frame
+}
+
+func (m *FooterModel) syncUsageLayout() {
+	full, compact := m.usageWidthStrings()
+	m.usageFullWidth = lipgloss.Width(full)
+	m.usageCompactWidth = lipgloss.Width(compact)
+}
+
+func (m *FooterModel) usageWidthStrings() (string, string) {
+	if m.usage.ContextWindow <= 0 || m.usage.TotalTokens <= 0 {
+		return "", ""
+	}
+	percentage := (float64(m.usage.TotalTokens) / float64(m.usage.ContextWindow)) * 100
+	percentText := fmt.Sprintf("%d%%", int(percentage+0.5))
+	warning := ""
+	switch {
+	case percentage >= 95:
+		warning = " ⚠ /compact"
+	case percentage >= 90:
+		warning = " ⚠"
+	}
+	return percentText + warning + " " + fmt.Sprintf("(%s/%s)", formatUsageTokens(m.usage.TotalTokens), formatUsageTokens(m.usage.ContextWindow)),
+		percentText + warning + " " + fmt.Sprintf("(%s)", formatUsageTokens(m.usage.TotalTokens))
 }
 
 func (m FooterModel) renderCompression(t *theme.Theme) string {
@@ -93,24 +142,33 @@ func (m FooterModel) renderCompression(t *theme.Theme) string {
 	return style.Render(indicator)
 }
 
-func (m FooterModel) View() string {
+func (m *FooterModel) View() string {
 	t := theme.Current()
-	if t == nil || m.app == nil {
+	if t == nil {
 		return ""
 	}
-	parts := []string{
-		"model " + footerValue(m.app.Model, "connecting..."),
-		"session " + footerValue(m.app.Session, "none"),
+	if m.app != nil {
+		if next := "model " + footerValue(m.app.Model, "connecting..."); next != m.modelText {
+			m.SetModel(m.app.Model)
+		}
+		if next := "session " + footerValue(m.app.Session, "none"); next != m.sessionText {
+			m.SetSession(m.app.Session)
+		}
 	}
-	if strings.TrimSpace(m.metadata) != "" {
-		parts = append(parts, strings.TrimSpace(m.metadata))
+	parts := []string{m.modelText, m.sessionText}
+	leftWidth := 1 + m.modelWidth + 3 + m.sessionWidth
+	if m.metadataText != "" {
+		parts = append(parts, m.metadataText)
+		leftWidth += 3 + m.metadataWidth
 	}
 	// Add compression indicator if available
 	if comp := m.renderCompression(t); comp != "" {
 		parts = append(parts, comp)
+		leftWidth += 3 + lipgloss.Width(comp)
 	}
 	left := " " + strings.Join(parts, " | ")
 	right := m.renderUsage(t, false)
+	rightWidth := m.usageFullWidth
 	if right == "" {
 		return lipgloss.NewStyle().
 			Width(m.width).
@@ -119,10 +177,11 @@ func (m FooterModel) View() string {
 			Render(left)
 	}
 
-	if m.width > 0 && lipgloss.Width(left)+1+lipgloss.Width(right) > m.width {
+	if m.width > 0 && leftWidth+1+rightWidth > m.width {
 		right = m.renderUsage(t, true)
+		rightWidth = m.usageCompactWidth
 	}
-	if m.width > 0 && lipgloss.Width(right)+1 >= m.width {
+	if m.width > 0 && rightWidth+1 >= m.width {
 		return lipgloss.NewStyle().
 			Width(m.width).
 			Background(t.Panel).
@@ -132,12 +191,13 @@ func (m FooterModel) View() string {
 	}
 
 	if m.width > 0 {
-		availableLeft := max(1, m.width-lipgloss.Width(right)-1)
-		left = truncateFooterText(left, availableLeft)
+		availableLeft := max(1, m.width-rightWidth-1)
+		left = truncateFooterText(left, leftWidth, availableLeft)
+		leftWidth = min(leftWidth, availableLeft)
 	}
 	gap := " "
 	if m.width > 0 {
-		gapWidth := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+		gapWidth := m.width - leftWidth - rightWidth
 		if gapWidth > 0 {
 			gap = strings.Repeat(" ", gapWidth)
 		}
@@ -156,8 +216,8 @@ func footerValue(value, fallback string) string {
 	return value
 }
 
-func truncateFooterText(text string, width int) string {
-	if width <= 0 || lipgloss.Width(text) <= width {
+func truncateFooterText(text string, currentWidth, width int) string {
+	if width <= 0 || currentWidth <= width {
 		return text
 	}
 	if width <= 1 {

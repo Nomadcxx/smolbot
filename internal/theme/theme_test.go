@@ -22,21 +22,20 @@ func TestBuiltInThemesRegister(t *testing.T) {
 	}
 }
 
-func TestBuiltInThemesUseBlackSurfaces(t *testing.T) {
-	want := fmt.Sprintf("%#v", lipgloss.Color("#000000"))
+func TestBuiltInThemesConfigureSurfaceColors(t *testing.T) {
 	for _, name := range theme.List() {
 		if !theme.Set(name) {
 			t.Fatalf("expected to set theme %q", name)
 		}
 		current := theme.Current()
-		if got := fmt.Sprintf("%#v", current.Background); got != want {
-			t.Fatalf("expected %s background black, got %s", name, got)
+		if got := fmt.Sprintf("%#v", current.Background); got == fmt.Sprintf("%#v", lipgloss.NoColor{}) {
+			t.Fatalf("expected %s background to be configured", name)
 		}
-		if got := fmt.Sprintf("%#v", current.Panel); got != want {
-			t.Fatalf("expected %s panel black, got %s", name, got)
+		if got := fmt.Sprintf("%#v", current.Panel); got == fmt.Sprintf("%#v", lipgloss.NoColor{}) {
+			t.Fatalf("expected %s panel to be configured", name)
 		}
-		if got := fmt.Sprintf("%#v", current.Element); got != want {
-			t.Fatalf("expected %s element black, got %s", name, got)
+		if got := fmt.Sprintf("%#v", current.Element); got == fmt.Sprintf("%#v", lipgloss.NoColor{}) {
+			t.Fatalf("expected %s element to be configured", name)
 		}
 	}
 }

@@ -12,6 +12,7 @@ type Model struct {
 	reconnecting bool
 	streaming    bool
 	quitHint     bool
+	flash        string
 }
 
 func New(a *app.App) Model {
@@ -24,6 +25,8 @@ func (m *Model) SetConnected(v bool)    { m.connected = v }
 func (m *Model) SetReconnecting(v bool) { m.reconnecting = v }
 func (m *Model) SetStreaming(v bool)    { m.streaming = v }
 func (m *Model) SetQuitHint(v bool)     { m.quitHint = v }
+func (m *Model) SetFlash(v string)      { m.flash = v }
+func (m *Model) ClearFlash()            { m.flash = "" }
 
 func (m Model) View() string {
 	t := theme.Current()
@@ -41,6 +44,12 @@ func (m Model) View() string {
 	bar := " " + connStatus
 	if m.quitHint {
 		bar += lipgloss.NewStyle().Foreground(t.Warning).Render("  Press Ctrl+C again to quit")
+	}
+	if m.flash != "" {
+		bar += lipgloss.NewStyle().
+			Foreground(t.Primary).
+			Bold(true).
+			Render("  " + m.flash)
 	}
 	return lipgloss.NewStyle().Width(m.width).Background(t.Panel).Foreground(t.Text).Render(bar)
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -326,6 +327,61 @@ func TestStatusLoadedUpdatesFooterUsage(t *testing.T) {
 	}
 	if !strings.Contains(view, "52% (68K/131.1K)") {
 		t.Fatalf("expected footer usage update, got %q", view)
+	}
+}
+
+func TestCopyShortcutWritesOSC52AndFlashesStatus(t *testing.T) {
+	model := New(app.Config{})
+	model.status.SetWidth(80)
+	model.messages.SetSize(80, 20)
+	model.messages.AppendAssistant("copy me")
+	model.editor.Blur()
+	var out bytes.Buffer
+	model.clipboardOut = &out
+
+	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: 'y'}))
+	got := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected copy shortcut to return command")
+	}
+
+	msg := cmd()
+	updated, nextCmd := got.Update(msg)
+	got = updated.(Model)
+	if nextCmd == nil {
+		t.Fatal("expected flash clear timer after copy")
+	}
+	if !strings.Contains(out.String(), "\033]52;c;") {
+		t.Fatalf("expected OSC 52 output, got %q", out.String())
+	}
+	if view := plain(got.status.View()); !strings.Contains(view, "Copied to clipboard") {
+		t.Fatalf("expected copied flash in status row, got %q", view)
+	}
+
+	updated, _ = got.Update(flashClearMsg{Seq: got.flashSeq})
+	got = updated.(Model)
+	if view := plain(got.status.View()); strings.Contains(view, "Copied to clipboard") {
+		t.Fatalf("expected copied flash to clear, got %q", view)
+	}
+}
+
+func TestInsertModeTogglePreservesTypingShortcuts(t *testing.T) {
+	model := New(app.Config{})
+
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	got := updated.(Model)
+	if got.editor.Focused() {
+		t.Fatal("expected esc to leave insert mode")
+	}
+
+	updated, cmd := got.Update(tea.KeyPressMsg(tea.Key{Code: 'i'}))
+	got = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected i to refocus editor")
+	}
+	_ = cmd()
+	if !got.editor.Focused() {
+		t.Fatal("expected editor to be focused after i")
 	}
 }
 
@@ -656,6 +712,77 @@ func TestUsageWarningIsAppendedOncePerSession(t *testing.T) {
 	view = plain(got.messages.View())
 	if strings.Count(view, "Use /compact to free space.") != 1 {
 		t.Fatalf("expected warning to appear once, got %q", view)
+	}
+}
+
+func TestChatProgressIsBatchedUntilFlushTick(t *testing.T) {
+	model := New(app.Config{})
+	model.messages.SetSize(80, 20)
+
+	updated, cmd := model.Update(ChatProgressMsg{Content: "hel"})
+	got := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected first progress chunk to schedule flush")
+	}
+	if got.messages.GetProgress() != "" {
+		t.Fatalf("expected progress to stay buffered before flush, got %q", got.messages.GetProgress())
+	}
+
+	updated, nextCmd := got.Update(ChatProgressMsg{Content: "lo"})
+	got = updated.(Model)
+	if nextCmd != nil {
+		t.Fatalf("expected second chunk to reuse pending flush, got %T", nextCmd)
+	}
+	if got.messages.GetProgress() != "" {
+		t.Fatalf("expected progress to remain buffered before flush, got %q", got.messages.GetProgress())
+	}
+
+	updated, _ = got.Update(flushProgressMsg{Seq: got.progressFlushSeq})
+	got = updated.(Model)
+	if got.messages.GetProgress() != "hello" {
+		t.Fatalf("expected buffered chunks to flush once, got %q", got.messages.GetProgress())
+	}
+}
+
+func TestClearResetsBufferedProgress(t *testing.T) {
+	model := New(app.Config{})
+	model.messages.SetSize(80, 20)
+
+	updated, _ := model.Update(ChatProgressMsg{Content: "stale"})
+	got := updated.(Model)
+	staleSeq := got.progressFlushSeq
+
+	updated, _ = got.handleSlashCommand("/clear")
+	got = updated.(Model)
+	if got.progressBuffer != "" || got.progressFlushPending {
+		t.Fatalf("expected /clear to reset buffered progress, got buffer=%q pending=%v", got.progressBuffer, got.progressFlushPending)
+	}
+
+	updated, _ = got.Update(flushProgressMsg{Seq: staleSeq})
+	got = updated.(Model)
+	if got.messages.GetProgress() != "" {
+		t.Fatalf("expected stale flush to be ignored after clear, got %q", got.messages.GetProgress())
+	}
+}
+
+func TestSessionNewResetsBufferedProgress(t *testing.T) {
+	model := New(app.Config{})
+	model.messages.SetSize(80, 20)
+
+	updated, _ := model.Update(ChatProgressMsg{Content: "stale"})
+	got := updated.(Model)
+	staleSeq := got.progressFlushSeq
+
+	updated, _ = got.handleSlashCommand("/session new")
+	got = updated.(Model)
+	if got.progressBuffer != "" || got.progressFlushPending {
+		t.Fatalf("expected /session new to reset buffered progress, got buffer=%q pending=%v", got.progressBuffer, got.progressFlushPending)
+	}
+
+	updated, _ = got.Update(flushProgressMsg{Seq: staleSeq})
+	got = updated.(Model)
+	if got.messages.GetProgress() != "" {
+		t.Fatalf("expected stale flush to be ignored after session new, got %q", got.messages.GetProgress())
 	}
 }
 

@@ -140,6 +140,23 @@ func TestMessagesModelRendersReadableProgressAndThinkingRows(t *testing.T) {
 	}
 }
 
+func TestLastAssistantContentReturnsMostRecentAssistantMessage(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+
+	model := NewMessages()
+	model.SetSize(80, 20)
+	model.AppendUser("hello")
+	model.AppendAssistant("first reply")
+	model.AppendSystem("note")
+	model.AppendAssistant("second reply")
+
+	if got := model.LastAssistantContent(); got != "second reply" {
+		t.Fatalf("LastAssistantContent = %q, want second reply", got)
+	}
+}
+
 func TestToolBlocksUseSemanticChromeByStatus(t *testing.T) {
 	if !theme.Set("nord") {
 		t.Fatal("expected nord theme to be registered")
@@ -224,7 +241,9 @@ func assertStyleColor(t *testing.T, label string, got *string, want string) {
 }
 
 func TestHasContentAboveReflectsScrollPosition(t *testing.T) {
-	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
 	model := NewMessages()
 	model.SetSize(80, 10)
 	for i := 0; i < 30; i++ {
@@ -241,7 +260,9 @@ func TestHasContentAboveReflectsScrollPosition(t *testing.T) {
 }
 
 func TestToolInputIsDisplayedInToolBlock(t *testing.T) {
-	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
 	model := NewMessages()
 	model.SetSize(80, 30)
 	model.AppendUser("read the config")
@@ -255,13 +276,17 @@ func TestToolInputIsDisplayedInToolBlock(t *testing.T) {
 
 func TestProgressAndThinkingBlocksUseSemanticTranscriptColors(t *testing.T) {
 	const themeName = "transcript-color-test"
-	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
 	base := *theme.Current()
 	base.Name = themeName
 	base.TranscriptStreaming = lipgloss.Color("#FF0099")
 	base.TranscriptThinking = lipgloss.Color("#00FF88")
 	theme.Register(&base)
-	if !theme.Set(themeName) { t.Fatalf("could not set test theme %q", themeName) }
+	if !theme.Set(themeName) {
+		t.Fatalf("could not set test theme %q", themeName)
+	}
 	t.Cleanup(func() { theme.Set("nord") })
 
 	model := NewMessages()
@@ -280,7 +305,9 @@ func TestProgressAndThinkingBlocksUseSemanticTranscriptColors(t *testing.T) {
 }
 
 func TestThinkingContentPersistsAfterAssistantResponse(t *testing.T) {
-	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
 	model := NewMessages()
 	model.SetSize(80, 40)
 	model.AppendUser("what is 2+2?")
@@ -295,6 +322,53 @@ func TestThinkingContentPersistsAfterAssistantResponse(t *testing.T) {
 	}
 	if !strings.Contains(stripANSI(view), "The answer is 4.") {
 		t.Fatalf("expected assistant response also visible, got %q", view)
+	}
+}
+
+func TestMessageCacheInvalidatesOnWidthChange(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
+
+	model := NewMessages()
+	model.SetSize(80, 20)
+	model.AppendAssistant("cached response")
+	_ = model.View()
+
+	if len(model.cache) != 1 {
+		t.Fatalf("expected one cached message, got %d", len(model.cache))
+	}
+	if got := model.cache[0].width; got != 80 {
+		t.Fatalf("expected cache width 80, got %d", got)
+	}
+
+	model.SetSize(60, 20)
+	_ = model.View()
+
+	if len(model.cache) != 1 {
+		t.Fatalf("expected cache to rebuild with one message, got %d", len(model.cache))
+	}
+	if got := model.cache[0].width; got != 60 {
+		t.Fatalf("expected rebuilt cache width 60, got %d", got)
+	}
+}
+
+func BenchmarkMessagesRenderContent(b *testing.B) {
+	if !theme.Set("nord") {
+		b.Fatal("expected nord theme")
+	}
+
+	model := NewMessages()
+	model.SetSize(100, 30)
+	for i := 0; i < 80; i++ {
+		model.AppendAssistant("assistant response " + strconv.Itoa(i) + " with enough content to exercise markdown rendering and cached transcript rows")
+	}
+	model.SetProgress("streaming text")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		model.dirty = true
+		_ = model.View()
 	}
 }
 

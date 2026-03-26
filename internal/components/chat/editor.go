@@ -72,7 +72,23 @@ func (m *EditorModel) SetValue(value string) {
 	m.textarea.MoveToEnd()
 }
 
+func (m *EditorModel) Focus() tea.Cmd {
+	return m.textarea.Focus()
+}
+
+func (m *EditorModel) Blur() {
+	m.textarea.Blur()
+}
+
+func (m EditorModel) Focused() bool {
+	return m.textarea.Focused()
+}
+
 func (m EditorModel) Update(msg tea.Msg) (EditorModel, tea.Cmd) {
+	if paste, ok := msg.(tea.PasteMsg); ok {
+		m.textarea.InsertString(paste.Content)
+		return m, nil
+	}
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "shift+enter", "alt+enter":

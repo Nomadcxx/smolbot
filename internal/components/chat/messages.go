@@ -19,6 +19,15 @@ type ChatMessage struct {
 	Duration time.Duration
 }
 
+type messageCache struct {
+	role      string
+	content   string
+	duration  time.Duration
+	width     int
+	signature string
+	rendered  string
+}
+
 type MessagesModel struct {
 	messages      []ChatMessage
 	tools         []ToolCall
@@ -34,6 +43,8 @@ type MessagesModel struct {
 	rendererWidth int
 	rendererStyle string
 	expandedTools map[string]bool
+	cache         []messageCache
+	messageBody   string
 }
 
 func NewMessages() MessagesModel {
@@ -48,6 +59,10 @@ func NewMessages() MessagesModel {
 }
 
 func (m *MessagesModel) SetSize(w, h int) {
+	if m.width != w {
+		m.cache = nil
+		m.messageBody = ""
+	}
 	m.width = w
 	m.height = h
 	m.viewport.SetWidth(max(1, w))
@@ -59,6 +74,9 @@ func (m *MessagesModel) AppendUser(content string) {
 	m.messages = append(m.messages, ChatMessage{Role: "user", Content: content})
 	m.progress = ""
 	m.thinking = ""
+	if len(m.cache) != len(m.messages)-1 {
+		m.messageBody = ""
+	}
 	m.sync(true)
 }
 
@@ -67,6 +85,9 @@ func (m *MessagesModel) AppendAssistant(content string) {
 	m.progress = ""
 	m.thinking = ""
 	m.tools = nil
+	if len(m.cache) != len(m.messages)-1 {
+		m.messageBody = ""
+	}
 	m.sync(true)
 }
 
@@ -74,6 +95,9 @@ func (m *MessagesModel) AppendError(content string) {
 	m.messages = append(m.messages, ChatMessage{Role: "error", Content: content})
 	m.progress = ""
 	m.thinking = ""
+	if len(m.cache) != len(m.messages)-1 {
+		m.messageBody = ""
+	}
 	m.sync(true)
 }
 
@@ -84,6 +108,9 @@ func (m *MessagesModel) AppendSystem(content string) {
 	m.messages = append(m.messages, ChatMessage{Role: "system", Content: content})
 	m.progress = ""
 	m.thinking = ""
+	if len(m.cache) != len(m.messages)-1 {
+		m.messageBody = ""
+	}
 	m.sync(m.viewport.AtBottom())
 }
 
@@ -97,6 +124,9 @@ func (m *MessagesModel) AppendThinking(content string) {
 		m.thinkingStart = time.Time{}
 	}
 	m.messages = append(m.messages, ChatMessage{Role: "thinking", Content: content, Duration: dur})
+	if len(m.cache) != len(m.messages)-1 {
+		m.messageBody = ""
+	}
 	m.sync(m.viewport.AtBottom())
 }
 
@@ -129,6 +159,8 @@ func (m *MessagesModel) ReplaceHistory(history []ChatMessage) {
 	m.tools = nil
 	m.progress = ""
 	m.thinking = ""
+	m.cache = nil
+	m.messageBody = ""
 	m.sync(true)
 }
 
@@ -178,7 +210,18 @@ func (m *MessagesModel) HasContentAbove() bool {
 
 func (m *MessagesModel) InvalidateTheme() {
 	m.renderer = nil
+	m.cache = nil
+	m.messageBody = ""
 	m.dirty = true
+}
+
+func (m MessagesModel) LastAssistantContent() string {
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if m.messages[i].Role == "assistant" && strings.TrimSpace(m.messages[i].Content) != "" {
+			return m.messages[i].Content
+		}
+	}
+	return ""
 }
 
 func (m *MessagesModel) IsDirty() bool {
@@ -216,34 +259,94 @@ func (m *MessagesModel) renderContent() string {
 		return ""
 	}
 
-	var lines []string
-	for _, msg := range m.messages {
-		switch msg.Role {
-		case "user":
-			lines = append(lines, renderRoleBlock("USER", msg.Content, t.TranscriptUserAccent, m.width))
-		case "assistant":
-			lines = append(lines, renderRoleBlock("ASSISTANT", m.renderAssistant(msg.Content), t.TranscriptAssistantAccent, m.width))
-		case "system":
-			lines = append(lines, renderSystemMessage(msg.Content, m.width))
-		case "error":
-			lines = append(lines, renderMessageBlock("ERROR", msg.Content, t.Error, m.width))
-		case "thinking":
-			lines = append(lines, renderThinkingBlock(msg.Content, msg.Duration, t.TranscriptThinking, m.width))
-		}
-		lines = append(lines, "")
+	sections := make([]string, 0, len(m.tools)+3)
+	if body := m.renderMessageBody(t); body != "" {
+		sections = append(sections, body)
 	}
 	if m.progress != "" {
-		lines = append(lines, renderRoleBlock("ASSISTANT", m.renderAssistant(m.progress), t.TranscriptStreaming, m.width))
+		sections = append(sections, renderRoleBlock("ASSISTANT", m.renderAssistant(m.progress), t.TranscriptStreaming, m.width))
 	}
 	if m.thinking != "" {
-		lines = append(lines, renderRoleBlock("THINKING", m.thinking, t.TranscriptThinking, m.width))
+		sections = append(sections, renderRoleBlock("THINKING", m.thinking, t.TranscriptThinking, m.width))
 	}
 	for i, tool := range m.tools {
 		expanded := m.expandedTools[strconv.Itoa(i)]
-		lines = append(lines, renderToolCall(tool, m.width, expanded))
-		lines = append(lines, "")
+		sections = append(sections, renderToolCall(tool, m.width, expanded))
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(sections, "\n\n")
+}
+
+func (m *MessagesModel) renderMessageBody(t *theme.Theme) string {
+	signature := transcriptRenderSignature()
+	if len(m.cache) > len(m.messages) {
+		m.cache = m.cache[:len(m.messages)]
+	}
+	if len(m.messages) == 0 {
+		m.messageBody = ""
+		return ""
+	}
+	if len(m.cache) == len(m.messages) && m.messageBody != "" {
+		return m.messageBody
+	}
+	if len(m.cache) == len(m.messages)-1 && m.messageBody != "" {
+		block := m.renderCachedMessage(len(m.messages)-1, m.messages[len(m.messages)-1], t, signature)
+		m.messageBody = m.messageBody + "\n\n" + block
+		return m.messageBody
+	}
+
+	blocks := make([]string, 0, len(m.messages))
+	for i, msg := range m.messages {
+		blocks = append(blocks, m.renderCachedMessage(i, msg, t, signature))
+	}
+	m.cache = m.cache[:len(m.messages)]
+	m.messageBody = strings.Join(blocks, "\n\n")
+	return m.messageBody
+}
+
+func (m *MessagesModel) renderCachedMessage(index int, msg ChatMessage, t *theme.Theme, signature string) string {
+	if index < len(m.cache) {
+		entry := m.cache[index]
+		if entry.role == msg.Role &&
+			entry.content == msg.Content &&
+			entry.duration == msg.Duration &&
+			entry.width == m.width &&
+			entry.signature == signature {
+			return entry.rendered
+		}
+	}
+
+	rendered := m.renderMessage(msg, t)
+	entry := messageCache{
+		role:      msg.Role,
+		content:   msg.Content,
+		duration:  msg.Duration,
+		width:     m.width,
+		signature: signature,
+		rendered:  rendered,
+	}
+	if index < len(m.cache) {
+		m.cache[index] = entry
+	} else {
+		m.cache = append(m.cache, entry)
+	}
+	return rendered
+}
+
+func (m *MessagesModel) renderMessage(msg ChatMessage, t *theme.Theme) string {
+	switch msg.Role {
+	case "user":
+		return renderRoleBlock("USER", msg.Content, t.TranscriptUserAccent, m.width)
+	case "assistant":
+		return renderRoleBlock("ASSISTANT", m.renderAssistant(msg.Content), t.TranscriptAssistantAccent, m.width)
+	case "system":
+		return renderSystemMessage(msg.Content, m.width)
+	case "error":
+		return renderMessageBlock("ERROR", msg.Content, t.Error, m.width)
+	case "thinking":
+		return renderThinkingBlock(msg.Content, msg.Duration, t.TranscriptThinking, m.width)
+	default:
+		return msg.Content
+	}
 }
 
 func (m *MessagesModel) renderAssistant(content string) string {
@@ -312,6 +415,21 @@ func markdownSignature() string {
 		colorHex(current.SyntaxKeyword),
 		colorHex(current.SyntaxString),
 		colorHex(current.SyntaxComment),
+	}, ":")
+}
+
+func transcriptRenderSignature() string {
+	current := theme.Current()
+	if current == nil {
+		return "default"
+	}
+	return strings.Join([]string{
+		markdownSignature(),
+		colorHex(current.TranscriptUserAccent),
+		colorHex(current.TranscriptAssistantAccent),
+		colorHex(current.TranscriptThinking),
+		colorHex(current.TranscriptStreaming),
+		colorHex(current.Error),
 	}, ":")
 }
 

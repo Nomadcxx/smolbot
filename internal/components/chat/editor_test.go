@@ -57,6 +57,17 @@ func TestEditorNavigatesPromptHistory(t *testing.T) {
 	}
 }
 
+func TestEditorPasteMsgInsertsClipboardText(t *testing.T) {
+	model := NewEditor()
+	model.textarea.SetValue("before ")
+
+	updated, _ := model.Update(tea.PasteMsg{Content: "after"})
+
+	if got := updated.textarea.Value(); got != "before after" {
+		t.Fatalf("expected pasted text to be inserted, got %q", got)
+	}
+}
+
 func TestEditorViewShowsQuickStartHintRail(t *testing.T) {
 	if !theme.Set("nord") {
 		t.Fatal("expected nord theme to be registered")
