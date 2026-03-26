@@ -209,7 +209,7 @@ func TestAnthropicProviderStreamIncludesThinkingAndToolUse(t *testing.T) {
 			`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"command\":\""}}` + "\n\n",
 			`data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"ls\"}"}}` + "\n\n",
 			`data: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"done"}}` + "\n\n",
-			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}` + "\n\n",
+			`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":12,"output_tokens":8}}` + "\n\n",
 			`data: {"type":"message_stop"}` + "\n\n",
 		}
 		for _, event := range events {
@@ -248,6 +248,9 @@ func TestAnthropicProviderStreamIncludesThinkingAndToolUse(t *testing.T) {
 	}
 	if resp.FinishReason != "tool_calls" {
 		t.Fatalf("finish_reason = %q, want tool_calls", resp.FinishReason)
+	}
+	if resp.Usage.TotalTokens != 20 {
+		t.Fatalf("total_tokens = %d, want 20", resp.Usage.TotalTokens)
 	}
 }
 

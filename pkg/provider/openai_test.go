@@ -257,6 +257,15 @@ func TestOpenAIProviderInjectsPromptCachingHooks(t *testing.T) {
 
 func TestOpenAIProviderStreamAccumulatesPartialToolCalls(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		streamOptions, ok := req["stream_options"].(map[string]any)
+		if !ok || streamOptions["include_usage"] != true {
+			t.Fatalf("expected stream_options.include_usage=true, got %#v", req["stream_options"])
+		}
+
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -266,6 +275,7 @@ func TestOpenAIProviderStreamAccumulatesPartialToolCalls(t *testing.T) {
 		events := []string{
 			`data: {"choices":[{"delta":{"content":"Hello "}}]}` + "\n\n",
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"exec","arguments":"{\"command\":\""}}]}}]}` + "\n\n",
+			`data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19}}` + "\n\n",
 			`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ls\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n",
 			"data: [DONE]\n\n",
 		}
@@ -302,6 +312,68 @@ func TestOpenAIProviderStreamAccumulatesPartialToolCalls(t *testing.T) {
 	}
 	if resp.FinishReason != "tool_calls" {
 		t.Fatalf("finish_reason = %q, want tool_calls", resp.FinishReason)
+	}
+	if resp.Usage.TotalTokens != 19 {
+		t.Fatalf("total_tokens = %d, want 19", resp.Usage.TotalTokens)
+	}
+}
+
+func TestOpenAIProviderStreamFallsBackWhenUsageOptionsUnsupported(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if attempts == 1 {
+			streamOptions, ok := req["stream_options"].(map[string]any)
+			if !ok || streamOptions["include_usage"] != true {
+				t.Fatalf("expected first request to include usage options, got %#v", req["stream_options"])
+			}
+			http.Error(w, `{"error":{"message":"unknown parameter: stream_options.include_usage"}}`, http.StatusBadRequest)
+			return
+		}
+		if _, ok := req["stream_options"]; ok {
+			t.Fatalf("expected fallback request to omit stream_options, got %#v", req["stream_options"])
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer is not a flusher")
+		}
+		events := []string{
+			`data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}` + "\n\n",
+			"data: [DONE]\n\n",
+		}
+		for _, event := range events {
+			fmt.Fprint(w, event)
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	p := NewOpenAIProvider("moonshot", "test-key", server.URL+"/v1", nil)
+	p.sleep = func(context.Context, int) error { return nil }
+
+	stream, err := p.ChatStream(context.Background(), ChatRequest{
+		Model:    "kimi-k2.5:cloud",
+		Messages: []Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+
+	resp, err := AccumulateStream(stream)
+	if err != nil {
+		t.Fatalf("AccumulateStream: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if resp.Content != "ok" {
+		t.Fatalf("content = %q, want ok", resp.Content)
 	}
 }
 

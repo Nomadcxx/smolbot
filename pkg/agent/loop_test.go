@@ -405,6 +405,55 @@ func TestAgentLoopPassesRoutingDepsAndUsesToolOutput(t *testing.T) {
 	}
 }
 
+func TestAgentLoopEmitsUsageEventsFromStreamDeltas(t *testing.T) {
+	fakeProvider := &fakeStreamProvider{
+		streams: []fakeStreamScript{{
+			deltas: []*provider.StreamDelta{
+				{Content: "done"},
+				{Usage: &provider.Usage{PromptTokens: 12, CompletionTokens: 8, TotalTokens: 20}},
+				{FinishReason: stringPtr("stop")},
+			},
+		}},
+	}
+
+	loop, store, _ := newTestAgentLoop(t, fakeProvider)
+	defer store.Close()
+
+	var events []Event
+	resp, err := loop.ProcessDirect(context.Background(), Request{
+		Content:    "hello",
+		SessionKey: "s1",
+	}, func(ev Event) {
+		events = append(events, ev)
+	})
+	if err != nil {
+		t.Fatalf("ProcessDirect: %v", err)
+	}
+	if resp != "done" {
+		t.Fatalf("response = %q, want done", resp)
+	}
+
+	foundUsage := false
+	for _, ev := range events {
+		if ev.Type != EventUsage {
+			continue
+		}
+		foundUsage = true
+		if got, _ := ev.Data["totalTokens"].(int); got != 20 {
+			t.Fatalf("usage totalTokens = %v, want 20", ev.Data["totalTokens"])
+		}
+		if got, _ := ev.Data["promptTokens"].(int); got != 12 {
+			t.Fatalf("usage promptTokens = %v, want 12", ev.Data["promptTokens"])
+		}
+		if got, _ := ev.Data["completionTokens"].(int); got != 8 {
+			t.Fatalf("usage completionTokens = %v, want 8", ev.Data["completionTokens"])
+		}
+	}
+	if !foundUsage {
+		t.Fatalf("expected usage event, got %+v", events)
+	}
+}
+
 func TestAgentLoopCompactNowRewritesSessionHistory(t *testing.T) {
 	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{})
 	defer store.Close()

@@ -467,6 +467,9 @@ func (a *AgentLoop) consumeStream(stream *provider.Stream, cb EventCallback, sup
 			}
 			existing.Function.Arguments += toolCall.Function.Arguments
 		}
+		if delta.Usage != nil {
+			resp.Usage = *delta.Usage
+		}
 		if delta.FinishReason != nil {
 			resp.FinishReason = *delta.FinishReason
 		}

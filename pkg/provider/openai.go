@@ -90,6 +90,10 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stre
 		return nil, err
 	}
 
+	return p.openStream(ctx, req.ExtraHeaders, wireReq)
+}
+
+func (p *OpenAIProvider) openStream(ctx context.Context, extraHeaders map[string]string, wireReq openAIRequest) (*Stream, error) {
 	data, err := json.Marshal(wireReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai request: %w", err)
@@ -99,7 +103,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stre
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	p.setHeaders(httpReq, req.ExtraHeaders)
+	p.setHeaders(httpReq, extraHeaders)
 
 	httpResp, err := p.client.Do(httpReq)
 	if err != nil {
@@ -108,6 +112,10 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stre
 	if httpResp.StatusCode != http.StatusOK {
 		defer httpResp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 8192))
+		if wireReq.StreamOptions != nil && shouldRetryOpenAIStreamWithoutUsage(httpResp.StatusCode, string(body)) {
+			wireReq.StreamOptions = nil
+			return p.openStream(ctx, extraHeaders, wireReq)
+		}
 		return nil, fmt.Errorf("openai stream http %d: %s", httpResp.StatusCode, string(body))
 	}
 
@@ -130,6 +138,9 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stre
 					return nil, fmt.Errorf("decode openai stream chunk: %w", err)
 				}
 				if len(chunk.Choices) == 0 {
+					if chunk.Usage != nil {
+						return &StreamDelta{Usage: chunk.Usage}, nil
+					}
 					continue
 				}
 
@@ -138,6 +149,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stre
 					Content:          choice.Delta.Content,
 					ReasoningContent: choice.Delta.ReasoningContent,
 					FinishReason:     choice.FinishReason,
+					Usage:            chunk.Usage,
 				}
 				for _, toolCall := range choice.Delta.ToolCalls {
 					delta.ToolCalls = append(delta.ToolCalls, ToolCall{
@@ -171,6 +183,9 @@ func (p *OpenAIProvider) buildWireRequest(req ChatRequest, stream bool) (openAIR
 		Messages:   convertOpenAIMessages(messages, supportsPromptCaching(p.name, p.baseURL)),
 		ToolChoice: req.ToolChoice,
 		Stream:     stream,
+	}
+	if stream && supportsStreamUsage(p.name, p.baseURL) {
+		wireReq.StreamOptions = &openAIStreamOpts{IncludeUsage: true}
 	}
 	if req.MaxTokens > 0 {
 		wireReq.MaxTokens = req.MaxTokens
@@ -255,15 +270,20 @@ func (p *OpenAIProvider) setHeaders(req *http.Request, extra map[string]string) 
 }
 
 type openAIRequest struct {
-	Model        string            `json:"model"`
-	Messages     []openAIMessage   `json:"messages"`
-	Tools        []openAITool      `json:"tools,omitempty"`
-	ToolChoice   any               `json:"tool_choice,omitempty"`
-	MaxTokens    int               `json:"max_tokens,omitempty"`
-	Temperature  *float64          `json:"temperature,omitempty"`
-	Reasoning    *openAIReasoning  `json:"reasoning,omitempty"`
-	ExtraHeaders map[string]string `json:"-"`
-	Stream       bool              `json:"stream,omitempty"`
+	Model         string            `json:"model"`
+	Messages      []openAIMessage   `json:"messages"`
+	Tools         []openAITool      `json:"tools,omitempty"`
+	ToolChoice    any               `json:"tool_choice,omitempty"`
+	MaxTokens     int               `json:"max_tokens,omitempty"`
+	Temperature   *float64          `json:"temperature,omitempty"`
+	Reasoning     *openAIReasoning  `json:"reasoning,omitempty"`
+	ExtraHeaders  map[string]string `json:"-"`
+	Stream        bool              `json:"stream,omitempty"`
+	StreamOptions *openAIStreamOpts `json:"stream_options,omitempty"`
+}
+
+type openAIStreamOpts struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type openAIReasoning struct {
@@ -326,6 +346,7 @@ type openAIChoice struct {
 
 type openAIStreamChunk struct {
 	Choices []openAIStreamChoice `json:"choices"`
+	Usage   *Usage               `json:"usage,omitempty"`
 }
 
 type openAIStreamChoice struct {
@@ -449,6 +470,15 @@ func supportsPromptCaching(name, baseURL string) bool {
 	return strings.Contains(lowerName, "openrouter") || strings.Contains(lowerBase, "openrouter")
 }
 
+func supportsStreamUsage(name, baseURL string) bool {
+	lowerName := strings.ToLower(name)
+	lowerBase := strings.ToLower(baseURL)
+	if strings.Contains(lowerName, "ollama") || strings.Contains(lowerBase, "localhost:11434") || strings.Contains(lowerBase, "127.0.0.1:11434") {
+		return false
+	}
+	return true
+}
+
 func shouldRetryOpenAI(status int, body string) bool {
 	if status == http.StatusTooManyRequests || status >= http.StatusInternalServerError {
 		return true
@@ -459,6 +489,14 @@ func shouldRetryOpenAI(status int, body string) bool {
 		}
 	}
 	return false
+}
+
+func shouldRetryOpenAIStreamWithoutUsage(status int, body string) bool {
+	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+		return false
+	}
+	lowerBody := strings.ToLower(body)
+	return strings.Contains(lowerBody, "stream_options") || strings.Contains(lowerBody, "include_usage")
 }
 
 func hasImageMessages(messages []openAIMessage) bool {

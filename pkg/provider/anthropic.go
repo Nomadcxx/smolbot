@@ -132,7 +132,16 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (*S
 					}
 				case "message_delta":
 					finishReason := mapAnthropicStopReason(event.Delta.StopReason)
-					return &StreamDelta{FinishReason: &finishReason}, nil
+					delta := &StreamDelta{FinishReason: &finishReason}
+					if event.Usage.InputTokens > 0 || event.Usage.OutputTokens > 0 {
+						total := event.Usage.InputTokens + event.Usage.OutputTokens
+						delta.Usage = &Usage{
+							PromptTokens:     event.Usage.InputTokens,
+							CompletionTokens: event.Usage.OutputTokens,
+							TotalTokens:      total,
+						}
+					}
+					return delta, nil
 				case "message_stop":
 					return nil, io.EOF
 				}
@@ -335,6 +344,10 @@ type anthropicStreamEvent struct {
 		PartialJSON string `json:"partial_json"`
 		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
+	Usage struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
 }
 
 func anthropicRole(msg Message) string {

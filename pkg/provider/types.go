@@ -79,6 +79,7 @@ type StreamDelta struct {
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
 	FinishReason     *string    `json:"finish_reason,omitempty"`
+	Usage            *Usage     `json:"usage,omitempty"`
 }
 
 func (m Message) StringContent() string {

@@ -76,6 +76,10 @@ func AccumulateStream(stream *Stream) (*Response, error) {
 			existing.Function.Arguments += toolCall.Function.Arguments
 		}
 
+		if delta.Usage != nil {
+			resp.Usage = *delta.Usage
+		}
+
 		if delta.FinishReason != nil {
 			resp.FinishReason = *delta.FinishReason
 		}
