@@ -7,26 +7,26 @@ import (
 
 func init() {
 	register("rama", [15]string{
-		"#000000", "#000000", "#000000", "#3B3D52", "#F4A261",
-		"#F4A261", "#2A9D8F", "#E76F51", "#F1FAEE", "#C9D6DF",
-		"#E63946", "#E9C46A", "#8AB17D", "#4CC9F0", "#3B3D52",
+		"#2b2d42", "#2b2d42", "#2b2d42", "#8d99ae", "#ef233c",
+		"#ef233c", "#8d99ae", "#d90429", "#edf2f4", "#8d99ae",
+		"#d90429", "#ffd700", "#8d99ae", "#edf2f4", "#8d99ae",
 	}, func(t *theme.Theme) {
-		t.ToolName = lipgloss.Color("#F4A261")
-		t.TranscriptUserAccent = lipgloss.Color("#F4A261")
-		t.TranscriptAssistantAccent = lipgloss.Color("#2A9D8F")
-		t.TranscriptThinking = lipgloss.Color("#C9D6DF")
-		t.TranscriptStreaming = lipgloss.Color("#4CC9F0")
-		t.TranscriptError = lipgloss.Color("#E63946")
-		t.MarkdownHeading = lipgloss.Color("#F4A261")
-		t.MarkdownLink = lipgloss.Color("#E76F51")
-		t.MarkdownCode = lipgloss.Color("#2A9D8F")
-		t.SyntaxKeyword = lipgloss.Color("#E76F51")
-		t.SyntaxString = lipgloss.Color("#4CC9F0")
-		t.SyntaxComment = lipgloss.Color("#8D99AE")
-		t.ToolStateRunning = lipgloss.Color("#E9C46A")
-		t.ToolStateDone = lipgloss.Color("#8AB17D")
-		t.ToolStateError = lipgloss.Color("#E63946")
-		t.ToolArtifactHeader = lipgloss.Color("#2C1D11")
-		t.ToolArtifactBody = lipgloss.Color("#20222D")
+		t.ToolName = lipgloss.Color("#ef233c")
+		t.TranscriptUserAccent = lipgloss.Color("#ef233c")
+		t.TranscriptAssistantAccent = lipgloss.Color("#8d99ae")
+		t.TranscriptThinking = lipgloss.Color("#8d99ae")
+		t.TranscriptStreaming = lipgloss.Color("#edf2f4")
+		t.TranscriptError = lipgloss.Color("#d90429")
+		t.MarkdownHeading = lipgloss.Color("#ef233c")
+		t.MarkdownLink = lipgloss.Color("#d90429")
+		t.MarkdownCode = lipgloss.Color("#edf2f4")
+		t.SyntaxKeyword = lipgloss.Color("#ef233c")
+		t.SyntaxString = lipgloss.Color("#edf2f4")
+		t.SyntaxComment = lipgloss.Color("#8d99ae")
+		t.ToolStateRunning = lipgloss.Color("#ffd700")
+		t.ToolStateDone = lipgloss.Color("#8d99ae")
+		t.ToolStateError = lipgloss.Color("#d90429")
+		t.ToolArtifactHeader = lipgloss.Color("#1a1c2a")
+		t.ToolArtifactBody = lipgloss.Color("#2b2d42")
 	})
 }
