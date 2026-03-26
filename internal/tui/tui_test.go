@@ -311,17 +311,20 @@ func TestStatusLoadedUpdatesFooterUsage(t *testing.T) {
 			Session: "tui:main",
 			Usage: client.UsageInfo{
 				TotalTokens:   68000,
-				ContextWindow: 200000,
+				ContextWindow: 131072,
 			},
 		},
 	})
 	got := updated.(Model)
 
+	if headerView := plain(got.header.View()); !strings.Contains(headerView, "52%") {
+		t.Fatalf("expected header context percent 52, got %q", headerView)
+	}
 	view := plain(got.footer.View())
 	if !strings.Contains(view, "model ollama/qwen3:8b") {
 		t.Fatalf("expected footer model update, got %q", view)
 	}
-	if !strings.Contains(view, "34% (68K/200K)") {
+	if !strings.Contains(view, "52% (68K/131.1K)") {
 		t.Fatalf("expected footer usage update, got %q", view)
 	}
 }
@@ -465,7 +468,7 @@ func TestSidebarDataUpdatesFromStatusAndCompressionEvents(t *testing.T) {
 			Session: "tui:alt",
 			Usage: client.UsageInfo{
 				TotalTokens:   68000,
-				ContextWindow: 200000,
+				ContextWindow: 131072,
 			},
 			Channels: []client.ChannelStatus{
 				{Name: "WhatsApp", Status: "connected"},
@@ -474,6 +477,9 @@ func TestSidebarDataUpdatesFromStatusAndCompressionEvents(t *testing.T) {
 	})
 	got := updated.(Model)
 
+	if headerView := plain(got.header.View()); !strings.Contains(headerView, "52%") {
+		t.Fatalf("expected header context percent 52, got %q", headerView)
+	}
 	sidebarView := plain(got.sidebar.View())
 	if !strings.Contains(sidebarView, "tui:alt") {
 		t.Fatalf("expected sidebar session to update, got %q", sidebarView)
@@ -481,7 +487,7 @@ func TestSidebarDataUpdatesFromStatusAndCompressionEvents(t *testing.T) {
 	if !strings.Contains(sidebarView, "model-b") {
 		t.Fatalf("expected sidebar model to update, got %q", sidebarView)
 	}
-	if !strings.Contains(sidebarView, "68K / 200K") {
+	if !strings.Contains(sidebarView, "68K / 131.1K") {
 		t.Fatalf("expected sidebar usage to update, got %q", sidebarView)
 	}
 	if !strings.Contains(sidebarView, "WhatsApp") {
@@ -614,19 +620,33 @@ func TestContextCompressedEventAddsSystemMessage(t *testing.T) {
 func TestUsageWarningIsAppendedOncePerSession(t *testing.T) {
 	model := New(app.Config{})
 	model.messages.SetSize(80, 20)
+	model.width = 80
+	model.footer.SetWidth(80)
+	model.sidebar.SetSize(30, 20)
 
 	payload, _ := json.Marshal(client.UsagePayload{
-		TotalTokens:   180000,
-		ContextWindow: 200000,
+		TotalTokens:   120000,
+		ContextWindow: 131072,
 	})
 	updated, _ := model.Update(EventMsg{
 		Event: client.Event{Type: client.FrameEvent, Event: "chat.usage", Payload: payload, Seq: 1},
 	})
 	got := updated.(Model)
 
+	if headerView := plain(got.header.View()); !strings.Contains(headerView, "92%") {
+		t.Fatalf("expected header context percent 92, got %q", headerView)
+	}
 	view := plain(got.messages.View())
-	if !strings.Contains(view, "Context is 90% full. Use /compact to free space.") {
+	if !strings.Contains(view, "Context is 92% full. Use /compact to free space.") {
 		t.Fatalf("expected warning on first threshold crossing, got %q", view)
+	}
+	footer := plain(got.footer.View())
+	if !strings.Contains(footer, "92%") || !strings.Contains(footer, "120K/131.1K") {
+		t.Fatalf("expected footer usage update, got %q", footer)
+	}
+	sidebar := plain(got.sidebar.View())
+	if !strings.Contains(sidebar, "120K / 131.1K") {
+		t.Fatalf("expected sidebar usage update, got %q", sidebar)
 	}
 
 	updated, _ = got.Update(EventMsg{
@@ -649,7 +669,7 @@ func TestSyncStatusUsesCurrentSession(t *testing.T) {
 				Session: "tui:alt",
 				Usage: client.UsageInfo{
 					TotalTokens:   42000,
-					ContextWindow: 200000,
+					ContextWindow: 131072,
 				},
 			},
 		},
@@ -665,7 +685,10 @@ func TestSyncStatusUsesCurrentSession(t *testing.T) {
 	if !strings.Contains(view, "session tui:alt") {
 		t.Fatalf("expected footer to keep current session label, got %q", view)
 	}
-	if !strings.Contains(view, "21% (42K/200K)") {
+	if headerView := plain(got.header.View()); !strings.Contains(headerView, "32%") {
+		t.Fatalf("expected header context percent 32, got %q", headerView)
+	}
+	if !strings.Contains(view, "32% (42K/131.1K)") {
 		t.Fatalf("expected footer to use current session usage, got %q", view)
 	}
 }

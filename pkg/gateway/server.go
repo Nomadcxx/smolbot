@@ -245,7 +245,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 				"promptTokens":     s.lastUsage.PromptTokens,
 				"completionTokens": s.lastUsage.CompletionTokens,
 				"totalTokens":      s.lastUsage.TotalTokens,
-				"contextWindow":    s.config.Agents.Defaults.ContextWindowTokens,
+				"contextWindow":    s.contextWindowTokens(ctx),
 			},
 		}, nil
 	case "cron.list":
@@ -608,7 +608,61 @@ func detectProviderFromModel(model, fallbackProvider string) string {
 	if strings.HasPrefix(lower, "azure/") {
 		return "azure_openai"
 	}
+	if strings.Contains(lower, "ollama") {
+		return "ollama"
+	}
 	return fallbackProvider
+}
+
+func (s *Server) contextWindowTokens(ctx context.Context) int {
+	fallback := s.configContextWindowTokens()
+	if s.currentProvider() != "ollama" {
+		return fallback
+	}
+
+	model := normalizeOllamaModelID(s.currentModel())
+	if model == "" {
+		return fallback
+	}
+
+	client := provider.NewOllamaClient(s.ollamaBaseURL())
+	window, err := client.ContextWindow(ctx, model)
+	if err != nil || !window.Found || window.Value <= 0 {
+		return fallback
+	}
+	return window.Value
+}
+
+func (s *Server) configContextWindowTokens() int {
+	if s.config == nil {
+		return 0
+	}
+	return s.config.Agents.Defaults.ContextWindowTokens
+}
+
+func (s *Server) ollamaBaseURL() string {
+	if s.config == nil {
+		return ""
+	}
+	if providerCfg, ok := s.config.Providers["ollama"]; ok {
+		return providerCfg.APIBase
+	}
+	return ""
+}
+
+func normalizeOllamaModelID(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ""
+	}
+	prefix, rest, ok := strings.Cut(model, "/")
+	if !ok {
+		return model
+	}
+	if strings.Contains(strings.ToLower(prefix), "ollama") {
+		return rest
+	}
+	return model
 }
 
 func firstNonEmptyString(values ...string) string {
@@ -722,7 +776,7 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 				"promptTokens":     pt,
 				"completionTokens": ct,
 				"totalTokens":      tt,
-				"contextWindow":    s.config.Agents.Defaults.ContextWindowTokens,
+				"contextWindow":    s.contextWindowTokens(ctx),
 			})
 		}
 	})

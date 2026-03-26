@@ -95,6 +95,17 @@ func TestServerMethods(t *testing.T) {
 		if !strings.Contains(string(frame.Response.Result), `"uptime":`) {
 			t.Fatalf("expected uptime in status, got %s", frame.Response.Result)
 		}
+		var payload struct {
+			Usage struct {
+				ContextWindow int `json:"contextWindow"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
+			t.Fatalf("unmarshal status payload: %v", err)
+		}
+		if payload.Usage.ContextWindow != cfg.Agents.Defaults.ContextWindowTokens {
+			t.Fatalf("expected fallback context window %d, got %d", cfg.Agents.Defaults.ContextWindowTokens, payload.Usage.ContextWindow)
+		}
 	})
 
 	t.Run("chat history", func(t *testing.T) {
@@ -296,6 +307,110 @@ func TestServerMethods(t *testing.T) {
 	})
 }
 
+func TestServerOllamaContextWindow(t *testing.T) {
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ps":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"models": []map[string]any{
+					{
+						"name":           "qwen3:8b",
+						"model":          "qwen3:8b",
+						"context_length": 131072,
+					},
+				},
+			})
+		case "/api/show":
+			t.Fatalf("did not expect /api/show fallback when /api/ps matched")
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer ollama.Close()
+
+	store, err := session.NewStore(filepath.Join(t.TempDir(), "sessions.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "ollama/qwen3:8b"
+	cfg.Agents.Defaults.Provider = "ollama"
+	cfg.Agents.Defaults.ContextWindowTokens = 200000
+	cfg.Providers = map[string]config.ProviderConfig{
+		"ollama": {APIBase: ollama.URL},
+	}
+
+	agentStub := &fakeAgentProcessor{
+		response: "done",
+		events: []agent.Event{
+			{
+				Type: agent.EventUsage,
+				Data: map[string]any{
+					"promptTokens":     12,
+					"completionTokens": 34,
+					"totalTokens":      56,
+				},
+			},
+		},
+	}
+
+	server := NewServer(ServerDeps{
+		Agent:     agentStub,
+		Sessions:  store,
+		Config:    cfg,
+		StartedAt: time.Now().Add(-time.Minute),
+	})
+
+	statusResp, err := server.handleRequest(context.Background(), &clientState{}, RequestFrame{
+		ID:     "1",
+		Method: "status",
+	})
+	if err != nil {
+		t.Fatalf("handleRequest status: %v", err)
+	}
+	status, ok := statusResp.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected status payload type %T", statusResp)
+	}
+	usage, ok := status["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected usage payload type %T", status["usage"])
+	}
+	if got := usage["contextWindow"]; got != 131072 {
+		t.Fatalf("expected detected ollama context window 131072, got %#v", got)
+	}
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "2",
+		Method: "chat.send",
+		Params: json.RawMessage(`{"session":"s1","message":"hello"}`),
+	})
+
+	frame := readEventFrame(t, conn, "chat.usage")
+	var usagePayload struct {
+		PromptTokens     int `json:"promptTokens"`
+		CompletionTokens int `json:"completionTokens"`
+		TotalTokens      int `json:"totalTokens"`
+		ContextWindow    int `json:"contextWindow"`
+	}
+	if err := json.Unmarshal(frame.Event.Payload, &usagePayload); err != nil {
+		t.Fatalf("unmarshal chat.usage payload: %v", err)
+	}
+	if usagePayload.ContextWindow != 131072 {
+		t.Fatalf("expected detected ollama context window in chat.usage, got %d", usagePayload.ContextWindow)
+	}
+	if usagePayload.TotalTokens != 56 {
+		t.Fatalf("unexpected usage payload %#v", usagePayload)
+	}
+}
+
 func TestCronListMapsJobs(t *testing.T) {
 	server := NewServer(ServerDeps{
 		Cron: &fakeCronLister{
@@ -369,6 +484,7 @@ func TestHealthEndpoint(t *testing.T) {
 type fakeAgentProcessor struct {
 	lastReq           agent.Request
 	response          string
+	events            []agent.Event
 	cancelled         []string
 	compactedSession  string
 	compactOriginal   int
@@ -377,8 +493,13 @@ type fakeAgentProcessor struct {
 	compactCalls      int
 }
 
-func (f *fakeAgentProcessor) ProcessDirect(_ context.Context, req agent.Request, _ agent.EventCallback) (string, error) {
+func (f *fakeAgentProcessor) ProcessDirect(_ context.Context, req agent.Request, cb agent.EventCallback) (string, error) {
 	f.lastReq = req
+	for _, event := range f.events {
+		if cb != nil {
+			cb(event)
+		}
+	}
 	return f.response, nil
 }
 
@@ -453,6 +574,18 @@ func readResponseFrame(t *testing.T, conn *websocket.Conn, id string) *DecodedFr
 	for {
 		frame := readFrame(t, conn)
 		if frame.Kind == FrameResponse && frame.Response.ID == id {
+			return frame
+		}
+	}
+}
+
+func readEventFrame(t *testing.T, conn *websocket.Conn, name string) *DecodedFrame {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	_ = conn.SetReadDeadline(deadline)
+	for {
+		frame := readFrame(t, conn)
+		if frame.Kind == FrameEvent && frame.Event.EventName == name {
 			return frame
 		}
 	}
