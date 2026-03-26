@@ -23,11 +23,26 @@ type StatusPayload struct {
 	Channels []ChannelStatus `json:"channels,omitempty"`
 }
 
-// MCPServerInfo represents an MCP server exposed by the gateway.
+type CompactResult struct {
+	Session          string  `json:"session,omitempty"`
+	Compacted        bool    `json:"compacted"`
+	Reason           string  `json:"reason,omitempty"`
+	OriginalTokens   int     `json:"originalTokens"`
+	CompressedTokens int     `json:"compressedTokens"`
+	ReductionPercent float64 `json:"reductionPercent"`
+}
+
+type SkillInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status"`
+}
+
 type MCPServerInfo struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Tools  int    `json:"tools"`
+	Name    string `json:"name"`
+	Command string `json:"command,omitempty"`
+	Status  string `json:"status"`
+	Tools   int    `json:"tools,omitempty"`
 }
 
 // CronJob represents a scheduled task exposed by the gateway.

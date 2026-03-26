@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/cron"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
 	"github.com/Nomadcxx/smolbot/pkg/session"
+	"github.com/Nomadcxx/smolbot/pkg/skill"
 	"github.com/gorilla/websocket"
 )
 
@@ -36,6 +38,7 @@ type ServerDeps struct {
 	Sessions         *session.Store
 	Channels         *channel.Manager
 	Config           *config.Config
+	Skills           *skill.Registry
 	Version          string
 	StartedAt        time.Time
 	SetModelCallback func(model string) error
@@ -47,6 +50,7 @@ type Server struct {
 	sessions         *session.Store
 	channels         *channel.Manager
 	config           *config.Config
+	skills           *skill.Registry
 	version          string
 	started          time.Time
 	setModelCallback func(model string) error
@@ -68,10 +72,11 @@ type Server struct {
 }
 
 type clientState struct {
-	conn     *websocket.Conn
-	mu       sync.Mutex
-	seq      int64
-	isLegacy bool
+	conn       *websocket.Conn
+	mu         sync.Mutex
+	seq        int64
+	isLegacy   bool
+	sessionKey string
 }
 
 type runState struct {
@@ -105,6 +110,7 @@ func NewServer(deps ServerDeps) *Server {
 		sessions:         deps.Sessions,
 		channels:         deps.Channels,
 		config:           deps.Config,
+		skills:           deps.Skills,
 		version:          firstNonEmptyString(deps.Version, "dev"),
 		started:          started,
 		setModelCallback: deps.SetModelCallback,
@@ -217,9 +223,9 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"version":  s.version,
 			"protocol": 1,
 			"methods": []string{
-				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set", "cron.list",
+				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set", "compact", "skills.list", "mcps.list", "cron.list",
 			},
-			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "context.compressed"},
+			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "compact.start", "compact.done", "context.compressed"},
 		}, nil
 	case "status":
 		var channels []map[string]string
@@ -300,6 +306,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		if err != nil {
 			return nil, err
 		}
+		client.sessionKey = request.SessionKey
 		runID, err := s.startRun(request, client)
 		if err != nil {
 			return nil, err
@@ -360,6 +367,112 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"models":  modelList,
 			"current": s.currentModel(),
 		}, nil
+	case "compact":
+		params := struct {
+			Session string `json:"session"`
+		}{}
+		if len(req.Params) != 0 {
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				return nil, fmt.Errorf("parse compact params: %w", err)
+			}
+		}
+		sessionKey := params.Session
+		if sessionKey == "" {
+			sessionKey = client.sessionKey
+		}
+		if sessionKey == "" {
+			return nil, fmt.Errorf("compact requires session")
+		}
+		if s.sessions == nil {
+			return nil, fmt.Errorf("session store unavailable")
+		}
+		history, err := s.sessions.GetHistory(sessionKey, 500)
+		if err != nil {
+			return nil, err
+		}
+		result := map[string]any{
+			"session":          sessionKey,
+			"compacted":        false,
+			"originalTokens":   0,
+			"compressedTokens": 0,
+			"reductionPercent": 0,
+		}
+		if s.config != nil && !s.config.Agents.Defaults.Compression.Enabled {
+			result["reason"] = "compression disabled"
+			return result, nil
+		}
+		if len(history) < 4 {
+			result["reason"] = "not enough history"
+			return result, nil
+		}
+		compactor, ok := s.agent.(interface {
+			CompactNow(context.Context, string) (int, int, float64, error)
+		})
+		if !ok {
+			return nil, fmt.Errorf("agent does not support manual compaction")
+		}
+		client.sessionKey = sessionKey
+		s.emitEvent(client, "compact.start", map[string]any{"session": sessionKey})
+		original, compressed, pct, err := compactor.CompactNow(ctx, sessionKey)
+		if err != nil {
+			return nil, err
+		}
+		if original == 0 || compressed == 0 || pct <= 0 {
+			result["reason"] = "no reduction achieved"
+			s.emitEvent(client, "compact.done", result)
+			return result, nil
+		}
+		payload := map[string]any{
+			"session":          sessionKey,
+			"compacted":        true,
+			"originalTokens":   original,
+			"compressedTokens": compressed,
+			"reductionPercent": pct,
+		}
+		s.emitEvent(client, "compact.done", payload)
+		return payload, nil
+	case "skills.list":
+		skills := make([]map[string]any, 0)
+		if s.skills != nil {
+			for _, name := range s.skills.Names() {
+				entry, ok := s.skills.Get(name)
+				if !ok {
+					continue
+				}
+				status := "available"
+				if entry.Always {
+					status = "always"
+				}
+				if !entry.Available {
+					status = "unavailable"
+				}
+				skills = append(skills, map[string]any{
+					"name":        entry.Name,
+					"description": entry.Description,
+					"status":      status,
+				})
+			}
+		}
+		return map[string]any{"skills": skills}, nil
+	case "mcps.list":
+		servers := make([]map[string]any, 0)
+		if s.config != nil {
+			names := make([]string, 0, len(s.config.Tools.MCPServers))
+			for name := range s.config.Tools.MCPServers {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				cfg := s.config.Tools.MCPServers[name]
+				command := strings.TrimSpace(strings.Join(append([]string{cfg.Command}, cfg.Args...), " "))
+				servers = append(servers, map[string]any{
+					"name":    name,
+					"command": command,
+					"status":  "configured",
+				})
+			}
+		}
+		return map[string]any{"servers": servers}, nil
 	case "models.set":
 		params := struct {
 			Model string `json:"model"`
@@ -551,6 +664,8 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 
 	result, err := s.agent.ProcessDirect(ctx, req, func(event agent.Event) {
 		switch event.Type {
+		case agent.EventContextCompacting:
+			s.emitEvent(state.owner, "compact.start", map[string]any{"session": req.SessionKey})
 		case agent.EventThinking:
 			thinking.WriteString(event.Content)
 			s.emitEvent(state.owner, "chat.thinking", map[string]any{"content": event.Content})
@@ -585,6 +700,11 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 			originalTokens, _ := event.Data["originalTokens"].(int)
 			compressedTokens, _ := event.Data["compressedTokens"].(int)
 			reductionPercent, _ := event.Data["reductionPercent"].(float64)
+			s.emitEvent(state.owner, "compact.done", map[string]any{
+				"originalTokens":   originalTokens,
+				"compressedTokens": compressedTokens,
+				"reductionPercent": reductionPercent,
+			})
 			s.emitEvent(state.owner, "context.compressed", map[string]any{
 				"enabled":          true,
 				"originalTokens":   originalTokens,
@@ -692,6 +812,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) writeEvent(client *clientState, name string, payload any) error {
+	if client == nil || client.conn == nil {
+		return nil
+	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -708,6 +831,9 @@ func (s *Server) writeEvent(client *clientState, name string, payload any) error
 }
 
 func (s *Server) emitEvent(client *clientState, name string, payload map[string]any) {
+	if client == nil || client.conn == nil {
+		return
+	}
 	if err := s.writeEvent(client, name, payload); err != nil {
 		log.Printf("[gateway] write %s event failed: %v", name, err)
 	}

@@ -32,6 +32,7 @@ const (
 	EventToolDone          EventType = "tool.done"
 	EventDone              EventType = "done"
 	EventError             EventType = "error"
+	EventContextCompacting EventType = "context.compacting"
 	EventContextCompressed EventType = "context.compressed"
 	EventUsage             EventType = "usage"
 )

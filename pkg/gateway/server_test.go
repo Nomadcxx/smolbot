@@ -17,6 +17,7 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/cron"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
 	"github.com/Nomadcxx/smolbot/pkg/session"
+	"github.com/Nomadcxx/smolbot/pkg/skill"
 	"github.com/gorilla/websocket"
 )
 
@@ -29,22 +30,39 @@ func TestServerMethods(t *testing.T) {
 	if err := store.SaveMessages("s1", []provider.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "world"},
+		{Role: "user", Content: "more context"},
+		{Role: "assistant", Content: "more reply"},
 	}); err != nil {
 		t.Fatalf("SaveMessages: %v", err)
+	}
+	if err := store.SaveMessages("s3", []provider.Message{
+		{Role: "user", Content: "short"},
+		{Role: "assistant", Content: "short reply"},
+	}); err != nil {
+		t.Fatalf("SaveMessages s3: %v", err)
 	}
 
 	cfg := &config.Config{}
 	cfg.Agents.Defaults.Model = "gpt-test"
 	cfg.Agents.Defaults.Provider = "openai"
+	cfg.Agents.Defaults.Compression.Enabled = true
+	cfg.Tools.MCPServers = map[string]config.MCPServerConfig{
+		"filesystem": {Command: "npx", Args: []string{"-y", "@modelcontextprotocol/server-filesystem"}},
+	}
 	channels := channel.NewManager()
 	channels.Register(&fakeChannel{name: "slack"})
-	agentStub := &fakeAgentProcessor{response: "done"}
+	agentStub := &fakeAgentProcessor{response: "done", compactOriginal: 12000, compactCompressed: 7000, compactPct: 42}
+	skills, err := skill.NewBuiltinRegistry()
+	if err != nil {
+		t.Fatalf("NewBuiltinRegistry: %v", err)
+	}
 
 	server := NewServer(ServerDeps{
 		Agent:     agentStub,
 		Sessions:  store,
 		Channels:  channels,
 		Config:    cfg,
+		Skills:    skills,
 		Version:   "test",
 		StartedAt: time.Now().Add(-2 * time.Minute),
 	})
@@ -179,6 +197,103 @@ func TestServerMethods(t *testing.T) {
 			t.Fatalf("expected empty cron list, got %#v", payload.Jobs)
 		}
 	})
+
+	t.Run("compact", func(t *testing.T) {
+		if err := store.SaveMessages("s1", []provider.Message{
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "world"},
+			{Role: "user", Content: "more context"},
+			{Role: "assistant", Content: "more reply"},
+		}); err != nil {
+			t.Fatalf("reseeding s1: %v", err)
+		}
+		writeFrame(t, conn, RequestFrame{
+			ID:     "9",
+			Method: "compact",
+			Params: json.RawMessage(`{"session":"s1"}`),
+		})
+		frame := readResponseFrame(t, conn, "9")
+		if !strings.Contains(string(frame.Response.Result), `"compacted":true`) {
+			t.Fatalf("unexpected compact payload %s", frame.Response.Result)
+		}
+		if !strings.Contains(string(frame.Response.Result), `"session":"s1"`) {
+			t.Fatalf("expected session in compact payload %s", frame.Response.Result)
+		}
+		if agentStub.compactedSession != "s1" {
+			t.Fatalf("expected compact to target session s1, got %q", agentStub.compactedSession)
+		}
+	})
+
+	t.Run("compact no-op is explicit and uses fallback session", func(t *testing.T) {
+		callsBefore := agentStub.compactCalls
+		resp, err := server.handleRequest(context.Background(), &clientState{sessionKey: "s3"}, RequestFrame{
+			ID:     "9b",
+			Method: "compact",
+		})
+		if err != nil {
+			t.Fatalf("handleRequest compact: %v", err)
+		}
+		payload, ok := resp.(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected payload type %T", resp)
+		}
+		if got := payload["session"]; got != "s3" {
+			t.Fatalf("expected fallback session s3, got %#v", got)
+		}
+		if got := payload["compacted"]; got != false {
+			t.Fatalf("expected no-op compaction to be explicit, got %#v", got)
+		}
+		if got := payload["reason"]; got != "not enough history" {
+			t.Fatalf("expected no-op reason, got %#v", got)
+		}
+		if agentStub.compactCalls != callsBefore {
+			t.Fatalf("expected compact agent not to be called for no-op, got %d -> %d", callsBefore, agentStub.compactCalls)
+		}
+	})
+
+	t.Run("compact no-reduction still emits done payload", func(t *testing.T) {
+		agentStub.compactOriginal = 0
+		agentStub.compactCompressed = 0
+		agentStub.compactPct = 0
+		defer func() {
+			agentStub.compactOriginal = 12000
+			agentStub.compactCompressed = 7000
+			agentStub.compactPct = 42
+		}()
+		resp, err := server.handleRequest(context.Background(), &clientState{sessionKey: "s1"}, RequestFrame{
+			ID:     "9c",
+			Method: "compact",
+		})
+		if err != nil {
+			t.Fatalf("handleRequest compact no-reduction: %v", err)
+		}
+		payload, ok := resp.(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected payload type %T", resp)
+		}
+		if got := payload["compacted"]; got != false {
+			t.Fatalf("expected explicit no-op, got %#v", got)
+		}
+		if got := payload["reason"]; got != "no reduction achieved" {
+			t.Fatalf("expected no-reduction reason, got %#v", got)
+		}
+	})
+
+	t.Run("skills list", func(t *testing.T) {
+		writeFrame(t, conn, RequestFrame{ID: "10", Method: "skills.list"})
+		frame := readResponseFrame(t, conn, "10")
+		if !strings.Contains(string(frame.Response.Result), `"skills"`) {
+			t.Fatalf("unexpected skills payload %s", frame.Response.Result)
+		}
+	})
+
+	t.Run("mcps list", func(t *testing.T) {
+		writeFrame(t, conn, RequestFrame{ID: "11", Method: "mcps.list"})
+		frame := readResponseFrame(t, conn, "11")
+		if !strings.Contains(string(frame.Response.Result), `"name":"filesystem"`) {
+			t.Fatalf("unexpected mcps payload %s", frame.Response.Result)
+		}
+	})
 }
 
 func TestCronListMapsJobs(t *testing.T) {
@@ -252,9 +367,14 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 type fakeAgentProcessor struct {
-	lastReq   agent.Request
-	response  string
-	cancelled []string
+	lastReq           agent.Request
+	response          string
+	cancelled         []string
+	compactedSession  string
+	compactOriginal   int
+	compactCompressed int
+	compactPct        float64
+	compactCalls      int
 }
 
 func (f *fakeAgentProcessor) ProcessDirect(_ context.Context, req agent.Request, _ agent.EventCallback) (string, error) {
@@ -264,6 +384,12 @@ func (f *fakeAgentProcessor) ProcessDirect(_ context.Context, req agent.Request,
 
 func (f *fakeAgentProcessor) CancelSession(sessionKey string) {
 	f.cancelled = append(f.cancelled, sessionKey)
+}
+
+func (f *fakeAgentProcessor) CompactNow(_ context.Context, sessionKey string) (int, int, float64, error) {
+	f.compactedSession = sessionKey
+	f.compactCalls++
+	return f.compactOriginal, f.compactCompressed, f.compactPct, nil
 }
 
 type fakeChannel struct{ name string }

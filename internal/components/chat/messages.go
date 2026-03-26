@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/glamour/v2/ansi"
 	viewport "charm.land/bubbles/v2/viewport"
 	glamour "charm.land/glamour/v2"
+	"charm.land/glamour/v2/ansi"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 )
@@ -20,20 +20,20 @@ type ChatMessage struct {
 }
 
 type MessagesModel struct {
-	messages       []ChatMessage
-	tools          []ToolCall
-	width          int
-	height         int
-	progress       string
-	thinking       string
-	thinkingStart  time.Time
-	viewport       viewport.Model
-	rendered       string
-	dirty          bool
-	renderer       *glamour.TermRenderer
-	rendererWidth  int
-	rendererStyle  string
-	expandedTools  map[string]bool
+	messages      []ChatMessage
+	tools         []ToolCall
+	width         int
+	height        int
+	progress      string
+	thinking      string
+	thinkingStart time.Time
+	viewport      viewport.Model
+	rendered      string
+	dirty         bool
+	renderer      *glamour.TermRenderer
+	rendererWidth int
+	rendererStyle string
+	expandedTools map[string]bool
 }
 
 func NewMessages() MessagesModel {
@@ -75,6 +75,16 @@ func (m *MessagesModel) AppendError(content string) {
 	m.progress = ""
 	m.thinking = ""
 	m.sync(true)
+}
+
+func (m *MessagesModel) AppendSystem(content string) {
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+	m.messages = append(m.messages, ChatMessage{Role: "system", Content: content})
+	m.progress = ""
+	m.thinking = ""
+	m.sync(m.viewport.AtBottom())
 }
 
 func (m *MessagesModel) AppendThinking(content string) {
@@ -213,6 +223,8 @@ func (m *MessagesModel) renderContent() string {
 			lines = append(lines, renderRoleBlock("USER", msg.Content, t.TranscriptUserAccent, m.width))
 		case "assistant":
 			lines = append(lines, renderRoleBlock("ASSISTANT", m.renderAssistant(msg.Content), t.TranscriptAssistantAccent, m.width))
+		case "system":
+			lines = append(lines, renderSystemMessage(msg.Content, m.width))
 		case "error":
 			lines = append(lines, renderMessageBlock("ERROR", msg.Content, t.Error, m.width))
 		case "thinking":
@@ -402,11 +414,11 @@ func markdownStyleConfig() ansi.StyleConfig {
 				},
 			},
 			Chroma: &ansi.Chroma{
-				Background: ansi.StylePrimitive{BackgroundColor: background},
-				Text:       ansi.StylePrimitive{BackgroundColor: background, Color: text},
-				Error:      ansi.StylePrimitive{BackgroundColor: background, Color: colorPtr(colorHex(current.TranscriptError))},
-				Comment:    ansi.StylePrimitive{BackgroundColor: background, Color: comment},
-				Keyword:    ansi.StylePrimitive{BackgroundColor: background, Color: keyword},
+				Background:       ansi.StylePrimitive{BackgroundColor: background},
+				Text:             ansi.StylePrimitive{BackgroundColor: background, Color: text},
+				Error:            ansi.StylePrimitive{BackgroundColor: background, Color: colorPtr(colorHex(current.TranscriptError))},
+				Comment:          ansi.StylePrimitive{BackgroundColor: background, Color: comment},
+				Keyword:          ansi.StylePrimitive{BackgroundColor: background, Color: keyword},
 				KeywordReserved:  ansi.StylePrimitive{BackgroundColor: background, Color: keyword},
 				KeywordNamespace: ansi.StylePrimitive{BackgroundColor: background, Color: keyword},
 				KeywordType:      ansi.StylePrimitive{BackgroundColor: background, Color: keyword},

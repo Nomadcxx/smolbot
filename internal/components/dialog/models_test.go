@@ -32,6 +32,35 @@ func TestModelsModelShowsCurrentModel(t *testing.T) {
 	}
 }
 
+func TestModelsModelGroupsByProvider(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be available")
+	}
+
+	model := NewModels([]client.ModelInfo{
+		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic"},
+		{ID: "gpt-5", Name: "GPT-5", Provider: "openai"},
+		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai"},
+	}, "gpt-5")
+
+	view := model.View()
+	if !strings.Contains(view, "Provider: anthropic") {
+		t.Fatalf("expected anthropic provider section, got %q", view)
+	}
+	if !strings.Contains(view, "Provider: openai (current)") {
+		t.Fatalf("expected current provider section, got %q", view)
+	}
+	if !strings.Contains(view, "[openai] GPT-5") || !strings.Contains(view, "current") {
+		t.Fatalf("expected current model row inside provider group, got %q", view)
+	}
+
+	anthropicIdx := strings.Index(view, "Provider: anthropic")
+	openaiIdx := strings.Index(view, "Provider: openai (current)")
+	if anthropicIdx == -1 || openaiIdx == -1 || anthropicIdx > openaiIdx {
+		t.Fatalf("expected provider groups in stable order, got %q", view)
+	}
+}
+
 func TestModelsModelShowsOverflowCues(t *testing.T) {
 	models := make([]client.ModelInfo, 0, 10)
 	for i := 0; i < 10; i++ {
