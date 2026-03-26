@@ -286,7 +286,7 @@ func TestOpenAIProviderStreamAccumulatesPartialToolCalls(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p := NewOpenAIProvider("openai", "test-key", server.URL+"/v1", nil)
+	p := NewOpenAIProvider("ollama", "test-key", server.URL, nil)
 	p.sleep = func(context.Context, int) error { return nil }
 
 	stream, err := p.ChatStream(context.Background(), ChatRequest{
@@ -354,7 +354,7 @@ func TestOpenAIProviderStreamFallsBackWhenUsageOptionsUnsupported(t *testing.T) 
 	}))
 	defer server.Close()
 
-	p := NewOpenAIProvider("moonshot", "test-key", server.URL+"/v1", nil)
+	p := NewOpenAIProvider("ollama", "test-key", server.URL, nil)
 	p.sleep = func(context.Context, int) error { return nil }
 
 	stream, err := p.ChatStream(context.Background(), ChatRequest{

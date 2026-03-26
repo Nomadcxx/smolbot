@@ -473,7 +473,10 @@ func supportsPromptCaching(name, baseURL string) bool {
 func supportsStreamUsage(name, baseURL string) bool {
 	lowerName := strings.ToLower(name)
 	lowerBase := strings.ToLower(baseURL)
-	if strings.Contains(lowerName, "ollama") || strings.Contains(lowerBase, "localhost:11434") || strings.Contains(lowerBase, "127.0.0.1:11434") {
+	if strings.Contains(lowerName, "ollama") {
+		return true
+	}
+	if strings.Contains(lowerBase, "localhost:11434") || strings.Contains(lowerBase, "127.0.0.1:11434") {
 		return false
 	}
 	return true
