@@ -22,3 +22,24 @@ type StatusPayload struct {
 	Uptime   int             `json:"uptime"`
 	Channels []ChannelStatus `json:"channels,omitempty"`
 }
+
+type CompactResult struct {
+	Session          string  `json:"session,omitempty"`
+	Compacted        bool    `json:"compacted"`
+	Reason           string  `json:"reason,omitempty"`
+	OriginalTokens   int     `json:"originalTokens"`
+	CompressedTokens int     `json:"compressedTokens"`
+	ReductionPercent float64 `json:"reductionPercent"`
+}
+
+type SkillInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status"`
+}
+
+type MCPServerInfo struct {
+	Name    string `json:"name"`
+	Command string `json:"command"`
+	Status  string `json:"status"`
+}

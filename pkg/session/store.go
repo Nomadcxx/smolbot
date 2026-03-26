@@ -102,50 +102,42 @@ func (s *Store) SaveMessages(sessionKey string, msgs []provider.Message) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO sessions (key) VALUES (?)`, sessionKey); err != nil {
-		return fmt.Errorf("upsert session: %w", err)
+	if err := ensureSessionTx(tx, sessionKey); err != nil {
+		return err
 	}
 
-	stmt, err := tx.Prepare(`
-		INSERT INTO messages (
-			session_key, role, content, tool_calls, tool_call_id, name, reasoning_content, thinking_blocks
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`)
+	if err := insertMessagesTx(tx, sessionKey, msgs); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE key = ?`, sessionKey); err != nil {
+		return fmt.Errorf("update session timestamp: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Store) ReplaceMessages(sessionKey string, msgs []provider.Message) error {
+	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("prepare insert: %w", err)
+		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer stmt.Close()
+	defer tx.Rollback()
 
-	for _, msg := range msgs {
-		if shouldSkipAssistant(msg) {
-			continue
-		}
+	if err := ensureSessionTx(tx, sessionKey); err != nil {
+		return err
+	}
 
-		contentJSON, err := marshalJSON(msg.Content)
-		if err != nil {
-			return fmt.Errorf("marshal content: %w", err)
-		}
-		toolCallsJSON, err := marshalJSON(msg.ToolCalls)
-		if err != nil {
-			return fmt.Errorf("marshal tool calls: %w", err)
-		}
-		thinkingJSON, err := marshalJSON(msg.ThinkingBlocks)
-		if err != nil {
-			return fmt.Errorf("marshal thinking blocks: %w", err)
-		}
+	if _, err := tx.Exec(`DELETE FROM messages WHERE session_key = ?`, sessionKey); err != nil {
+		return fmt.Errorf("clear session: %w", err)
+	}
 
-		if _, err := stmt.Exec(
-			sessionKey,
-			msg.Role,
-			nullString(contentJSON),
-			nullString(toolCallsJSON),
-			nullString(msg.ToolCallID),
-			nullString(msg.Name),
-			nullString(msg.ReasoningContent),
-			nullString(thinkingJSON),
-		); err != nil {
-			return fmt.Errorf("insert message: %w", err)
-		}
+	if err := insertMessagesTx(tx, sessionKey, msgs); err != nil {
+		return err
 	}
 
 	if _, err := tx.Exec(`UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE key = ?`, sessionKey); err != nil {
@@ -222,6 +214,59 @@ func shouldSkipAssistant(msg provider.Message) bool {
 		msg.Name == "" &&
 		msg.ReasoningContent == "" &&
 		len(msg.ThinkingBlocks) == 0
+}
+
+func insertMessagesTx(tx *sql.Tx, sessionKey string, msgs []provider.Message) error {
+	stmt, err := tx.Prepare(`
+		INSERT INTO messages (
+			session_key, role, content, tool_calls, tool_call_id, name, reasoning_content, thinking_blocks
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, msg := range msgs {
+		if shouldSkipAssistant(msg) {
+			continue
+		}
+
+		contentJSON, err := marshalJSON(msg.Content)
+		if err != nil {
+			return fmt.Errorf("marshal content: %w", err)
+		}
+		toolCallsJSON, err := marshalJSON(msg.ToolCalls)
+		if err != nil {
+			return fmt.Errorf("marshal tool calls: %w", err)
+		}
+		thinkingJSON, err := marshalJSON(msg.ThinkingBlocks)
+		if err != nil {
+			return fmt.Errorf("marshal thinking blocks: %w", err)
+		}
+
+		if _, err := stmt.Exec(
+			sessionKey,
+			msg.Role,
+			nullString(contentJSON),
+			nullString(toolCallsJSON),
+			nullString(msg.ToolCallID),
+			nullString(msg.Name),
+			nullString(msg.ReasoningContent),
+			nullString(thinkingJSON),
+		); err != nil {
+			return fmt.Errorf("insert message: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func ensureSessionTx(tx *sql.Tx, sessionKey string) error {
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO sessions (key) VALUES (?)`, sessionKey); err != nil {
+		return fmt.Errorf("upsert session: %w", err)
+	}
+	return nil
 }
 
 func contentIsEmpty(content any) bool {

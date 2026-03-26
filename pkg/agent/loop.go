@@ -118,53 +118,15 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	}
 
 	userMessage := a.buildUserMessage(req)
-	
-	// Context compression: check if threshold exceeded
-	if a.config.Agents.Defaults.Compression.Enabled && a.tokenizer != nil {
-		compConfig := a.config.Agents.Defaults.Compression
-		compressor := compression.NewCompressor(compression.Config{
-			Enabled:            compConfig.Enabled,
-			Mode:               compression.Mode(compConfig.Mode),
-			ThresholdPercent:   compConfig.ThresholdPercent,
-			KeepRecentMessages: compression.DefaultKeepRecentMessages,
-		})
-		tokenTracker := compression.NewTokenTracker(a.tokenizer)
-		
-		threshold := compConfig.ThresholdPercent
-		if threshold == 0 {
-			threshold = compression.DefaultThresholdPercent
-		}
-		
-		if tokenTracker.ShouldCompress(
-			historyToAny(history),
-			a.config.Agents.Defaults.ContextWindowTokens,
-			threshold,
-		) {
-			result := compressor.Compress(historyToAny(history))
-			
-			// Calculate token stats
-			orig, comp, reduction := tokenTracker.CalculateStats(
-				historyToAny(history),
-				result.CompressedMessages,
-			)
-			result.OriginalTokenCount = orig
-			result.CompressedTokenCount = comp
-			result.ReductionPercentage = reduction
-			
-			// Record stats for session
-			compression.RecordCompression(req.SessionKey, &result)
-			
-			// Convert back
-			history = anyToMessages(result.CompressedMessages)
-			
-			emit(cb, Event{
-				Type:    EventContextCompressed,
-				Content: fmt.Sprintf("Context compressed: %d→%d tokens (%.0f%% reduction)", 
-					orig, comp, reduction),
-			})
-		}
+
+	compressedHistory, compressed, _, _, _, err := a.compressSessionHistory(req.SessionKey, history, false, cb)
+	if err != nil {
+		return "", err
 	}
-	
+	if compressed {
+		history = compressedHistory
+	}
+
 	conversation := make([]provider.Message, 0, len(history)+2)
 	conversation = append(conversation, provider.Message{Role: "system", Content: systemPrompt})
 	conversation = append(conversation, history...)
@@ -261,7 +223,7 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 					Content: toolCall.Function.Name,
 					Data: map[string]any{
 						"deliveredToRequestTarget": delivered,
-						"id":                      toolCall.ID,
+						"id":                       toolCall.ID,
 					},
 				})
 			}
@@ -329,6 +291,21 @@ func (a *AgentLoop) CancelSession(sessionKey string) {
 	a.cancelSession(sessionKey)
 }
 
+func (a *AgentLoop) CompactNow(ctx context.Context, sessionKey string) (originalTokens, compressedTokens int, reductionPct float64, err error) {
+	history, err := a.sessions.GetHistory(sessionKey, 500)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	_, compressed, originalTokens, compressedTokens, reductionPct, err := a.compressSessionHistory(sessionKey, history, true, nil)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if !compressed {
+		return 0, 0, 0, nil
+	}
+	return originalTokens, compressedTokens, reductionPct, nil
+}
+
 func (a *AgentLoop) beginSession(parent context.Context, sessionKey string) (context.Context, context.CancelFunc, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -377,6 +354,62 @@ func (a *AgentLoop) buildUserMessage(req Request) provider.Message {
 		})
 	}
 	return provider.Message{Role: "user", Content: blocks}
+}
+
+func (a *AgentLoop) compressSessionHistory(sessionKey string, history []provider.Message, force bool, cb EventCallback) ([]provider.Message, bool, int, int, float64, error) {
+	if a == nil || a.config == nil || a.sessions == nil || a.tokenizer == nil {
+		return history, false, 0, 0, 0, nil
+	}
+	compConfig := a.config.Agents.Defaults.Compression
+	if !compConfig.Enabled || len(history) < 4 {
+		return history, false, 0, 0, 0, nil
+	}
+
+	compressor := compression.NewCompressor(compression.Config{
+		Enabled:            compConfig.Enabled,
+		Mode:               compression.Mode(compConfig.Mode),
+		ThresholdPercent:   compConfig.ThresholdPercent,
+		KeepRecentMessages: compression.DefaultKeepRecentMessages,
+	})
+	tokenTracker := compression.NewTokenTracker(a.tokenizer)
+
+	if !force {
+		threshold := compConfig.ThresholdPercent
+		if threshold == 0 {
+			threshold = compression.DefaultThresholdPercent
+		}
+		if !tokenTracker.ShouldCompress(historyToAny(history), a.config.Agents.Defaults.ContextWindowTokens, threshold) {
+			return history, false, 0, 0, 0, nil
+		}
+	}
+
+	emit(cb, Event{Type: EventContextCompacting})
+	result := compressor.Compress(historyToAny(history))
+	orig, comp, reduction := tokenTracker.CalculateStats(historyToAny(history), result.CompressedMessages)
+	if orig == 0 || comp == 0 || reduction <= 0 {
+		return history, false, 0, 0, 0, nil
+	}
+
+	result.OriginalTokenCount = orig
+	result.CompressedTokenCount = comp
+	result.ReductionPercentage = reduction
+	compression.RecordCompression(sessionKey, &result)
+
+	compressedHistory := anyToMessages(result.CompressedMessages)
+	if err := a.sessions.ReplaceMessages(sessionKey, compressedHistory); err != nil {
+		return history, false, 0, 0, 0, err
+	}
+
+	emit(cb, Event{
+		Type:    EventContextCompressed,
+		Content: fmt.Sprintf("Context compressed: %d→%d tokens (%.0f%% reduction)", orig, comp, reduction),
+		Data: map[string]any{
+			"originalTokens":   orig,
+			"compressedTokens": comp,
+			"reductionPercent": reduction,
+		},
+	})
+	return compressedHistory, true, orig, comp, reduction, nil
 }
 
 func (a *AgentLoop) consumeStream(stream *provider.Stream, cb EventCallback, suppressOutput bool) (*provider.Response, error) {

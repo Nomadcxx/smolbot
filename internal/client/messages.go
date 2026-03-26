@@ -76,7 +76,7 @@ func (c *Client) ModelsSet(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	var payload struct {
 		Previous string `json:"previous"`
 	}
@@ -91,10 +91,53 @@ func (c *Client) Status(session string) (StatusPayload, error) {
 	if err != nil {
 		return StatusPayload{}, err
 	}
-	
+
 	var payload StatusPayload
 	if err := json.Unmarshal(res.Payload, &payload); err != nil {
 		return StatusPayload{}, err
 	}
 	return payload, nil
+}
+
+func (c *Client) Compact(session string) (*CompactResult, error) {
+	res, err := c.sendRequest("compact", map[string]string{"session": session})
+	if err != nil {
+		return nil, err
+	}
+
+	var payload CompactResult
+	if err := json.Unmarshal(res.Payload, &payload); err != nil {
+		return nil, err
+	}
+	return &payload, nil
+}
+
+func (c *Client) Skills() ([]SkillInfo, error) {
+	res, err := c.sendRequest("skills.list", map[string]string{})
+	if err != nil {
+		return nil, err
+	}
+
+	var payload struct {
+		Skills []SkillInfo `json:"skills"`
+	}
+	if err := json.Unmarshal(res.Payload, &payload); err != nil {
+		return nil, err
+	}
+	return payload.Skills, nil
+}
+
+func (c *Client) MCPServers() ([]MCPServerInfo, error) {
+	res, err := c.sendRequest("mcps.list", map[string]string{})
+	if err != nil {
+		return nil, err
+	}
+
+	var payload struct {
+		Servers []MCPServerInfo `json:"servers"`
+	}
+	if err := json.Unmarshal(res.Payload, &payload); err != nil {
+		return nil, err
+	}
+	return payload.Servers, nil
 }

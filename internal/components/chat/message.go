@@ -130,7 +130,6 @@ func renderRoleBlock(label, body string, accent color.Color, width int) string {
 	return style.Render(content)
 }
 
-
 func subtleWash(accent color.Color) color.Color {
 	hex := colorHex(accent)
 	if len(hex) != 7 || hex[0] != '#' {
@@ -198,7 +197,7 @@ func renderThinkingBlock(body string, dur time.Duration, accent color.Color, wid
 			Foreground(t.TextMuted).
 			Width(innerWidth).
 			Padding(0, 1).
-			Render("Thought for "+formatDuration(dur))
+			Render("Thought for " + formatDuration(dur))
 		rows = append(rows, footer)
 	}
 
@@ -211,6 +210,28 @@ func renderThinkingBlock(body string, dur time.Duration, accent color.Color, wid
 		style = style.Width(width - 2)
 	}
 	return style.Render(content)
+}
+
+func renderSystemMessage(body string, width int) string {
+	t := theme.Current()
+	if t == nil {
+		return body
+	}
+	lineWidth := cappedWidth(width)
+	divider := "─── system ───"
+	style := lipgloss.NewStyle().
+		Foreground(t.TextMuted).
+		Width(lineWidth).
+		Align(lipgloss.Center)
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		style.Render(divider),
+		style.Render(body),
+	)
+	if width <= 4 {
+		return content
+	}
+	return lipgloss.NewStyle().Width(width - 2).Render(content)
 }
 
 func formatDuration(d time.Duration) string {

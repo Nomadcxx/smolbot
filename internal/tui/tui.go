@@ -17,6 +17,7 @@ import (
 	"github.com/Nomadcxx/smolbot/internal/components/status"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
+	cfgpkg "github.com/Nomadcxx/smolbot/pkg/config"
 )
 
 type ConnectedMsg struct{ Hello *client.HelloPayload }
@@ -56,6 +57,23 @@ type ModelSetMsg struct{ ID string }
 type ModelCurrentMsg struct {
 	Current string
 }
+type SkillsLoadedMsg struct{ Skills []client.SkillInfo }
+type MCPServersLoadedMsg struct{ Servers []client.MCPServerInfo }
+type ProvidersLoadedMsg struct {
+	Models  []client.ModelInfo
+	Current string
+	Status  client.StatusPayload
+}
+type CompactStartMsg struct{}
+type CompactDoneMsg struct {
+	Compacted  bool
+	Reason     string
+	Original   int
+	Compressed int
+	Reduction  float64
+}
+type CompactErrorMsg struct{ Err error }
+type CompactionTickMsg struct{}
 
 type Dialog interface {
 	Update(tea.Msg) (Dialog, tea.Cmd)
@@ -75,23 +93,29 @@ type gatewayClient interface {
 	ModelsList() ([]client.ModelInfo, string, error)
 	ModelsSet(id string) (string, error)
 	Status(session string) (client.StatusPayload, error)
+	Compact(session string) (*client.CompactResult, error)
+	Skills() ([]client.SkillInfo, error)
+	MCPServers() ([]client.MCPServerInfo, error)
 }
 
 type Model struct {
-	width, height int
-	app           *app.App
-	client        gatewayClient
-	header        header.Model
-	messages      chat.MessagesModel
-	editor        chat.EditorModel
-	status        status.Model
-	footer        status.FooterModel
-	dialog        Dialog
-	eventCh       chan tea.Msg
-	connected     bool
-	reconnectWait time.Duration
-	streaming     bool
-	currentRunID  string
+	width, height   int
+	app             *app.App
+	providerConfig  *cfgpkg.Config
+	client          gatewayClient
+	header          header.Model
+	messages        chat.MessagesModel
+	editor          chat.EditorModel
+	status          status.Model
+	footer          status.FooterModel
+	dialog          Dialog
+	eventCh         chan tea.Msg
+	connected       bool
+	reconnectWait   time.Duration
+	streaming       bool
+	currentRunID    string
+	contextWarned   bool
+	compactionFrame int
 }
 
 func New(cfg app.Config) Model {
@@ -105,14 +129,15 @@ func New(cfg app.Config) Model {
 	c := client.New(a.WSURL())
 
 	return Model{
-		app:      a,
-		client:   c,
-		header:   header.New(),
-		messages: chat.NewMessages(),
-		editor:   chat.NewEditor(),
-		status:   status.New(a),
-		footer:   status.NewFooter(a),
-		eventCh:  eventCh,
+		app:            a,
+		providerConfig: loadProviderConfig(),
+		client:         c,
+		header:         header.New(),
+		messages:       chat.NewMessages(),
+		editor:         chat.NewEditor(),
+		status:         status.New(a),
+		footer:         status.NewFooter(a),
+		eventCh:        eventCh,
 	}
 }
 
@@ -223,6 +248,26 @@ func (m Model) syncStatusCmd(echo bool) tea.Cmd {
 	}
 }
 
+func (m Model) compactCmd() tea.Cmd {
+	return func() tea.Msg {
+		result, err := m.client.Compact(m.app.Session)
+		if err != nil {
+			return CompactErrorMsg{Err: err}
+		}
+		return CompactDoneMsg{
+			Compacted:  result.Compacted,
+			Reason:     result.Reason,
+			Original:   result.OriginalTokens,
+			Compressed: result.CompressedTokens,
+			Reduction:  result.ReductionPercent,
+		}
+	}
+}
+
+func (m Model) compactTickCmd() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return CompactionTickMsg{} })
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
@@ -272,6 +317,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status.SetStreaming(false)
 		m.messages.AppendAssistant(msg.Content)
 		return m, m.syncStatusCmd(false)
+	case CompactStartMsg:
+		m.footer.SetCompacting(true)
+		m.compactionFrame = 0
+		m.footer.SetCompactionFrame(0)
+		return m, m.compactTickCmd()
+	case CompactDoneMsg:
+		m.footer.SetCompacting(false)
+		if !msg.Compacted {
+			m.messages.AppendSystem(compactionReasonMessage(msg.Reason))
+			return m, nil
+		}
+		m.footer.SetCompression(&client.CompressionInfo{
+			Enabled:          true,
+			OriginalTokens:   msg.Original,
+			CompressedTokens: msg.Compressed,
+			ReductionPercent: msg.Reduction,
+		})
+		m.messages.AppendSystem(fmt.Sprintf(
+			"Context compacted: %s → %s (%.0f%% reduction)",
+			formatTokens(msg.Original), formatTokens(msg.Compressed), msg.Reduction,
+		))
+		m.contextWarned = false
+		return m, m.syncStatusCmd(false)
+	case CompactErrorMsg:
+		m.footer.SetCompacting(false)
+		if msg.Err != nil {
+			m.messages.AppendError("Context compaction failed: " + msg.Err.Error())
+		}
+		return m, nil
+	case CompactionTickMsg:
+		if !m.footer.IsCompacting() {
+			return m, nil
+		}
+		m.compactionFrame++
+		m.footer.SetCompactionFrame(m.compactionFrame)
+		return m, m.compactTickCmd()
 	case ChatProgressMsg:
 		m.messages.SetProgress(m.messages.GetProgress() + msg.Content)
 		return m, nil
@@ -309,8 +390,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.footer.SetUsage(msg.Payload.Usage)
 		m.header.SetModel(m.app.Model)
 		if msg.Payload.Usage.ContextWindow > 0 && msg.Payload.Usage.TotalTokens > 0 {
-			pct := int((float64(msg.Payload.Usage.TotalTokens) / float64(msg.Payload.Usage.ContextWindow)) * 100 + 0.5)
+			pct := int((float64(msg.Payload.Usage.TotalTokens)/float64(msg.Payload.Usage.ContextWindow))*100 + 0.5)
 			m.header.SetContextPercent(pct)
+			m.maybeWarnContextUsage(pct)
 		}
 		if msg.Echo {
 			m.messages.AppendAssistant(formatStatusSummary(msg.Payload))
@@ -327,9 +409,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SessionResetDoneMsg:
 		m.app.Session = msg.Key
 		m.messages = chat.NewMessages()
+		m.contextWarned = false
 		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
 	case ModelsLoadedMsg:
 		m.dialog = modelsDialog{dialogcmp.NewModels(msg.Models, msg.Current)}
+		return m, nil
+	case SkillsLoadedMsg:
+		m.dialog = skillsDialog{dialogcmp.NewSkills(msg.Skills)}
+		return m, nil
+	case MCPServersLoadedMsg:
+		m.dialog = mcpServersDialog{dialogcmp.NewMCPServers(msg.Servers)}
+		return m, nil
+	case ProvidersLoadedMsg:
+		m.dialog = providersDialog{dialogcmp.NewProviders(buildProviderLines(msg.Models, msg.Current, msg.Status, m.providerConfig))}
 		return m, nil
 	case ModelSetMsg:
 		m.app.Model = msg.ID
@@ -338,11 +430,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.app.Session = msg.Key
 		m.messages = chat.NewMessages()
 		m.dialog = nil
+		m.contextWarned = false
 		return m, tea.Batch(m.loadHistoryCmd(), m.persistStateCmd(), m.syncStatusCmd(false))
 	case dialogcmp.SessionNewMsg:
 		m.app.Session = "tui:" + time.Now().Format("20060102-150405")
 		m.messages = chat.NewMessages()
 		m.dialog = nil
+		m.contextWarned = false
 		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
 	case dialogcmp.SessionResetMsg:
 		m.dialog = nil
@@ -425,6 +519,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var p client.CompressionInfo
 			_ = json.Unmarshal(msg.Event.Payload, &p)
 			m.footer.SetCompression(&p)
+			m.footer.SetCompacting(false)
+			m.messages.AppendSystem(fmt.Sprintf(
+				"Context compacted: %s → %s (%.0f%% reduction)",
+				formatTokens(p.OriginalTokens), formatTokens(p.CompressedTokens), p.ReductionPercent,
+			))
+			m.contextWarned = false
+		case "compact.start":
+			mapped = CompactStartMsg{}
+		case "compact.done":
+			m.footer.SetCompacting(false)
 		case "chat.usage":
 			var p client.UsagePayload
 			_ = json.Unmarshal(msg.Event.Payload, &p)
@@ -435,8 +539,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ContextWindow:    p.ContextWindow,
 			})
 			if p.ContextWindow > 0 && p.TotalTokens > 0 {
-				pct := int((float64(p.TotalTokens) / float64(p.ContextWindow)) * 100 + 0.5)
+				pct := int((float64(p.TotalTokens)/float64(p.ContextWindow))*100 + 0.5)
 				m.header.SetContextPercent(pct)
+				m.maybeWarnContextUsage(pct)
 			}
 		case "channel.inbound":
 			var p client.ChannelMessagePayload
@@ -535,6 +640,7 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		if args == "new" {
 			m.app.Session = "tui:" + time.Now().Format("20060102-150405")
 			m.messages = chat.NewMessages()
+			m.contextWarned = false
 			return m, m.persistStateCmd()
 		}
 		if args == "reset" {
@@ -572,8 +678,9 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		}
 	case "/clear":
 		m.messages = chat.NewMessages()
+		m.contextWarned = false
 	case "/help":
-		m.messages.AppendAssistant("Commands: /session, /session new, /session reset, /model, /model <name>, /theme <name>, /clear, /status, /help, /quit")
+		m.messages.AppendAssistant("Commands: /compact, /session, /session new, /session reset, /model, /model <name>, /theme <name>, /skills, /mcps, /providers, /keybindings, /clear, /status, /help, /quit")
 	case "/quit":
 		return m, m.saveStateCmd()
 	case "/theme":
@@ -590,6 +697,43 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.messages.AppendError("Unknown theme: " + args + ". Available: " + strings.Join(theme.List(), ", "))
 	case "/status":
 		return m, m.syncStatusCmd(true)
+	case "/compact", "/compress":
+		m.footer.SetCompacting(true)
+		m.compactionFrame = 0
+		m.footer.SetCompactionFrame(0)
+		m.contextWarned = false
+		return m, m.compactCmd()
+	case "/skills":
+		return m, func() tea.Msg {
+			skills, err := m.client.Skills()
+			if err != nil {
+				return ChatErrorMsg{Message: err.Error()}
+			}
+			return SkillsLoadedMsg{Skills: skills}
+		}
+	case "/mcps":
+		return m, func() tea.Msg {
+			servers, err := m.client.MCPServers()
+			if err != nil {
+				return ChatErrorMsg{Message: err.Error()}
+			}
+			return MCPServersLoadedMsg{Servers: servers}
+		}
+	case "/providers":
+		return m, func() tea.Msg {
+			models, current, err := m.client.ModelsList()
+			if err != nil {
+				return ChatErrorMsg{Message: err.Error()}
+			}
+			status, err := m.client.Status(m.app.Session)
+			if err != nil {
+				return ChatErrorMsg{Message: err.Error()}
+			}
+			return ProvidersLoadedMsg{Models: models, Current: current, Status: status}
+		}
+	case "/keybindings":
+		m.dialog = keybindingsDialog{dialogcmp.NewKeybindings()}
+		return m, nil
 	default:
 		m.messages.AppendError("Unknown command: " + cmd)
 	}
@@ -656,6 +800,34 @@ func (d commandsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	return commandsDialog{CommandsModel: next}, cmd
 }
 
+type skillsDialog struct{ dialogcmp.SkillsModel }
+
+func (d skillsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
+	next, cmd := d.SkillsModel.Update(msg)
+	return skillsDialog{next}, cmd
+}
+
+type mcpServersDialog struct{ dialogcmp.MCPServersModel }
+
+func (d mcpServersDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
+	next, cmd := d.MCPServersModel.Update(msg)
+	return mcpServersDialog{next}, cmd
+}
+
+type providersDialog struct{ dialogcmp.ProvidersModel }
+
+func (d providersDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
+	next, cmd := d.ProvidersModel.Update(msg)
+	return providersDialog{next}, cmd
+}
+
+type keybindingsDialog struct{ dialogcmp.KeybindingsModel }
+
+func (d keybindingsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
+	next, cmd := d.KeybindingsModel.Update(msg)
+	return keybindingsDialog{next}, cmd
+}
+
 func formatStatusSummary(payload client.StatusPayload) string {
 	parts := make([]string, 0, 4)
 	if payload.Model != "" {
@@ -699,6 +871,103 @@ func formatUsageTokens(value int) string {
 	default:
 		return fmt.Sprintf("%d", value)
 	}
+}
+
+func formatTokens(value int) string {
+	return formatUsageTokens(value)
+}
+
+func compactionReasonMessage(reason string) string {
+	switch strings.TrimSpace(reason) {
+	case "compression disabled":
+		return "Context compaction is disabled."
+	case "not enough history":
+		return "Nothing to compact yet."
+	case "no reduction achieved":
+		return "Context compaction did not reduce token usage."
+	default:
+		if strings.TrimSpace(reason) != "" {
+			return "Context compaction skipped: " + reason
+		}
+		return "Context compaction skipped."
+	}
+}
+
+func (m *Model) maybeWarnContextUsage(pct int) {
+	if pct < 90 || m.contextWarned {
+		return
+	}
+	m.contextWarned = true
+	m.messages.AppendSystem(fmt.Sprintf("Context is %d%% full. Use /compact to free space.", pct))
+}
+
+func buildProviderLines(models []client.ModelInfo, current string, status client.StatusPayload, cfg *cfgpkg.Config) []string {
+	currentModel := firstNonEmptyString(current, status.Model, "unknown")
+	currentProvider := providerNameForModel(models, currentModel)
+	if currentProvider == "" {
+		currentProvider = "unknown"
+	}
+
+	lines := []string{
+		"Current model: " + currentModel,
+		"Current provider: " + currentProvider,
+	}
+	if cfg != nil {
+		if providerCfg, ok := cfg.Providers[currentProvider]; ok && strings.TrimSpace(providerCfg.APIBase) != "" {
+			lines = append(lines, "API base URL: "+providerCfg.APIBase)
+		}
+		if len(cfg.Providers) > 0 {
+			names := make([]string, 0, len(cfg.Providers))
+			for name := range cfg.Providers {
+				names = append(names, name)
+			}
+			lines = append(lines, "Available providers: "+strings.Join(sortStrings(names), ", "))
+		}
+	}
+	if status.Usage.ContextWindow > 0 {
+		lines = append(lines, "Context window: "+formatTokens(status.Usage.ContextWindow))
+	}
+	return lines
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func providerNameForModel(models []client.ModelInfo, current string) string {
+	for _, model := range models {
+		if model.ID == current {
+			return model.Provider
+		}
+	}
+	return ""
+}
+
+func sortStrings(values []string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	for i := 1; i < len(values); i++ {
+		for j := i; j > 0 && values[j] < values[j-1]; j-- {
+			values[j], values[j-1] = values[j-1], values[j]
+		}
+	}
+	return values
+}
+
+func loadProviderConfig() *cfgpkg.Config {
+	paths := cfgpkg.DefaultPaths()
+	cfg, err := cfgpkg.Load(paths.ConfigFile())
+	if err == nil {
+		return cfg
+	}
+	fallback := cfgpkg.DefaultConfig()
+	return &fallback
 }
 
 func transcriptFrameView(content string, width int, hasContentAbove bool) string {

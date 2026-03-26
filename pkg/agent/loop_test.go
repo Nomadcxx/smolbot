@@ -405,6 +405,41 @@ func TestAgentLoopPassesRoutingDepsAndUsesToolOutput(t *testing.T) {
 	}
 }
 
+func TestAgentLoopCompactNowRewritesSessionHistory(t *testing.T) {
+	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{})
+	defer store.Close()
+
+	long := strings.Repeat("This is a long message that should be compacted. ", 80)
+	if err := store.SaveMessages("s1", []provider.Message{
+		{Role: "system", Content: "system prompt"},
+		{Role: "user", Content: long},
+		{Role: "assistant", Content: long},
+		{Role: "user", Content: "recent question"},
+		{Role: "assistant", Content: "recent answer"},
+	}); err != nil {
+		t.Fatalf("SaveMessages: %v", err)
+	}
+
+	original, compressed, pct, err := loop.CompactNow(context.Background(), "s1")
+	if err != nil {
+		t.Fatalf("CompactNow: %v", err)
+	}
+	if original == 0 || compressed == 0 || pct <= 0 {
+		t.Fatalf("expected compaction stats, got original=%d compressed=%d pct=%f", original, compressed, pct)
+	}
+
+	history, err := store.GetHistory("s1", 500)
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	if len(history) >= 5 {
+		t.Fatalf("expected compacted history to be no longer than original, got %d", len(history))
+	}
+	if got := history[1].StringContent(); len(got) >= len(long) {
+		t.Fatalf("expected compacted message to be shorter, got len=%d want<%d", len(got), len(long))
+	}
+}
+
 type fakeStreamProvider struct {
 	mu       sync.Mutex
 	streams  []fakeStreamScript
