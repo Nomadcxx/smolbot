@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -308,7 +309,9 @@ func TestServerMethods(t *testing.T) {
 }
 
 func TestServerOllamaContextWindow(t *testing.T) {
+	var requestCount atomic.Int32
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
 		switch r.URL.Path {
 		case "/api/ps":
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -408,6 +411,54 @@ func TestServerOllamaContextWindow(t *testing.T) {
 	}
 	if usagePayload.TotalTokens != 56 {
 		t.Fatalf("unexpected usage payload %#v", usagePayload)
+	}
+	if got := requestCount.Load(); got != 1 {
+		t.Fatalf("expected cached Ollama lookup to hit server once, got %d", got)
+	}
+}
+
+func TestServerOllamaContextWindowTimeoutFallsBackQuickly(t *testing.T) {
+	var requestCount atomic.Int32
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		<-r.Context().Done()
+	}))
+	defer ollama.Close()
+
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "ollama/qwen3:8b"
+	cfg.Agents.Defaults.Provider = "ollama"
+	cfg.Agents.Defaults.ContextWindowTokens = 200000
+	cfg.Providers = map[string]config.ProviderConfig{
+		"ollama": {APIBase: ollama.URL},
+	}
+
+	server := NewServer(ServerDeps{Config: cfg, StartedAt: time.Now().Add(-time.Minute)})
+
+	start := time.Now()
+	resp, err := server.handleRequest(context.Background(), &clientState{}, RequestFrame{
+		ID:     "1",
+		Method: "status",
+	})
+	if err != nil {
+		t.Fatalf("handleRequest status: %v", err)
+	}
+	payload, ok := resp.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected status payload type %T", resp)
+	}
+	usage, ok := payload["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected usage payload type %T", payload["usage"])
+	}
+	if got := usage["contextWindow"]; got != cfg.Agents.Defaults.ContextWindowTokens {
+		t.Fatalf("expected fallback context window %d, got %#v", cfg.Agents.Defaults.ContextWindowTokens, got)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("expected bounded Ollama lookup, took %s", elapsed)
+	}
+	if got := requestCount.Load(); got != 1 {
+		t.Fatalf("expected a single timed-out lookup, got %d", got)
 	}
 }
 

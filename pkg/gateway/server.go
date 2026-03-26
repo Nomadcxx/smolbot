@@ -64,6 +64,8 @@ type Server struct {
 	wsTasks           map[*websocket.Conn]map[string]struct{}
 	completedDelivery map[string]bool
 	clients           map[*websocket.Conn]*clientState
+	ollamaMu          sync.Mutex
+	ollamaContext     map[string]ollamaContextCacheEntry
 	lastUsage         struct {
 		PromptTokens     int
 		CompletionTokens int
@@ -84,6 +86,12 @@ type runState struct {
 	sessionKey string
 	cancel     context.CancelFunc
 	owner      *clientState
+}
+
+type ollamaContextCacheEntry struct {
+	value     int
+	found     bool
+	expiresAt time.Time
 }
 
 type chatSendParams struct {
@@ -123,6 +131,7 @@ func NewServer(deps ServerDeps) *Server {
 		wsTasks:           make(map[*websocket.Conn]map[string]struct{}),
 		completedDelivery: make(map[string]bool),
 		clients:           make(map[*websocket.Conn]*clientState),
+		ollamaContext:     make(map[string]ollamaContextCacheEntry),
 	}
 }
 
@@ -625,12 +634,63 @@ func (s *Server) contextWindowTokens(ctx context.Context) int {
 		return fallback
 	}
 
+	if window, ok := s.cachedOllamaContextWindow(model); ok {
+		if window.found && window.value > 0 {
+			return window.value
+		}
+		return fallback
+	}
+
+	lookupCtx, cancel := context.WithTimeout(ctx, ollamaMetadataLookupTimeout)
+	defer cancel()
+
 	client := provider.NewOllamaClient(s.ollamaBaseURL())
-	window, err := client.ContextWindow(ctx, model)
+	window, err := client.ContextWindow(lookupCtx, model)
+	s.storeOllamaContextWindow(model, window, err == nil && window.Found && window.Value > 0)
 	if err != nil || !window.Found || window.Value <= 0 {
 		return fallback
 	}
 	return window.Value
+}
+
+const ollamaMetadataLookupTimeout = 250 * time.Millisecond
+const ollamaContextCacheTTL = time.Minute
+
+func (s *Server) cachedOllamaContextWindow(model string) (ollamaContextCacheEntry, bool) {
+	key := s.ollamaCacheKey(model)
+
+	s.ollamaMu.Lock()
+	defer s.ollamaMu.Unlock()
+
+	entry, ok := s.ollamaContext[key]
+	if !ok {
+		return ollamaContextCacheEntry{}, false
+	}
+	if time.Now().After(entry.expiresAt) {
+		delete(s.ollamaContext, key)
+		return ollamaContextCacheEntry{}, false
+	}
+	return entry, true
+}
+
+func (s *Server) storeOllamaContextWindow(model string, window provider.OllamaContextWindow, found bool) {
+	key := s.ollamaCacheKey(model)
+	entry := ollamaContextCacheEntry{
+		value:     window.Value,
+		found:     found,
+		expiresAt: time.Now().Add(ollamaContextCacheTTL),
+	}
+
+	s.ollamaMu.Lock()
+	if s.ollamaContext == nil {
+		s.ollamaContext = make(map[string]ollamaContextCacheEntry)
+	}
+	s.ollamaContext[key] = entry
+	s.ollamaMu.Unlock()
+}
+
+func (s *Server) ollamaCacheKey(model string) string {
+	return strings.TrimSpace(s.ollamaBaseURL()) + "\x00" + model
 }
 
 func (s *Server) configContextWindowTokens() int {
