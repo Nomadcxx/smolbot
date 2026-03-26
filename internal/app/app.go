@@ -1,20 +1,26 @@
 package app
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/Nomadcxx/smolbot/internal/client"
+)
 
 type Config struct {
-	Host    string
-	Port    int
-	Theme   string
-	Session string
+	Host       string
+	Port       int
+	Theme      string
+	Session    string
+	MCPServers []client.MCPServerInfo
 }
 
 type App struct {
-	Config    Config
-	Theme     string
-	Session   string
-	Model     string
-	Connected bool
+	Config         Config
+	Theme          string
+	Session        string
+	Model          string
+	SidebarVisible bool
+	Connected      bool
 }
 
 func New(cfg Config) *App {
@@ -37,10 +43,11 @@ func New(cfg Config) *App {
 	}
 
 	return &App{
-		Config:  cfg,
-		Theme:   theme,
-		Session: session,
-		Model:   state.LastModel,
+		Config:         cfg,
+		Theme:          theme,
+		Session:        session,
+		Model:          state.LastModel,
+		SidebarVisible: state.SidebarVisible == nil || *state.SidebarVisible,
 	}
 }
 

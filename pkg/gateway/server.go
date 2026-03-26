@@ -15,10 +15,15 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/cron"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
 	"github.com/Nomadcxx/smolbot/pkg/session"
 	"github.com/gorilla/websocket"
 )
+
+type CronLister interface {
+	ListJobs() []cron.Job
+}
 
 type AgentProcessor interface {
 	ProcessDirect(ctx context.Context, req agent.Request, cb agent.EventCallback) (string, error)
@@ -27,6 +32,7 @@ type AgentProcessor interface {
 
 type ServerDeps struct {
 	Agent            AgentProcessor
+	Cron             CronLister
 	Sessions         *session.Store
 	Channels         *channel.Manager
 	Config           *config.Config
@@ -37,6 +43,7 @@ type ServerDeps struct {
 
 type Server struct {
 	agent            AgentProcessor
+	cron             CronLister
 	sessions         *session.Store
 	channels         *channel.Manager
 	config           *config.Config
@@ -61,10 +68,10 @@ type Server struct {
 }
 
 type clientState struct {
-	conn        *websocket.Conn
-	mu          sync.Mutex
-	seq         int64
-	isLegacy    bool
+	conn     *websocket.Conn
+	mu       sync.Mutex
+	seq      int64
+	isLegacy bool
 }
 
 type runState struct {
@@ -93,12 +100,13 @@ func NewServer(deps ServerDeps) *Server {
 		started = time.Now()
 	}
 	return &Server{
-		agent:    deps.Agent,
-		sessions: deps.Sessions,
-		channels: deps.Channels,
-		config:   deps.Config,
-		version:  firstNonEmptyString(deps.Version, "dev"),
-		started:  started,
+		agent:            deps.Agent,
+		cron:             deps.Cron,
+		sessions:         deps.Sessions,
+		channels:         deps.Channels,
+		config:           deps.Config,
+		version:          firstNonEmptyString(deps.Version, "dev"),
+		started:          started,
 		setModelCallback: deps.SetModelCallback,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(*http.Request) bool { return true },
@@ -209,7 +217,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"version":  s.version,
 			"protocol": 1,
 			"methods": []string{
-				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set",
+				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set", "cron.list",
 			},
 			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "context.compressed"},
 		}, nil
@@ -224,8 +232,8 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			}
 		}
 		return map[string]any{
-			"model":  s.currentModel(),
-			"uptime": int(time.Since(s.started).Seconds()),
+			"model":    s.currentModel(),
+			"uptime":   int(time.Since(s.started).Seconds()),
 			"channels": channels,
 			"usage": map[string]any{
 				"promptTokens":     s.lastUsage.PromptTokens,
@@ -234,6 +242,28 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 				"contextWindow":    s.config.Agents.Defaults.ContextWindowTokens,
 			},
 		}, nil
+	case "cron.list":
+		jobs := make([]map[string]any, 0)
+		if s.cron != nil {
+			for _, job := range s.cron.ListJobs() {
+				status := "paused"
+				if job.Enabled {
+					status = "active"
+				}
+				nextRun := ""
+				if !job.NextRun.IsZero() {
+					nextRun = job.NextRun.Format(time.RFC3339)
+				}
+				jobs = append(jobs, map[string]any{
+					"id":       job.ID,
+					"name":     job.Name,
+					"schedule": job.Schedule,
+					"status":   status,
+					"nextRun":  nextRun,
+				})
+			}
+		}
+		return map[string]any{"jobs": jobs}, nil
 	case "chat.history":
 		params := struct {
 			Session string `json:"session"`

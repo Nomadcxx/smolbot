@@ -76,7 +76,7 @@ func (c *Client) ModelsSet(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	var payload struct {
 		Previous string `json:"previous"`
 	}
@@ -91,10 +91,25 @@ func (c *Client) Status(session string) (StatusPayload, error) {
 	if err != nil {
 		return StatusPayload{}, err
 	}
-	
+
 	var payload StatusPayload
 	if err := json.Unmarshal(res.Payload, &payload); err != nil {
 		return StatusPayload{}, err
 	}
 	return payload, nil
+}
+
+func (c *Client) CronJobs() ([]CronJob, error) {
+	res, err := c.sendRequest("cron.list", map[string]string{})
+	if err != nil {
+		return nil, err
+	}
+
+	var payload struct {
+		Jobs []CronJob `json:"jobs"`
+	}
+	if err := json.Unmarshal(res.Payload, &payload); err != nil {
+		return nil, err
+	}
+	return payload.Jobs, nil
 }

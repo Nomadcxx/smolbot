@@ -14,6 +14,7 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/cron"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
 	"github.com/Nomadcxx/smolbot/pkg/session"
 	"github.com/gorilla/websocket"
@@ -61,6 +62,9 @@ func TestServerMethods(t *testing.T) {
 		}
 		if !strings.Contains(string(frame.Response.Result), `"server":"smolbot"`) {
 			t.Fatalf("unexpected hello payload %s", frame.Response.Result)
+		}
+		if !strings.Contains(string(frame.Response.Result), `"cron.list"`) {
+			t.Fatalf("expected cron.list in hello payload %s", frame.Response.Result)
 		}
 	})
 
@@ -158,6 +162,78 @@ func TestServerMethods(t *testing.T) {
 			t.Fatalf("expected model update, got %q", cfg.Agents.Defaults.Model)
 		}
 	})
+
+	t.Run("cron list with no cron service returns empty jobs", func(t *testing.T) {
+		writeFrame(t, conn, RequestFrame{ID: "9", Method: "cron.list"})
+		frame := readResponseFrame(t, conn, "9")
+		if frame.Response.Error != nil {
+			t.Fatalf("unexpected cron.list error %#v", frame.Response.Error)
+		}
+		var payload struct {
+			Jobs []any `json:"jobs"`
+		}
+		if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
+			t.Fatalf("unmarshal cron payload: %v", err)
+		}
+		if len(payload.Jobs) != 0 {
+			t.Fatalf("expected empty cron list, got %#v", payload.Jobs)
+		}
+	})
+}
+
+func TestCronListMapsJobs(t *testing.T) {
+	server := NewServer(ServerDeps{
+		Cron: &fakeCronLister{
+			jobs: []cron.Job{
+				{
+					ID:       "job-1",
+					Name:     "Daily cleanup",
+					Schedule: "every 5m",
+					Enabled:  true,
+					NextRun:  time.Date(2026, 3, 27, 10, 0, 0, 0, time.UTC),
+				},
+				{
+					ID:       "job-2",
+					Name:     "Paused sync",
+					Schedule: "daily 02:00",
+					Enabled:  false,
+				},
+			},
+		},
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{ID: "1", Method: "cron.list"})
+	frame := readResponseFrame(t, conn, "1")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected cron.list error %#v", frame.Response.Error)
+	}
+
+	var payload struct {
+		Jobs []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Schedule string `json:"schedule"`
+			Status   string `json:"status"`
+			NextRun  string `json:"nextRun"`
+		} `json:"jobs"`
+	}
+	if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
+		t.Fatalf("unmarshal cron payload: %v", err)
+	}
+	if len(payload.Jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %#v", payload.Jobs)
+	}
+	if payload.Jobs[0].Status != "active" || payload.Jobs[0].NextRun == "" {
+		t.Fatalf("expected active job with next run, got %#v", payload.Jobs[0])
+	}
+	if payload.Jobs[1].Status != "paused" {
+		t.Fatalf("expected paused job, got %#v", payload.Jobs[1])
+	}
 }
 
 func TestHealthEndpoint(t *testing.T) {
@@ -200,6 +276,14 @@ func (f *fakeChannel) Send(context.Context, channel.OutboundMessage) error {
 }
 func (f *fakeChannel) Status(context.Context) (channel.Status, error) {
 	return channel.Status{State: "connected"}, nil
+}
+
+type fakeCronLister struct {
+	jobs []cron.Job
+}
+
+func (f *fakeCronLister) ListJobs() []cron.Job {
+	return append([]cron.Job(nil), f.jobs...)
 }
 
 func dialWebsocket(t *testing.T, rawURL string) *websocket.Conn {

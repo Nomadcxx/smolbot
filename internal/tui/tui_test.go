@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +22,8 @@ var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 type fakeClient struct {
 	sessions []client.SessionInfo
 	models   []client.ModelInfo
+	mcps     []client.MCPServerInfo
+	jobs     []client.CronJob
 	current  string
 	status   client.StatusPayload
 	statuses map[string]client.StatusPayload
@@ -80,6 +83,8 @@ func (f *fakeClient) Status(session string) (client.StatusPayload, error) {
 	}
 	return f.status, nil
 }
+func (f *fakeClient) MCPServers() ([]client.MCPServerInfo, error) { return f.mcps, nil }
+func (f *fakeClient) CronJobs() ([]client.CronJob, error)         { return f.jobs, nil }
 
 func plain(text string) string {
 	return ansiPattern.ReplaceAllString(text, "")
@@ -254,6 +259,197 @@ func TestStatusLoadedUpdatesFooterUsage(t *testing.T) {
 	}
 	if !strings.Contains(view, "34% (68K/200K)") {
 		t.Fatalf("expected footer usage update, got %q", view)
+	}
+}
+
+func TestWindowSizeConfiguresSidebarLayout(t *testing.T) {
+	model := New(app.Config{})
+	model.sidebarVisible = true
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	got := updated.(Model)
+
+	if got.compactMode {
+		t.Fatal("expected normal layout at width 140")
+	}
+	if got.mainWidth != 109 {
+		t.Fatalf("expected main width 109, got %d", got.mainWidth)
+	}
+	if got.sidebarWidth != 30 {
+		t.Fatalf("expected sidebar width 30, got %d", got.sidebarWidth)
+	}
+	if got.headerWidth != 109 {
+		t.Fatalf("expected header width 109, got %d", got.headerWidth)
+	}
+	if got.statusWidth != 109 {
+		t.Fatalf("expected status width 109, got %d", got.statusWidth)
+	}
+	if got.footerWidth != 140 {
+		t.Fatalf("expected footer to span full width, got %d", got.footerWidth)
+	}
+	if got.messagesWidth != 107 {
+		t.Fatalf("expected transcript width 107, got %d", got.messagesWidth)
+	}
+}
+
+func TestCtrlDTogglesSidebarVisibilityAndPersistsState(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+
+	model := New(app.Config{})
+	model.sidebarVisible = true
+	updated, cmd := model.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	got := updated.(Model)
+	if got.sidebarVisible != true {
+		t.Fatalf("expected sidebar visible in normal mode, got %v", got.sidebarVisible)
+	}
+
+	updated, cmd = got.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Mod: tea.ModCtrl}))
+	got = updated.(Model)
+	if got.sidebarVisible {
+		t.Fatal("expected ctrl+d to hide sidebar in normal mode")
+	}
+	if cmd == nil {
+		t.Fatal("expected sidebar toggle to persist state")
+	}
+	_ = cmd()
+
+	state := app.LoadState()
+	if state.SidebarVisible == nil || *state.SidebarVisible {
+		t.Fatalf("expected sidebar visibility to persist as false, got %#v", state.SidebarVisible)
+	}
+}
+
+func TestCompactModeCtrlDTogglesOverlay(t *testing.T) {
+	model := New(app.Config{})
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 110, Height: 34})
+	got := updated.(Model)
+	if !got.compactMode {
+		t.Fatal("expected compact mode for width 110")
+	}
+	if got.detailsOpen {
+		t.Fatal("expected compact overlay to start closed")
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Mod: tea.ModCtrl}))
+	got = updated.(Model)
+	if !got.detailsOpen {
+		t.Fatal("expected ctrl+d to open compact overlay")
+	}
+	view := plain(got.View().Content)
+	if !strings.Contains(view, "SESSION") || !strings.Contains(view, "CONTEXT") {
+		t.Fatalf("expected compact overlay sections in view, got %q", view)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 'd', Mod: tea.ModCtrl}))
+	got = updated.(Model)
+	if got.detailsOpen {
+		t.Fatal("expected ctrl+d to close compact overlay")
+	}
+}
+
+func TestSidebarWidthRestoresAfterCompactCycle(t *testing.T) {
+	model := New(app.Config{})
+	model.sidebarVisible = true
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 140, Height: 34})
+	got := updated.(Model)
+	if got.sidebarWidth != 30 {
+		t.Fatalf("expected initial sidebar width 30, got %d", got.sidebarWidth)
+	}
+
+	updated, _ = got.Update(tea.WindowSizeMsg{Width: 110, Height: 34})
+	got = updated.(Model)
+	if !got.compactMode {
+		t.Fatal("expected compact mode at width 110")
+	}
+
+	updated, _ = got.Update(tea.WindowSizeMsg{Width: 140, Height: 34})
+	got = updated.(Model)
+	if got.sidebarWidth != 30 {
+		t.Fatalf("expected sidebar width to restore to 30 after compact cycle, got %d", got.sidebarWidth)
+	}
+}
+
+func TestSidebarAreaClicksAreConsumed(t *testing.T) {
+	model := New(app.Config{})
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	got := updated.(Model)
+
+	updated, cmd := got.Update(tea.MouseClickMsg(tea.Mouse{X: 120, Y: 5, Button: tea.MouseLeft}))
+	if cmd != nil {
+		t.Fatalf("expected sidebar click to be consumed, got %T", cmd)
+	}
+	if updated.(Model).mainWidth != got.mainWidth {
+		t.Fatal("expected sidebar click not to change layout")
+	}
+}
+
+func TestSidebarDataUpdatesFromStatusAndCompressionEvents(t *testing.T) {
+	model := New(app.Config{
+		MCPServers: []client.MCPServerInfo{
+			{Name: "memory", Status: "configured", Tools: 3},
+		},
+	})
+	model.app.Session = "tui:alt"
+	model.app.Model = "model-a"
+
+	updated, _ := model.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "model-b",
+			Session: "tui:alt",
+			Usage: client.UsageInfo{
+				TotalTokens:   68000,
+				ContextWindow: 200000,
+			},
+			Channels: []client.ChannelStatus{
+				{Name: "WhatsApp", Status: "connected"},
+			},
+		},
+	})
+	got := updated.(Model)
+
+	sidebarView := plain(got.sidebar.View())
+	if !strings.Contains(sidebarView, "tui:alt") {
+		t.Fatalf("expected sidebar session to update, got %q", sidebarView)
+	}
+	if !strings.Contains(sidebarView, "model-b") {
+		t.Fatalf("expected sidebar model to update, got %q", sidebarView)
+	}
+	if !strings.Contains(sidebarView, "68K / 200K") {
+		t.Fatalf("expected sidebar usage to update, got %q", sidebarView)
+	}
+	if !strings.Contains(sidebarView, "WhatsApp") {
+		t.Fatalf("expected sidebar channels to update, got %q", sidebarView)
+	}
+
+	compPayload, _ := json.Marshal(client.CompressionInfo{
+		Enabled:          true,
+		OriginalTokens:   120000,
+		CompressedTokens: 70000,
+		ReductionPercent: 41.7,
+	})
+	updated, _ = got.Update(EventMsg{
+		Event: client.Event{Type: client.FrameEvent, Event: "context.compressed", Payload: compPayload, Seq: 2},
+	})
+	got = updated.(Model)
+
+	sidebarView = plain(got.sidebar.View())
+	if !strings.Contains(sidebarView, "↓ 42% compacted") {
+		t.Fatalf("expected sidebar compression to update, got %q", sidebarView)
+	}
+
+	updated, _ = got.Update(CronJobsLoadedMsg{
+		Jobs: []client.CronJob{
+			{Name: "backup", Schedule: "every 5m", Status: "active"},
+		},
+	})
+	got = updated.(Model)
+
+	sidebarView = plain(got.sidebar.View())
+	if !strings.Contains(sidebarView, "memory") || !strings.Contains(sidebarView, "backup") {
+		t.Fatalf("expected sidebar mcp and cron data to update, got %q", sidebarView)
 	}
 }
 
@@ -905,7 +1101,6 @@ func TestVisualSurfaceIntegration(t *testing.T) {
 	}
 }
 
-
 func TestHelpCommandAddsAssistantMessage(t *testing.T) {
 	model := New(app.Config{})
 
@@ -956,7 +1151,9 @@ func TestEscKeyDoesNotScrollTranscript(t *testing.T) {
 }
 
 func TestMouseWheelScrollsTranscript(t *testing.T) {
-	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
 	model := New(app.Config{})
 	model.width = 80
 	model.height = 24
@@ -990,7 +1187,9 @@ func TestThemeCommandShowsErrorOnUnknownTheme(t *testing.T) {
 }
 
 func TestThemeCommandInvalidatesMessageRender(t *testing.T) {
-	if !theme.Set("nord") { t.Fatal("expected nord theme") }
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
 	model := New(app.Config{})
 	model.width = 80
 	model.height = 24
