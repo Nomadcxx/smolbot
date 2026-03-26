@@ -835,7 +835,7 @@ func (m Model) View() tea.View {
 	content := main
 	if m.compactMode && m.detailsOpen && m.width >= 80 {
 		overlaySidebar := m.sidebar
-		overlaySidebar.SetSize(mainWidth, m.height-1)
+		overlaySidebar.SetSize(mainWidth, m.height)
 		overlay := lipgloss.NewStyle().
 			Width(mainWidth).
 			Background(t.Panel).
@@ -843,16 +843,18 @@ func (m Model) View() tea.View {
 			Render(overlaySidebar.CompactView())
 		content = lipgloss.JoinVertical(lipgloss.Left, overlay, main)
 	} else if m.shouldShowSidebar() {
+		mainWithFooter := lipgloss.JoinVertical(lipgloss.Left, main, m.footer.View())
 		sidebar := lipgloss.NewStyle().
 			Width(m.sidebarWidth).
-			Height(lipgloss.Height(main)).
+			Height(lipgloss.Height(mainWithFooter)).
 			Background(t.Panel).
 			Foreground(t.Text).
 			Render(m.sidebar.View())
-		separator := m.renderSidebarSeparator(lipgloss.Height(main))
-		content = lipgloss.JoinHorizontal(lipgloss.Top, main, separator, sidebar)
+		separator := m.renderSidebarSeparator(lipgloss.Height(mainWithFooter))
+		content = lipgloss.JoinHorizontal(lipgloss.Top, mainWithFooter, separator, sidebar)
+	} else {
+		content = lipgloss.JoinVertical(lipgloss.Left, content, m.footer.View())
 	}
-	content = lipgloss.JoinVertical(lipgloss.Left, content, m.footer.View())
 	if m.width > 0 && m.height > 0 && m.dialog != nil {
 		canvas := lipgloss.NewCanvas(m.width, m.height)
 		layers := []*lipgloss.Layer{
@@ -1105,12 +1107,7 @@ func (m *Model) recalcLayout() {
 	editorH := m.editor.Height()
 	statusH := 1
 	footerH := 1
-	spacerH := 1
-	frameH := m.height - headerH - spacerH - editorH - statusH - footerH - m.overlayHeight
-	if frameH < 5 {
-		frameH = 5
-	}
-	chatH := frameH - 2
+	chatH := m.height - headerH - editorH - statusH - footerH - m.overlayHeight
 	if chatH < 3 {
 		chatH = 3
 	}
@@ -1122,9 +1119,9 @@ func (m *Model) recalcLayout() {
 	m.editor.SetWidth(m.mainWidth)
 	m.status.SetWidth(m.mainWidth)
 	m.statusWidth = m.mainWidth
-	m.footer.SetWidth(m.width)
-	m.footerWidth = m.width
-	m.sidebar.SetSize(sidebarcmp.DefaultWidth, m.height-1)
+	m.footer.SetWidth(m.mainWidth)
+	m.footerWidth = m.mainWidth
+	m.sidebar.SetSize(sidebarcmp.DefaultWidth, m.height)
 	if m.compactMode {
 		m.sidebar.SetVisible(false)
 	} else {

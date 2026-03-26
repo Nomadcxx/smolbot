@@ -348,8 +348,8 @@ func TestWindowSizeConfiguresSidebarLayout(t *testing.T) {
 	if got.statusWidth != 109 {
 		t.Fatalf("expected status width 109, got %d", got.statusWidth)
 	}
-	if got.footerWidth != 140 {
-		t.Fatalf("expected footer to span full width, got %d", got.footerWidth)
+	if got.footerWidth != 109 {
+		t.Fatalf("expected footer to match main pane width, got %d", got.footerWidth)
 	}
 	if got.messagesWidth != 107 {
 		t.Fatalf("expected transcript width 107, got %d", got.messagesWidth)
@@ -1230,6 +1230,22 @@ func TestFrameHierarchyLayout(t *testing.T) {
 	}
 	if lines := strings.Count(view, "\n") + 1; lines > 16 {
 		t.Fatalf("expected frame hierarchy to fit viewport height, got %d lines", lines)
+	}
+}
+
+func TestSidebarLayoutFillsViewportHeight(t *testing.T) {
+	model := New(app.Config{})
+	model.sidebarVisible = true
+	model.app.Model = "gpt-5"
+	model.app.Session = "tui:main"
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 140, Height: 20})
+	got := updated.(Model)
+	got.status.SetConnected(true)
+
+	lines := strings.Count(plain(got.View().Content), "\n") + 1
+	if lines != 20 {
+		t.Fatalf("expected composed layout to fill viewport height 20, got %d lines", lines)
 	}
 }
 
