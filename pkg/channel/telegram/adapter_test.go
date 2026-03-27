@@ -308,6 +308,19 @@ func TestChunkMessageIsRuneSafeAtBoundary(t *testing.T) {
 	}
 }
 
+func TestChunkMessagePreservesBoundaryWhitespaceAndNewlines(t *testing.T) {
+	content := "abc \n\ndef"
+	chunks := channel.ChunkMessage(content, 5)
+
+	want := []string{"abc \n", "\ndef"}
+	if !reflect.DeepEqual(chunks, want) {
+		t.Fatalf("chunks = %#v, want %#v", chunks, want)
+	}
+	if got := strings.Join(chunks, ""); got != content {
+		t.Fatalf("chunks rejoined = %q, want %q", got, content)
+	}
+}
+
 type fakeSeam struct {
 	startFn func(context.Context, func(chatID int64, text string)) error
 	stopFn  func(context.Context) error

@@ -163,8 +163,34 @@ func removeWorkspace(m *model) error {
 	return nil
 }
 
+func validateTelegramTokenFile(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read Telegram token file %q: %w", path, err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return fmt.Errorf("read Telegram token file %q: empty or whitespace-only", path)
+	}
+
+	return nil
+}
+
 // Task: Write config file with full structure
 func writeConfig(m *model) error {
+	if m.telegramEnabled {
+		tokenFile := strings.TrimSpace(m.telegramTokenFile)
+		if tokenFile == "" {
+			return fmt.Errorf("telegram token file is required when Telegram is enabled")
+		}
+		if err := validateTelegramTokenFile(tokenFile); err != nil {
+			return err
+		}
+	}
+
 	config := map[string]interface{}{
 		"agents": map[string]interface{}{
 			"defaults": map[string]interface{}{
@@ -274,9 +300,7 @@ func writeConfig(m *model) error {
 	if m.telegramEnabled {
 		telegramConfig := channels["telegram"].(map[string]interface{})
 		telegramConfig["enabled"] = true
-		if m.telegramTokenFile != "" {
-			telegramConfig["tokenFile"] = m.telegramTokenFile
-		}
+		telegramConfig["tokenFile"] = strings.TrimSpace(m.telegramTokenFile)
 	}
 
 	// Marshal to JSON

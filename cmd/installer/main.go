@@ -50,6 +50,13 @@ func newModel() model {
 	telegramInput.Placeholder = filepath.Join(os.Getenv("HOME"), ".smolbot", "telegram.token")
 	telegramInput.CharLimit = 256
 	telegramInput.Width = 50
+	telegramInput.Validate = func(value string) error {
+		tokenFile := strings.TrimSpace(value)
+		if tokenFile == "" {
+			return nil
+		}
+		return validateTelegramTokenFile(tokenFile)
+	}
 
 	m := model{
 		ctx:                ctx,
@@ -369,10 +376,11 @@ func (m model) enterTelegramSetup() (tea.Model, tea.Cmd) {
 func (m model) handleTelegramSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		m.telegramTokenFile = strings.TrimSpace(m.telegramTokenInput.Value())
-		if m.telegramTokenFile == "" {
+		tokenFile := strings.TrimSpace(m.telegramTokenInput.Value())
+		if tokenFile == "" {
 			m.telegramEnabled = false
 			m.telegramTokenFile = ""
+			m.telegramTokenInput.Err = nil
 			if m.whatsappEnabled {
 				m.step = stepWhatsAppSetup
 				m.whatsappStatus = "Connecting to WhatsApp..."
@@ -381,7 +389,15 @@ func (m model) handleTelegramSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.step = stepService
 			return m, nil
 		}
+		if err := validateTelegramTokenFile(tokenFile); err != nil {
+			m.telegramEnabled = false
+			m.telegramTokenFile = ""
+			m.telegramTokenInput.Err = err
+			return m, nil
+		}
+		m.telegramTokenFile = tokenFile
 		m.telegramEnabled = true
+		m.telegramTokenInput.Err = nil
 		if m.whatsappEnabled {
 			m.step = stepWhatsAppSetup
 			m.whatsappStatus = "Connecting to WhatsApp..."
@@ -392,6 +408,7 @@ func (m model) handleTelegramSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.telegramEnabled = false
 		m.telegramTokenFile = ""
+		m.telegramTokenInput.Err = nil
 		if m.whatsappEnabled {
 			m.step = stepWhatsAppSetup
 			m.whatsappStatus = "Connecting to WhatsApp..."

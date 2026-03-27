@@ -32,13 +32,10 @@ func TestTelegramChannelSetupStoresState(t *testing.T) {
 	}
 
 	tokenFile := filepath.Join(t.TempDir(), "telegram.token")
-	for _, r := range tokenFile {
-		updated, _ = m.handleTelegramSetupKeys(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		m = updated.(model)
+	if err := os.WriteFile(tokenFile, []byte("bot-token"), 0600); err != nil {
+		t.Fatalf("write token file: %v", err)
 	}
-	if got := m.telegramTokenInput.Value(); got != tokenFile {
-		t.Fatalf("telegram input value = %q, want %q", got, tokenFile)
-	}
+	m.telegramTokenInput.SetValue(tokenFile)
 
 	updated, _ = m.handleTelegramSetupKeys(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
@@ -47,6 +44,97 @@ func TestTelegramChannelSetupStoresState(t *testing.T) {
 	}
 	if m.step != stepService {
 		t.Fatalf("step = %v, want stepService", m.step)
+	}
+}
+
+func TestTelegramSetupEnterRejectsMissingTokenFile(t *testing.T) {
+	m := newModel()
+	m.step = stepTelegramSetup
+	m.telegramEnabled = true
+
+	m.telegramTokenInput.SetValue(filepath.Join(t.TempDir(), "missing.token"))
+
+	updated, _ := m.handleTelegramSetupKeys(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.step != stepTelegramSetup {
+		t.Fatalf("step = %v, want stepTelegramSetup for missing token file", m.step)
+	}
+	if m.telegramEnabled {
+		t.Fatal("telegramEnabled should be false when token file validation fails")
+	}
+	if m.telegramTokenFile != "" {
+		t.Fatalf("telegramTokenFile = %q, want empty after missing-token validation failure", m.telegramTokenFile)
+	}
+	if m.telegramTokenInput.Err == nil {
+		t.Fatal("telegramTokenInput.Err = nil, want visible validation error for missing token file")
+	}
+	if got := m.renderTelegramSetup(); !strings.Contains(got, "read Telegram token file") {
+		t.Fatalf("renderTelegramSetup() missing validation error, got:\n%s", got)
+	}
+}
+
+func TestTelegramSetupEnterRejectsUnreadableTokenFile(t *testing.T) {
+	m := newModel()
+	m.step = stepTelegramSetup
+	m.telegramEnabled = true
+
+	tokenFile := filepath.Join(t.TempDir(), "telegram.token")
+	if err := os.WriteFile(tokenFile, []byte("bot-token"), 0600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	if err := os.Chmod(tokenFile, 0000); err != nil {
+		t.Fatalf("chmod token file unreadable: %v", err)
+	}
+
+	m.telegramTokenInput.SetValue(tokenFile)
+
+	updated, _ := m.handleTelegramSetupKeys(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.step != stepTelegramSetup {
+		t.Fatalf("step = %v, want stepTelegramSetup for unreadable token file", m.step)
+	}
+	if m.telegramEnabled {
+		t.Fatal("telegramEnabled should be false when token file validation fails")
+	}
+	if m.telegramTokenFile != "" {
+		t.Fatalf("telegramTokenFile = %q, want empty after unreadable-token validation failure", m.telegramTokenFile)
+	}
+	if m.telegramTokenInput.Err == nil {
+		t.Fatal("telegramTokenInput.Err = nil, want visible validation error for unreadable token file")
+	}
+	if got := m.renderTelegramSetup(); !strings.Contains(got, "read Telegram token file") {
+		t.Fatalf("renderTelegramSetup() missing validation error, got:\n%s", got)
+	}
+}
+
+func TestTelegramSetupEnterRejectsWhitespaceOnlyTokenFile(t *testing.T) {
+	m := newModel()
+	m.step = stepTelegramSetup
+	m.telegramEnabled = true
+
+	tokenFile := filepath.Join(t.TempDir(), "telegram.token")
+	if err := os.WriteFile(tokenFile, []byte("   \n\t  "), 0600); err != nil {
+		t.Fatalf("write whitespace token file: %v", err)
+	}
+
+	m.telegramTokenInput.SetValue(tokenFile)
+
+	updated, _ := m.handleTelegramSetupKeys(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	if m.step != stepTelegramSetup {
+		t.Fatalf("step = %v, want stepTelegramSetup for whitespace token file", m.step)
+	}
+	if m.telegramEnabled {
+		t.Fatal("telegramEnabled should be false when token file is whitespace-only")
+	}
+	if m.telegramTokenFile != "" {
+		t.Fatalf("telegramTokenFile = %q, want empty after whitespace-token validation failure", m.telegramTokenFile)
+	}
+	if m.telegramTokenInput.Err == nil {
+		t.Fatal("telegramTokenInput.Err = nil, want visible validation error for whitespace token file")
+	}
+	if got := m.renderTelegramSetup(); !strings.Contains(got, "empty") {
+		t.Fatalf("renderTelegramSetup() missing whitespace validation error, got:\n%s", got)
 	}
 }
 
@@ -88,6 +176,11 @@ func TestTelegramSetupEscSkipsTelegram(t *testing.T) {
 }
 
 func TestWriteConfigIncludesTelegramWhenEnabled(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "telegram-token.txt")
+	if err := os.WriteFile(tokenFile, []byte("bot-token"), 0600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+
 	m := &model{
 		step:              stepChannels,
 		projectDir:        t.TempDir(),
@@ -98,7 +191,7 @@ func TestWriteConfigIncludesTelegramWhenEnabled(t *testing.T) {
 		ollamaURL:         "http://localhost:11434",
 		port:              18790,
 		telegramEnabled:   true,
-		telegramTokenFile: "/tmp/telegram-token.txt",
+		telegramTokenFile: tokenFile,
 	}
 
 	if err := writeConfig(m); err != nil {
@@ -120,11 +213,35 @@ func TestWriteConfigIncludesTelegramWhenEnabled(t *testing.T) {
 	if enabled, ok := telegram["enabled"].(bool); !ok || !enabled {
 		t.Fatalf("telegram.enabled = %#v, want true", telegram["enabled"])
 	}
-	if got := telegram["tokenFile"]; got != "/tmp/telegram-token.txt" {
-		t.Fatalf("telegram.tokenFile = %#v, want %q", got, "/tmp/telegram-token.txt")
+	if got := telegram["tokenFile"]; got != tokenFile {
+		t.Fatalf("telegram.tokenFile = %#v, want %q", got, tokenFile)
 	}
 	if _, ok := telegram["botToken"]; ok {
 		t.Fatalf("telegram.botToken should be omitted, got %#v", telegram["botToken"])
+	}
+}
+
+func TestWriteConfigRejectsWhitespaceOnlyTelegramTokenFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "telegram-token.txt")
+	if err := os.WriteFile(tokenFile, []byte(" \n\t "), 0600); err != nil {
+		t.Fatalf("write whitespace token file: %v", err)
+	}
+
+	m := &model{
+		step:              stepChannels,
+		projectDir:        t.TempDir(),
+		configPath:        filepath.Join(t.TempDir(), "config.json"),
+		workspacePath:     filepath.Join(t.TempDir(), "workspace"),
+		provider:          providerOllama,
+		selectedModel:     "llama3.2",
+		ollamaURL:         "http://localhost:11434",
+		port:              18790,
+		telegramEnabled:   true,
+		telegramTokenFile: tokenFile,
+	}
+
+	if err := writeConfig(m); err == nil {
+		t.Fatal("writeConfig succeeded, want whitespace-only Telegram token file to be rejected")
 	}
 }
 

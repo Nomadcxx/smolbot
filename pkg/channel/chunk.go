@@ -30,8 +30,8 @@ func ChunkMessage(content string, maxLen int) []string {
 			cut = idx + 1
 		}
 
-		chunks = append(chunks, strings.TrimRight(content[:cut], " \n"))
-		content = strings.TrimLeft(content[cut:], " \n")
+		chunks = append(chunks, content[:cut])
+		content = content[cut:]
 	}
 	return chunks
 }

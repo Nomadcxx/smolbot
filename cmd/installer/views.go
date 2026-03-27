@@ -383,6 +383,9 @@ func (m model) renderTelegramSetup() string {
 	b.WriteString("  Enter the token file path below.\n\n")
 	b.WriteString("  " + m.telegramTokenInput.View())
 	b.WriteString("\n\n")
+	if m.telegramTokenInput.Err != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  ✗ %s\n\n", m.telegramTokenInput.Err)))
+	}
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Leave it empty to skip Telegram."))
 	return b.String()
 }
