@@ -1275,9 +1275,9 @@ func TestEventMsgUpdatesToolLifecycle(t *testing.T) {
 	}
 }
 
-func TestDelegatedAgentEventsAreToleratedBeforeTask6(t *testing.T) {
+func TestDelegatedAgentEventsAppendTranscriptArtifacts(t *testing.T) {
 	model := New(app.Config{})
-	initialView := plain(model.messages.View())
+	model.messages.SetSize(80, 20)
 
 	events := []struct {
 		name    string
@@ -1345,8 +1345,18 @@ func TestDelegatedAgentEventsAreToleratedBeforeTask6(t *testing.T) {
 		model = updated.(Model)
 	}
 
-	if got := plain(model.messages.View()); got != initialView {
-		t.Fatalf("expected delegated-agent events to be ignored before Task 6, got transcript diff:\nBEFORE:\n%s\nAFTER:\n%s", initialView, got)
+	view := plain(model.messages.View())
+	if !strings.Contains(view, "Spawned Bernoulli [explorer] (gpt-5.4 high)") {
+		t.Fatalf("expected spawned artifact in view, got %q", view)
+	}
+	if !strings.Contains(view, "Waiting for 2 agents") {
+		t.Fatalf("expected waiting artifact in view, got %q", view)
+	}
+	if !strings.Contains(view, "Finished waiting") {
+		t.Fatalf("expected finished-waiting artifact in view, got %q", view)
+	}
+	if strings.Contains(view, "agent.completed") {
+		t.Fatalf("expected completed event not to render standalone noise, got %q", view)
 	}
 }
 
