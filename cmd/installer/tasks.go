@@ -14,7 +14,7 @@ import (
 func cloneRepository(m *model) error {
 	// Create a subdirectory for the clone
 	cloneDir := filepath.Join(m.projectDir, "smolbot")
-	
+
 	setLastCommand("git", "clone", "--depth", "1", "https://github.com/Nomadcxx/smolbot.git", cloneDir)
 
 	result := runCommand(m, "git", "clone", "--depth", "1",
@@ -153,13 +153,13 @@ func removeWorkspace(m *model) error {
 	if err := os.RemoveAll(baseDir); err != nil {
 		return fmt.Errorf("remove workspace: %w", err)
 	}
-	
+
 	// Also remove legacy nanobot directory if it exists
 	legacyDir := filepath.Join(os.Getenv("HOME"), ".nanobot")
 	if err := os.RemoveAll(legacyDir); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove legacy workspace: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -182,9 +182,9 @@ func writeConfig(m *model) error {
 				},
 			},
 		},
-		"providers":    map[string]interface{}{},
+		"providers": map[string]interface{}{},
 		"channels": map[string]interface{}{
-			"sendProgress": true,
+			"sendProgress":  true,
 			"sendToolHints": true,
 			"signal": map[string]interface{}{
 				"enabled": false,
@@ -196,6 +196,9 @@ func writeConfig(m *model) error {
 				"enabled":    false,
 				"deviceName": "smolbot",
 				"storePath":  filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db"),
+			},
+			"telegram": map[string]interface{}{
+				"enabled": false,
 			},
 		},
 		"gateway": map[string]interface{}{
@@ -213,10 +216,10 @@ func writeConfig(m *model) error {
 				"maxResults":    5,
 			},
 			"exec": map[string]interface{}{
-				"defaultTimeout":       60,
-				"maxTimeout":           600,
-				"denyPatterns":         []string{"rm -rf /", "dd if="},
-				"restrictToWorkspace":  true,
+				"defaultTimeout":      60,
+				"maxTimeout":          600,
+				"denyPatterns":        []string{"rm -rf /", "dd if="},
+				"restrictToWorkspace": true,
 			},
 			"mcpServers": map[string]interface{}{},
 		},
@@ -254,18 +257,25 @@ func writeConfig(m *model) error {
 
 	// Update channel settings if enabled
 	channels := config["channels"].(map[string]interface{})
-	if signalEnabled {
+	if m.signalEnabled {
 		signalConfig := channels["signal"].(map[string]interface{})
 		signalConfig["enabled"] = true
 		if m.signalCLIPath != "" {
 			signalConfig["cliPath"] = m.signalCLIPath
 		}
 	}
-	if whatsappEnabled {
+	if m.whatsappEnabled {
 		whatsappConfig := channels["whatsapp"].(map[string]interface{})
 		whatsappConfig["enabled"] = true
 		if m.whatsappDBPath != "" {
 			whatsappConfig["storePath"] = m.whatsappDBPath
+		}
+	}
+	if m.telegramEnabled {
+		telegramConfig := channels["telegram"].(map[string]interface{})
+		telegramConfig["enabled"] = true
+		if m.telegramTokenFile != "" {
+			telegramConfig["tokenFile"] = m.telegramTokenFile
 		}
 	}
 
@@ -294,13 +304,13 @@ func removeConfig(m *model) error {
 	if err := os.Remove(m.configPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove config: %w", err)
 	}
-	
+
 	// Also remove legacy config if it exists
 	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".nanobot", "config.json")
 	if err := os.Remove(legacyConfigPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove legacy config: %w", err)
 	}
-	
+
 	return nil
 }
 

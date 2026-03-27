@@ -63,6 +63,8 @@ func (m model) View() string {
 		mainContent = m.renderConfiguration()
 	case stepChannels:
 		mainContent = m.renderChannels()
+	case stepTelegramSetup:
+		mainContent = m.renderTelegramSetup()
 	case stepWhatsAppSetup:
 		mainContent = m.renderWhatsAppSetup()
 	case stepService:
@@ -133,6 +135,8 @@ func (m model) getHelpText() string {
 		return "↑/↓: Select model  •  Enter: Confirm  •  Esc: Back"
 	case stepChannels:
 		return "↑/↓: Navigate  •  Space: Toggle  •  Enter: Continue  •  Esc: Back"
+	case stepTelegramSetup:
+		return "Enter: Continue  •  Esc: Skip"
 	case stepWhatsAppSetup:
 		if m.whatsappDone {
 			return "Enter: Continue  •  Esc: Back"
@@ -349,8 +353,37 @@ func (m model) renderChannels() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Requires QR code scan"))
 	b.WriteString("\n\n")
 
+	// Telegram
+	telegramStyle := lipgloss.NewStyle()
+	telegramMarker := "○"
+	if m.channelIndex == 2 {
+		telegramMarker = "●"
+		telegramStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	}
+	telegramStatus := "[ ] Disabled"
+	if m.telegramEnabled {
+		telegramStatus = "[✓] Enabled"
+	}
+	b.WriteString(telegramStyle.Render(fmt.Sprintf("  %s Telegram Integration  %s", telegramMarker, telegramStatus)))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Uses a bot token file"))
+	b.WriteString("\n\n")
+
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Note: Can be configured later"))
 
+	return b.String()
+}
+
+func (m model) renderTelegramSetup() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render("Telegram Setup"))
+	b.WriteString("\n\n")
+	b.WriteString("  Telegram reads its bot token from a file.\n")
+	b.WriteString("  Enter the token file path below.\n\n")
+	b.WriteString("  " + m.telegramTokenInput.View())
+	b.WriteString("\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Leave it empty to skip Telegram."))
 	return b.String()
 }
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 )
 
@@ -36,6 +37,11 @@ func TestConfigRoundTrip(t *testing.T) {
 				"deviceName": "smolbot",
 				"storePath": "/tmp/nanobot-whatsapp.db",
 				"allowedChatIDs": ["example@s.whatsapp.net"]
+			},
+			"telegram": {
+				"enabled": true,
+				"tokenFile": "/tmp/nanobot-telegram.token",
+				"allowedChatIDs": ["123456789"]
 			}
 		},
 		"gateway": {
@@ -81,6 +87,12 @@ func TestConfigRoundTrip(t *testing.T) {
 	if got := cfg.Channels.WhatsApp.AllowedChatIDs; len(got) != 1 || got[0] != "example@s.whatsapp.net" {
 		t.Errorf("whatsapp allowedChatIDs = %#v", got)
 	}
+	if !cfg.Channels.Telegram.Enabled || cfg.Channels.Telegram.TokenFile != "/tmp/nanobot-telegram.token" {
+		t.Errorf("telegram config = %+v", cfg.Channels.Telegram)
+	}
+	if got := cfg.Channels.Telegram.AllowedChatIDs; len(got) != 1 || got[0] != "123456789" {
+		t.Errorf("telegram allowedChatIDs = %#v", got)
+	}
 	if !cfg.Tools.RestrictToWorkspace {
 		t.Error("restrictToWorkspace should be true")
 	}
@@ -112,6 +124,45 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if cfg.Channels.WhatsApp.DeviceName == "" || cfg.Channels.WhatsApp.StorePath == "" {
 		t.Fatalf("whatsapp defaults = %+v, want non-empty settings", cfg.Channels.WhatsApp)
+	}
+	if cfg.Channels.Telegram.Enabled {
+		t.Fatalf("telegram defaults = %+v, want disabled", cfg.Channels.Telegram)
+	}
+	if cfg.Channels.Telegram.TokenFile != "" {
+		t.Fatalf("telegram defaults = %+v, want empty token file", cfg.Channels.Telegram)
+	}
+}
+
+func TestLoadTelegramConfig(t *testing.T) {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	input := `{
+		"channels": {
+			"telegram": {
+				"enabled": true,
+				"tokenFile": "/tmp/load-telegram.token",
+				"allowedChatIDs": ["42"]
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Channels.Telegram.Enabled {
+		t.Fatal("telegram should be enabled after loading config")
+	}
+	if cfg.Channels.Telegram.TokenFile != "/tmp/load-telegram.token" {
+		t.Fatalf("telegram tokenFile = %q, want %q", cfg.Channels.Telegram.TokenFile, "/tmp/load-telegram.token")
+	}
+	if got := cfg.Channels.Telegram.AllowedChatIDs; len(got) != 1 || got[0] != "42" {
+		t.Fatalf("telegram allowedChatIDs = %#v", got)
 	}
 }
 

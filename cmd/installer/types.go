@@ -21,6 +21,7 @@ const (
 	stepProvider
 	stepConfiguration
 	stepChannels
+	stepTelegramSetup
 	stepWhatsAppSetup
 	stepService
 	stepInstalling
@@ -30,11 +31,11 @@ const (
 
 // Provider types
 const (
-	providerOllama     = "ollama"
-	providerOpenAI     = "openai"
-	providerAnthropic  = "anthropic"
-	providerAzure      = "azure"
-	providerCustom     = "custom"
+	providerOllama    = "ollama"
+	providerOpenAI    = "openai"
+	providerAnthropic = "anthropic"
+	providerAzure     = "azure"
+	providerCustom    = "custom"
 )
 
 var providers = []string{
@@ -145,17 +146,20 @@ type model struct {
 	port             int
 
 	// Channel configuration
-	signalEnabled   bool
-	whatsappEnabled bool
-	signalCLIPath   string
-	whatsappDBPath  string
+	signalEnabled      bool
+	whatsappEnabled    bool
+	telegramEnabled    bool
+	signalCLIPath      string
+	whatsappDBPath     string
+	telegramTokenFile  string
+	telegramTokenInput textinput.Model
 
 	// WhatsApp setup state
-	whatsappQRCode  string
-	whatsappStatus  string
-	whatsappDone    bool
-	whatsappError   string
-	whatsappLinker  *WhatsAppLinker
+	whatsappQRCode string
+	whatsappStatus string
+	whatsappDone   bool
+	whatsappError  string
+	whatsappLinker *WhatsAppLinker
 
 	// Service options
 	enableService bool
