@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/gateway"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
@@ -124,6 +125,91 @@ func TestRunChatMessageUsesInProcessRuntime(t *testing.T) {
 	}
 	if output != "hello from cli" {
 		t.Fatalf("unexpected output %q", output)
+	}
+}
+
+func TestBuildRuntimeWiresUsageStoreIntoAgentAndGateway(t *testing.T) {
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{
+		Provider: &fakeRuntimeProvider{
+			deltas: []*provider.StreamDelta{
+				{Content: "usage integrated"},
+				{Usage: &provider.Usage{PromptTokens: 12, CompletionTokens: 8, TotalTokens: 20}},
+				{FinishReason: stringPtr("stop")},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	defer app.Close()
+
+	if _, err := app.agent.ProcessDirect(context.Background(), agent.Request{
+		SessionKey: "s1",
+		Content:    "hello",
+	}, nil); err != nil {
+		t.Fatalf("ProcessDirect: %v", err)
+	}
+
+	if _, err := os.Stat(app.paths.UsageDB()); err != nil {
+		t.Fatalf("usage db stat: %v", err)
+	}
+
+	httpServer := httptest.NewServer(app.gateway.Handler())
+	defer httpServer.Close()
+
+	conn := dialWebsocketGateway(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	params, err := json.Marshal(map[string]any{"session": "s1"})
+	if err != nil {
+		t.Fatalf("Marshal status params: %v", err)
+	}
+	writeFrameGateway(t, conn, gateway.RequestFrame{
+		ID:     "status-1",
+		Method: "status",
+		Params: params,
+	})
+	frame := readResponseFrameGateway(t, conn, "status-1")
+	if frame.Kind != gateway.FrameResponse || frame.Response.Error != nil {
+		t.Fatalf("status failed: %#v", frame)
+	}
+
+	var payload struct {
+		PersistedUsage struct {
+			ProviderID    string `json:"providerId"`
+			ModelName     string `json:"modelName"`
+			SessionTokens int    `json:"sessionTokens"`
+			TodayTokens   int    `json:"todayTokens"`
+			WeeklyTokens  int    `json:"weeklyTokens"`
+		} `json:"persistedUsage"`
+	}
+	if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
+		t.Fatalf("Unmarshal status payload: %v", err)
+	}
+	if payload.PersistedUsage.ProviderID != "openai" {
+		t.Fatalf("providerId = %q, want openai", payload.PersistedUsage.ProviderID)
+	}
+	if payload.PersistedUsage.ModelName != "gpt-test" {
+		t.Fatalf("modelName = %q, want gpt-test", payload.PersistedUsage.ModelName)
+	}
+	if payload.PersistedUsage.SessionTokens != 20 || payload.PersistedUsage.TodayTokens != 20 || payload.PersistedUsage.WeeklyTokens != 20 {
+		t.Fatalf("unexpected persisted usage summary: %#v", payload.PersistedUsage)
 	}
 }
 

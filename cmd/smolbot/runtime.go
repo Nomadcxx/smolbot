@@ -32,6 +32,7 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/skill"
 	"github.com/Nomadcxx/smolbot/pkg/tokenizer"
 	"github.com/Nomadcxx/smolbot/pkg/tool"
+	"github.com/Nomadcxx/smolbot/pkg/usage"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -81,6 +82,7 @@ type runtimeApp struct {
 	config           *config.Config
 	paths            *config.Paths
 	sessions         *session.Store
+	usage            *usage.Store
 	mcpCleanup       func()
 	channels         *channel.Manager
 	tools            *tool.Registry
@@ -553,12 +555,18 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	if err != nil {
 		return nil, err
 	}
+	usageStore, err := usage.NewStore(paths.UsageDB())
+	if err != nil {
+		_ = sessions.Close()
+		return nil, err
+	}
 
 	runtimeProvider := deps.Provider
 	if runtimeProvider == nil {
 		registry := provider.NewRegistryWithDefaults(cfg)
 		runtimeProvider, err = registry.ForModel(cfg.Agents.Defaults.Model)
 		if err != nil {
+			_ = usageStore.Close()
 			_ = sessions.Close()
 			return nil, err
 		}
@@ -567,6 +575,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	channels := channel.NewManager()
 	configured, err := configuredChannels(cfg, false)
 	if err != nil {
+		_ = usageStore.Close()
 		_ = sessions.Close()
 		return nil, err
 	}
@@ -610,6 +619,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		Config:        cfg,
 		Skills:        skills,
 		Tokenizer:     tokenizer.New(),
+		UsageRecorder: usageStore,
 		Workspace:     paths.Workspace(),
 		MessageRouter: channels,
 		Spawner:       spawner,
@@ -645,6 +655,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		config:     cfg,
 		paths:      paths,
 		sessions:   sessions,
+		usage:      usageStore,
 		mcpCleanup: mcpCleanup,
 		channels:   channels,
 		tools:      tools,
@@ -661,6 +672,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 			Sessions:  sessions,
 			Channels:  channels,
 			Config:    cfg,
+			Usage:     usageStore,
 			Version:   version,
 			StartedAt: time.Now(),
 			SetModelCallback: func(model string) error {
@@ -1003,8 +1015,17 @@ func (a *runtimeApp) Close() error {
 		a.mcpCleanup()
 		a.mcpCleanup = nil
 	}
+	var errs []error
+	if a.usage != nil {
+		errs = append(errs, a.usage.Close())
+		a.usage = nil
+	}
 	if a.sessions != nil {
-		return a.sessions.Close()
+		errs = append(errs, a.sessions.Close())
+		a.sessions = nil
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	return nil
 }
