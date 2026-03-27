@@ -328,25 +328,45 @@ func budgetWindow(budget Budget, recordedAt time.Time) (time.Time, time.Time) {
 		return budget.WindowStart.UTC(), budget.WindowEnd.UTC()
 	}
 
+	var start time.Time
+	var end time.Time
 	switch budget.BudgetType {
 	case "hourly":
-		start := recordedAt.UTC().Truncate(time.Hour)
-		return start, start.Add(time.Hour)
+		start = recordedAt.UTC().Truncate(time.Hour)
+		end = start.Add(time.Hour)
 	case "daily":
-		start := startOfDay(recordedAt.UTC())
-		return start, start.Add(24 * time.Hour)
+		start = startOfDay(recordedAt.UTC())
+		end = start.Add(24 * time.Hour)
 	case "weekly":
-		start := startOfWeek(recordedAt.UTC())
-		return start, start.AddDate(0, 0, 7)
+		start = startOfWeek(recordedAt.UTC())
+		end = start.AddDate(0, 0, 7)
 	case "monthly":
-		start := startOfMonth(recordedAt.UTC())
-		return start, start.AddDate(0, 1, 0)
+		start = startOfMonth(recordedAt.UTC())
+		end = start.AddDate(0, 1, 0)
 	case "total":
-		return time.Time{}, maxBudgetWindowEnd()
+		start = time.Time{}
+		end = maxBudgetWindowEnd()
 	default:
-		start := startOfDay(recordedAt.UTC())
-		return start, start.Add(24 * time.Hour)
+		start = startOfDay(recordedAt.UTC())
+		end = start.Add(24 * time.Hour)
 	}
+
+	if budget.WindowStart != nil {
+		windowStart := budget.WindowStart.UTC()
+		if windowStart.After(start) {
+			start = windowStart
+		}
+	}
+	if budget.WindowEnd != nil {
+		windowEnd := budget.WindowEnd.UTC()
+		if windowEnd.Before(end) {
+			end = windowEnd
+		}
+	}
+	if !start.Before(end) {
+		return start, start
+	}
+	return start, end
 }
 
 func startOfDay(t time.Time) time.Time {

@@ -791,6 +791,93 @@ func TestBudgetThresholdAlertsRespectOneSidedActivationBounds(t *testing.T) {
 	}
 }
 
+func TestBudgetThresholdAlertsExcludeUsageBeforeStartBound(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	start := time.Date(2026, 3, 29, 0, 0, 0, 0, time.UTC)
+	budget := Budget{
+		ID:              "start-bound-total",
+		Name:            "Start Bound Total",
+		BudgetType:      "total",
+		LimitAmount:     100,
+		LimitUnit:       "tokens",
+		ScopeType:       "provider",
+		ScopeTarget:     "ollama",
+		AlertThresholds: []int{80},
+		IsActive:        true,
+		WindowStart:     &start,
+	}
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget: %v", err)
+	}
+
+	for _, record := range []CompletionRecord{
+		{
+			SessionKey:       "s1",
+			ProviderID:       "ollama",
+			ModelName:        "llama3.2",
+			RequestType:      "chat",
+			PromptTokens:     30,
+			CompletionTokens: 30,
+			TotalTokens:      60,
+			Status:           "success",
+			UsageSource:      "reported",
+			RecordedAt:       time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			SessionKey:       "s1",
+			ProviderID:       "ollama",
+			ModelName:        "llama3.2",
+			RequestType:      "chat",
+			PromptTokens:     15,
+			CompletionTokens: 15,
+			TotalTokens:      30,
+			Status:           "success",
+			UsageSource:      "reported",
+			RecordedAt:       time.Date(2026, 3, 29, 10, 0, 0, 0, time.UTC),
+		},
+	} {
+		if err := store.RecordCompletion(context.Background(), record); err != nil {
+			t.Fatalf("RecordCompletion before threshold: %v", err)
+		}
+	}
+
+	alerts, err := store.ListBudgetAlerts(budget.ID)
+	if err != nil {
+		t.Fatalf("ListBudgetAlerts before threshold: %v", err)
+	}
+	if len(alerts) != 0 {
+		t.Fatalf("alerts before post-start threshold = %d, want 0", len(alerts))
+	}
+
+	if err := store.RecordCompletion(context.Background(), CompletionRecord{
+		SessionKey:       "s1",
+		ProviderID:       "ollama",
+		ModelName:        "llama3.2",
+		RequestType:      "chat",
+		PromptTokens:     30,
+		CompletionTokens: 30,
+		TotalTokens:      60,
+		Status:           "success",
+		UsageSource:      "reported",
+		RecordedAt:       time.Date(2026, 3, 29, 11, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordCompletion after threshold: %v", err)
+	}
+
+	alerts, err = store.ListBudgetAlerts(budget.ID)
+	if err != nil {
+		t.Fatalf("ListBudgetAlerts after threshold: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("alerts after post-start threshold = %d, want 1", len(alerts))
+	}
+}
+
 func TestCurrentProviderSummaryIgnoresInactiveBudgets(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
@@ -1072,6 +1159,78 @@ func TestPruneOlderThanPreservesAlertsForActiveLongWindowBudgets(t *testing.T) {
 	}
 	if len(alerts) != 1 {
 		t.Fatalf("alerts after prune in active window = %d, want 1", len(alerts))
+	}
+}
+
+func TestPruneOlderThanPreservesEscalationForActiveLongWindowBudgets(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	windowEnd := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	budget := Budget{
+		ID:              "long-window-escalation",
+		Name:            "Long Window Escalation",
+		BudgetType:      "custom",
+		LimitAmount:     100,
+		LimitUnit:       "tokens",
+		ScopeType:       "provider",
+		ScopeTarget:     "ollama",
+		AlertThresholds: []int{50, 80},
+		IsActive:        true,
+		WindowStart:     &windowStart,
+		WindowEnd:       &windowEnd,
+	}
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget: %v", err)
+	}
+
+	if err := store.RecordCompletion(context.Background(), CompletionRecord{
+		SessionKey:       "s1",
+		ProviderID:       "ollama",
+		ModelName:        "llama3.2",
+		RequestType:      "chat",
+		PromptTokens:     30,
+		CompletionTokens: 30,
+		TotalTokens:      60,
+		Status:           "success",
+		UsageSource:      "reported",
+		RecordedAt:       time.Date(2026, 2, 1, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordCompletion first: %v", err)
+	}
+
+	if err := store.PruneOlderThan(context.Background(), time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("PruneOlderThan: %v", err)
+	}
+
+	if err := store.RecordCompletion(context.Background(), CompletionRecord{
+		SessionKey:       "s1",
+		ProviderID:       "ollama",
+		ModelName:        "llama3.2",
+		RequestType:      "chat",
+		PromptTokens:     15,
+		CompletionTokens: 15,
+		TotalTokens:      30,
+		Status:           "success",
+		UsageSource:      "reported",
+		RecordedAt:       time.Date(2026, 3, 16, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordCompletion second: %v", err)
+	}
+
+	alerts, err := store.ListBudgetAlerts(budget.ID)
+	if err != nil {
+		t.Fatalf("ListBudgetAlerts: %v", err)
+	}
+	if len(alerts) != 2 {
+		t.Fatalf("alerts after escalation = %+v, want thresholds 50 and 80", alerts)
+	}
+	if alerts[0].ThresholdPercent != 50 || alerts[1].ThresholdPercent != 80 {
+		t.Fatalf("thresholds after escalation = %+v, want [50 80]", alerts)
 	}
 }
 
