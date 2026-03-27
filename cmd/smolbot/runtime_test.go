@@ -214,6 +214,73 @@ func TestBuildRuntimeRegistersOnlyEnabledConfiguredChannels(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeRegistersSignalWhatsAppAndTelegramTogether(t *testing.T) {
+	origSignal := newSignalChannel
+	origWhatsApp := newWhatsAppChannel
+	origTelegram := newTelegramChannel
+	defer func() {
+		newSignalChannel = origSignal
+		newWhatsAppChannel = origWhatsApp
+		newTelegramChannel = origTelegram
+	}()
+
+	newSignalChannel = func(cfg config.SignalChannelConfig) channel.Channel {
+		if cfg.Account != "+15551234567" {
+			t.Fatalf("unexpected signal config %#v", cfg)
+		}
+		return &runtimeLoginStatusChannel{name: "signal", status: channel.Status{State: "connected"}}
+	}
+	newWhatsAppChannel = func(cfg config.WhatsAppChannelConfig) (channel.Channel, error) {
+		if cfg.DeviceName != "smolbot-test" {
+			t.Fatalf("unexpected whatsapp config %#v", cfg)
+		}
+		return &runtimeLoginStatusChannel{name: "whatsapp", status: channel.Status{State: "connected"}}, nil
+	}
+	newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "telegram-bot-token" {
+			t.Fatalf("unexpected telegram config %#v", cfg)
+		}
+		return &runtimeLoginStatusChannel{name: "telegram", status: channel.Status{State: "connected"}}, nil
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Signal.Enabled = true
+	cfg.Channels.Signal.Account = "+15551234567"
+	cfg.Channels.WhatsApp.Enabled = true
+	cfg.Channels.WhatsApp.DeviceName = "smolbot-test"
+	cfg.Channels.Telegram.Enabled = true
+	cfg.Channels.Telegram.BotToken = "telegram-bot-token"
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{
+		Provider: &fakeRuntimeProvider{},
+	})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	defer app.Close()
+
+	if got := strings.Join(app.channels.ChannelNames(), ","); got != "signal,telegram,whatsapp" {
+		t.Fatalf("registered channels = %q, want signal,telegram,whatsapp", got)
+	}
+	statuses := app.channels.Statuses(context.Background())
+	if statuses["signal"].State != "connected" || statuses["whatsapp"].State != "connected" || statuses["telegram"].State != "connected" {
+		t.Fatalf("unexpected channel statuses %#v", statuses)
+	}
+}
+
 func TestBuildRuntimeConstructsConfiguredSignalChannel(t *testing.T) {
 	orig := newSignalChannel
 	defer func() { newSignalChannel = orig }()
@@ -372,6 +439,85 @@ func TestBuildRuntimeConstructsConfiguredWhatsAppChannel(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeConstructsConfiguredTelegramChannel(t *testing.T) {
+	orig := newTelegramChannel
+	defer func() { newTelegramChannel = orig }()
+
+	fakeTelegram := &runtimeLoginStatusChannel{name: "telegram", status: channel.Status{State: "connected"}}
+	newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "telegram-bot-token" {
+			t.Fatalf("unexpected telegram config %#v", cfg)
+		}
+		return fakeTelegram, nil
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Telegram.Enabled = true
+	cfg.Channels.Telegram.BotToken = "telegram-bot-token"
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{
+		Provider: &fakeRuntimeProvider{},
+	})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	defer app.Close()
+
+	if got := strings.Join(app.channels.ChannelNames(), ","); got != "telegram" {
+		t.Fatalf("registered channels = %q, want telegram", got)
+	}
+	if state := app.channels.Statuses(context.Background())["telegram"].State; state != "connected" {
+		t.Fatalf("telegram status = %q, want connected", state)
+	}
+}
+
+func TestRunChannelLoginUsesConfiguredTelegramChannel(t *testing.T) {
+	orig := newTelegramChannel
+	defer func() { newTelegramChannel = orig }()
+
+	fakeTelegram := &runtimeLoginStatusChannel{name: "telegram"}
+	newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "telegram-bot-token" {
+			t.Fatalf("unexpected telegram config %#v", cfg)
+		}
+		return fakeTelegram, nil
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Telegram.Enabled = true
+	cfg.Channels.Telegram.BotToken = "telegram-bot-token"
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	if err := runChannelLoginImpl(context.Background(), rootOptions{configPath: cfgPath}, "telegram", io.Discard); err != nil {
+		t.Fatalf("runChannelLoginImpl: %v", err)
+	}
+	if fakeTelegram.logins != 1 {
+		t.Fatalf("telegram login calls = %d, want 1", fakeTelegram.logins)
+	}
+}
+
 func TestRunChannelLoginUsesConfiguredWhatsAppChannelWhenDisabled(t *testing.T) {
 	orig := newWhatsAppChannel
 	defer func() { newWhatsAppChannel = orig }()
@@ -468,6 +614,43 @@ func TestBuildRuntimeReturnsConfiguredWhatsAppChannelError(t *testing.T) {
 	cfg.Gateway.Host = "127.0.0.1"
 	cfg.Gateway.Port = port
 	cfg.Channels.WhatsApp.Enabled = true
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	_, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{
+		Provider: &fakeRuntimeProvider{},
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("buildRuntime error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestBuildRuntimeReturnsConfiguredTelegramChannelError(t *testing.T) {
+	orig := newTelegramChannel
+	defer func() { newTelegramChannel = orig }()
+
+	wantErr := errors.New("telegram seam failed")
+	newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken == "" {
+			t.Fatalf("expected bot token in telegram config %#v", cfg)
+		}
+		return nil, wantErr
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Telegram.Enabled = true
+	cfg.Channels.Telegram.BotToken = "telegram-bot-token"
 
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	if err := writeConfigFile(cfgPath, &cfg); err != nil {

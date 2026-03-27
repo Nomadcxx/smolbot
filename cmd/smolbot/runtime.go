@@ -18,6 +18,7 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	signalchannel "github.com/Nomadcxx/smolbot/pkg/channel/signal"
+	telegramchannel "github.com/Nomadcxx/smolbot/pkg/channel/telegram"
 	whatsappchannel "github.com/Nomadcxx/smolbot/pkg/channel/whatsapp"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/cron"
@@ -122,6 +123,10 @@ var newSignalChannel = func(cfg config.SignalChannelConfig) channel.Channel {
 
 var newWhatsAppChannel = func(cfg config.WhatsAppChannelConfig) (channel.Channel, error) {
 	return whatsappchannel.NewProductionAdapter(cfg)
+}
+
+var newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
+	return telegramchannel.NewProductionAdapter(cfg)
 }
 
 var runChatRuntimeDeps = func() runtimeDeps {
@@ -867,6 +872,8 @@ func channelEnabled(cfg *config.Config, name string) bool {
 		return cfg.Channels.Signal.Enabled
 	case "whatsapp":
 		return cfg.Channels.WhatsApp.Enabled
+	case "telegram":
+		return cfg.Channels.Telegram.Enabled
 	default:
 		return true
 	}
@@ -888,6 +895,13 @@ func configuredChannels(cfg *config.Config, includeDisabled bool) ([]channel.Cha
 		}
 		out = append(out, whatsApp)
 	}
+	if includeDisabled || cfg.Channels.Telegram.Enabled {
+		telegram, err := newTelegramChannel(cfg.Channels.Telegram)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, telegram)
+	}
 	return out, nil
 }
 
@@ -904,6 +918,10 @@ func configuredChannel(cfg *config.Config, name string, includeDisabled bool) (c
 	case "whatsapp":
 		if includeDisabled || cfg.Channels.WhatsApp.Enabled {
 			return newWhatsAppChannel(cfg.Channels.WhatsApp)
+		}
+	case "telegram":
+		if includeDisabled || cfg.Channels.Telegram.Enabled {
+			return newTelegramChannel(cfg.Channels.Telegram)
 		}
 	}
 	return nil, nil
