@@ -1275,6 +1275,51 @@ func TestEventMsgUpdatesToolLifecycle(t *testing.T) {
 	}
 }
 
+func TestDelegatedAgentPayloadsCompileAndRoundTrip(t *testing.T) {
+	t.Run("spawned", func(t *testing.T) {
+		want := client.AgentSpawnedPayload{
+			ID:            "child-1",
+			Name:          "Bernoulli",
+			AgentType:     "explorer",
+			Model:         "gpt-5.4 high",
+			Description:   "Spec review Gate 6",
+			PromptPreview: "Review ONLY the Gate 6 changes.",
+		}
+		raw, err := json.Marshal(want)
+		if err != nil {
+			t.Fatalf("marshal spawned payload: %v", err)
+		}
+		var got client.AgentSpawnedPayload
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal spawned payload: %v", err)
+		}
+		if got != want {
+			t.Fatalf("spawned payload mismatch: got %#v want %#v", got, want)
+		}
+	})
+
+	t.Run("waiting", func(t *testing.T) {
+		want := client.AgentWaitStartedPayload{
+			Count: 2,
+			Agents: []client.AgentWaitAgent{
+				{ID: "child-1", Name: "Bernoulli", AgentType: "explorer"},
+				{ID: "child-2", Name: "Averroes", AgentType: "explorer"},
+			},
+		}
+		raw, err := json.Marshal(want)
+		if err != nil {
+			t.Fatalf("marshal wait-started payload: %v", err)
+		}
+		var got client.AgentWaitStartedPayload
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal wait-started payload: %v", err)
+		}
+		if got.Count != want.Count || len(got.Agents) != len(want.Agents) {
+			t.Fatalf("wait-started payload mismatch: got %#v want %#v", got, want)
+		}
+	})
+}
+
 func TestWaitForEventIsResubscribedAfterDisconnect(t *testing.T) {
 	model := New(app.Config{})
 

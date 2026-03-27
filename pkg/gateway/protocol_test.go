@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	"github.com/Nomadcxx/smolbot/pkg/config"
@@ -279,6 +280,95 @@ func TestEventFrameHasCorrectStructure(t *testing.T) {
 	if wf.Seq == 0 {
 		t.Fatalf("event frame seq = 0, want nonzero")
 	}
+}
+
+func TestDelegatedAgentPayloadsRoundTrip(t *testing.T) {
+	t.Run("spawned", func(t *testing.T) {
+		want := client.AgentSpawnedPayload{
+			ID:              "child-1",
+			Name:            "Bernoulli",
+			AgentType:       "explorer",
+			Model:           "gpt-5.4 high",
+			ReasoningEffort: "high",
+			Description:     "Spec review Gate 6",
+			PromptPreview:   "Review ONLY the Gate 6 changes.",
+		}
+		raw, err := json.Marshal(want)
+		if err != nil {
+			t.Fatalf("marshal spawned payload: %v", err)
+		}
+		var got client.AgentSpawnedPayload
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal spawned payload: %v", err)
+		}
+		if got != want {
+			t.Fatalf("spawned payload mismatch: got %#v want %#v", got, want)
+		}
+	})
+
+	t.Run("completed", func(t *testing.T) {
+		want := client.AgentCompletedPayload{
+			ID:        "child-1",
+			Name:      "Bernoulli",
+			AgentType: "explorer",
+			Status:    "completed",
+			Summary:   "✅ Spec compliant",
+		}
+		raw, err := json.Marshal(want)
+		if err != nil {
+			t.Fatalf("marshal completed payload: %v", err)
+		}
+		var got client.AgentCompletedPayload
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal completed payload: %v", err)
+		}
+		if got != want {
+			t.Fatalf("completed payload mismatch: got %#v want %#v", got, want)
+		}
+	})
+
+	t.Run("wait_started", func(t *testing.T) {
+		want := client.AgentWaitStartedPayload{
+			Count: 3,
+			Agents: []client.AgentWaitAgent{
+				{ID: "child-1", Name: "Bernoulli", AgentType: "explorer"},
+				{ID: "child-2", Name: "Averroes", AgentType: "explorer"},
+				{ID: "child-3", Name: "Curie", AgentType: "explorer"},
+			},
+		}
+		raw, err := json.Marshal(want)
+		if err != nil {
+			t.Fatalf("marshal wait-started payload: %v", err)
+		}
+		var got client.AgentWaitStartedPayload
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal wait-started payload: %v", err)
+		}
+		if got.Count != want.Count || len(got.Agents) != len(want.Agents) {
+			t.Fatalf("wait-started payload mismatch: got %#v want %#v", got, want)
+		}
+	})
+
+	t.Run("wait_completed", func(t *testing.T) {
+		want := client.AgentWaitCompletedPayload{
+			Count: 2,
+			Results: []client.AgentWaitResult{
+				{ID: "child-1", Name: "Bernoulli", AgentType: "explorer", Status: "completed", Summary: "✅ Spec compliant"},
+				{ID: "child-2", Name: "Averroes", AgentType: "explorer", Status: "completed", Summary: "✅ Approved"},
+			},
+		}
+		raw, err := json.Marshal(want)
+		if err != nil {
+			t.Fatalf("marshal wait-completed payload: %v", err)
+		}
+		var got client.AgentWaitCompletedPayload
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal wait-completed payload: %v", err)
+		}
+		if got.Count != want.Count || len(got.Results) != len(want.Results) {
+			t.Fatalf("wait-completed payload mismatch: got %#v want %#v", got, want)
+		}
+	})
 }
 
 func TestRequestFrameHasCorrectStructure(t *testing.T) {
