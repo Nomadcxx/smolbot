@@ -45,9 +45,11 @@ func TestChannelsLoginRoutesSignalToDedicatedFlow(t *testing.T) {
 	}
 }
 
-func TestRunSignalLoginUsesInteractiveLoginAndRendersProvisioningURI(t *testing.T) {
+func TestRunSignalLoginUsesSharedQRRendererForProvisioningURI(t *testing.T) {
 	orig := newSignalChannel
+	origRenderer := newSignalQRRenderer
 	defer func() { newSignalChannel = orig }()
+	defer func() { newSignalQRRenderer = origRenderer }()
 
 	fake := &signalInteractiveLoginChannel{name: "signal"}
 	newSignalChannel = func(cfg config.SignalChannelConfig) channel.Channel {
@@ -55,6 +57,14 @@ func TestRunSignalLoginUsesInteractiveLoginAndRendersProvisioningURI(t *testing.
 			t.Fatalf("unexpected signal config %#v", cfg)
 		}
 		return fake
+	}
+
+	renderer := &signalQRRendererStub{}
+	newSignalQRRenderer = func(size int) signalQRRenderer {
+		if size != 256 {
+			t.Fatalf("unexpected qr size %d", size)
+		}
+		return renderer
 	}
 
 	port := freePort(t)
@@ -78,12 +88,70 @@ func TestRunSignalLoginUsesInteractiveLoginAndRendersProvisioningURI(t *testing.
 	if fake.interactiveCalls != 1 {
 		t.Fatalf("interactive login calls = %d, want 1", fake.interactiveCalls)
 	}
+	if len(renderer.calls) != 1 || renderer.calls[0] != "signal://provisioning-token" {
+		t.Fatalf("unexpected renderer calls %#v", renderer.calls)
+	}
 	rendered := out.String()
 	if !strings.Contains(rendered, "connecting: Linking device...") {
 		t.Fatalf("expected connecting update in output %q", rendered)
 	}
-	if !strings.Contains(rendered, "auth-required: signal://provisioning-token") {
-		t.Fatalf("expected provisioning URI in output %q", rendered)
+	if strings.Contains(rendered, "signal://provisioning-token") {
+		t.Fatalf("provisioning URI should not be printed verbatim: %q", rendered)
+	}
+	if !strings.Contains(rendered, "QR-RENDERED") {
+		t.Fatalf("expected rendered QR output in %q", rendered)
+	}
+}
+
+func TestRunSignalLoginSkipsRenderingEmptyProvisioningURI(t *testing.T) {
+	orig := newSignalChannel
+	origRenderer := newSignalQRRenderer
+	defer func() { newSignalChannel = orig }()
+	defer func() { newSignalQRRenderer = origRenderer }()
+
+	fake := &signalInteractiveLoginChannel{name: "signal"}
+	newSignalChannel = func(cfg config.SignalChannelConfig) channel.Channel {
+		return fake
+	}
+
+	renderer := &signalQRRendererStub{}
+	newSignalQRRenderer = func(size int) signalQRRenderer {
+		if size != 256 {
+			t.Fatalf("unexpected qr size %d", size)
+		}
+		return renderer
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Signal.Enabled = true
+	cfg.Channels.Signal.Account = "+15551234567"
+
+	cfgPath := writeSignalLoginConfig(t, cfg)
+
+	fake.interactiveCalls = 0
+	fake.loginWithEmptyProvisioningURI = true
+
+	var out bytes.Buffer
+	if err := runSignalLogin(context.Background(), rootOptions{configPath: cfgPath}, &out); err != nil {
+		t.Fatalf("runSignalLogin: %v", err)
+	}
+	if fake.interactiveCalls != 1 {
+		t.Fatalf("interactive login calls = %d, want 1", fake.interactiveCalls)
+	}
+	rendered := out.String()
+	if strings.Contains(rendered, "signal://") {
+		t.Fatalf("unexpected provisioning URI in output %q", rendered)
+	}
+	if len(renderer.calls) != 0 {
+		t.Fatalf("renderer should not be called for an empty provisioning URI: %#v", renderer.calls)
+	}
+	if strings.Contains(rendered, "QR(") {
+		t.Fatalf("unexpected qr output in %q", rendered)
 	}
 }
 
@@ -133,9 +201,10 @@ func writeSignalLoginConfig(t *testing.T, cfg config.Config) string {
 }
 
 type signalInteractiveLoginChannel struct {
-	name             string
-	loginCalls       int
-	interactiveCalls  int
+	name                          string
+	loginCalls                    int
+	interactiveCalls              int
+	loginWithEmptyProvisioningURI bool
 }
 
 func (f *signalInteractiveLoginChannel) Name() string { return f.name }
@@ -144,7 +213,9 @@ func (f *signalInteractiveLoginChannel) Start(context.Context, channel.Handler) 
 
 func (f *signalInteractiveLoginChannel) Stop(context.Context) error { return nil }
 
-func (f *signalInteractiveLoginChannel) Send(context.Context, channel.OutboundMessage) error { return nil }
+func (f *signalInteractiveLoginChannel) Send(context.Context, channel.OutboundMessage) error {
+	return nil
+}
 
 func (f *signalInteractiveLoginChannel) Login(context.Context) error {
 	f.loginCalls++
@@ -157,7 +228,11 @@ func (f *signalInteractiveLoginChannel) LoginWithUpdates(ctx context.Context, re
 		if err := report(channel.Status{State: "connecting", Detail: "Linking device..."}); err != nil {
 			return err
 		}
-		if err := report(channel.Status{State: "auth-required", Detail: "signal://provisioning-token"}); err != nil {
+		detail := "signal://provisioning-token"
+		if f.loginWithEmptyProvisioningURI {
+			detail = ""
+		}
+		if err := report(channel.Status{State: "auth-required", Detail: detail}); err != nil {
 			return err
 		}
 	}
@@ -165,7 +240,7 @@ func (f *signalInteractiveLoginChannel) LoginWithUpdates(ctx context.Context, re
 }
 
 type signalBlockingLoginChannel struct {
-	name            string
+	name             string
 	interactiveCalls int
 }
 
@@ -185,4 +260,16 @@ func (f *signalBlockingLoginChannel) LoginWithUpdates(ctx context.Context, repor
 	f.interactiveCalls++
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+type signalQRRendererStub struct {
+	calls []string
+}
+
+func (r *signalQRRendererStub) RenderToASCII(data string) (string, error) {
+	r.calls = append(r.calls, data)
+	if data == "" {
+		return "", nil
+	}
+	return "QR-RENDERED", nil
 }
