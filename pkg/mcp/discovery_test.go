@@ -194,6 +194,25 @@ func TestStdioDiscoveryClientDiscoverUsesDefaultTimeout(t *testing.T) {
 	}
 }
 
+func TestStdioDiscoveryClientDiscoverPrefersShorterConfiguredTimeout(t *testing.T) {
+	client := NewStdioDiscoveryClient(nil)
+	t.Cleanup(client.Close)
+
+	spec := mockConnectionSpec(t, map[string]string{
+		"MOCK_MCP_DELAY_LIST": "1",
+	})
+	spec.ToolTimeout = 20 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if _, err := client.Discover(ctx, spec); err == nil {
+		t.Fatal("expected discover timeout from shorter configured timeout")
+	} else if !errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "deadline exceeded") {
+		t.Fatalf("expected deadline exceeded, got %v", err)
+	}
+}
+
 func TestStdioDiscoveryClientCloseCancelsInFlightConnect(t *testing.T) {
 	client := NewStdioDiscoveryClient(nil)
 

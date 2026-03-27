@@ -283,6 +283,9 @@ func shouldDropTransport(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, errTransportWriteInterrupted) {
+		return true
+	}
 	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
@@ -290,8 +293,10 @@ func withDefaultTimeout(ctx context.Context, timeout time.Duration) (context.Con
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	if _, ok := ctx.Deadline(); ok {
-		return ctx, func() {}
+	if deadline, ok := ctx.Deadline(); ok {
+		if time.Until(deadline) <= timeout {
+			return ctx, func() {}
+		}
 	}
 	return context.WithTimeout(ctx, timeout)
 }

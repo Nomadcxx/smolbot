@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -28,6 +29,13 @@ type StdioTransport struct {
 type responseResult struct {
 	resp jsonRPCResponse
 	err  error
+}
+
+var errTransportWriteInterrupted = errors.New("mcp transport write interrupted")
+
+type writeResult struct {
+	err     error
+	aborted bool
 }
 
 func NewStdioTransport(ctx context.Context, command string, args []string, env map[string]string) (*StdioTransport, error) {
@@ -109,11 +117,8 @@ func (t *StdioTransport) sendRequest(ctx context.Context, id *jsonRPCID, method 
 		defer t.unregisterPending(string(*id), waitCh)
 	}
 
-	t.writeMu.Lock()
-	_, err = t.stdin.Write(append(data, '\n'))
-	t.writeMu.Unlock()
-	if err != nil {
-		return nil, fmt.Errorf("write to mcp server: %w", err)
+	if err := t.write(ctx, append(data, '\n')); err != nil {
+		return nil, err
 	}
 	if id == nil {
 		return nil, nil
@@ -134,6 +139,56 @@ func (t *StdioTransport) sendRequest(ctx context.Context, id *jsonRPCID, method 
 				return nil, res.resp.Error
 			}
 			return res.resp.Result, nil
+		}
+	}
+}
+
+func (t *StdioTransport) write(ctx context.Context, data []byte) error {
+	abort := make(chan struct{})
+	acquired := make(chan struct{})
+	started := make(chan struct{})
+	done := make(chan writeResult, 1)
+	go func() {
+		t.writeMu.Lock()
+		defer t.writeMu.Unlock()
+		close(acquired)
+		select {
+		case <-abort:
+			done <- writeResult{aborted: true}
+			return
+		default:
+		}
+		close(started)
+		_, err := t.stdin.Write(data)
+		done <- writeResult{err: err}
+	}()
+
+	select {
+	case <-acquired:
+	case <-ctx.Done():
+		close(abort)
+		return ctx.Err()
+	}
+
+	select {
+	case result := <-done:
+		if result.aborted {
+			return ctx.Err()
+		}
+		if result.err != nil {
+			return fmt.Errorf("write to mcp server: %w", result.err)
+		}
+		return nil
+	case <-ctx.Done():
+		close(abort)
+		select {
+		case <-started:
+			if t.cancel != nil {
+				t.cancel()
+			}
+			return fmt.Errorf("%w: %w", errTransportWriteInterrupted, ctx.Err())
+		default:
+			return ctx.Err()
 		}
 	}
 }
