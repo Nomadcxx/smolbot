@@ -186,6 +186,7 @@ func TestBuildRuntimeRegistersOnlyEnabledConfiguredChannels(t *testing.T) {
 	cfg.Gateway.Port = port
 	cfg.Channels.Signal.Enabled = true
 	cfg.Channels.WhatsApp.Enabled = false
+	cfg.Channels.Discord.Enabled = false
 
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	if err := writeConfigFile(cfgPath, &cfg); err != nil {
@@ -200,6 +201,7 @@ func TestBuildRuntimeRegistersOnlyEnabledConfiguredChannels(t *testing.T) {
 		Channels: []channel.Channel{
 			&runtimeLifecycleChannel{name: "signal"},
 			&runtimeLifecycleChannel{name: "whatsapp"},
+			&runtimeLifecycleChannel{name: "discord"},
 			&runtimeLifecycleChannel{name: "slack"},
 		},
 	})
@@ -218,10 +220,12 @@ func TestBuildRuntimeRegistersSignalWhatsAppAndTelegramTogether(t *testing.T) {
 	origSignal := newSignalChannel
 	origWhatsApp := newWhatsAppChannel
 	origTelegram := newTelegramChannel
+	origDiscord := newDiscordChannel
 	defer func() {
 		newSignalChannel = origSignal
 		newWhatsAppChannel = origWhatsApp
 		newTelegramChannel = origTelegram
+		newDiscordChannel = origDiscord
 	}()
 
 	newSignalChannel = func(cfg config.SignalChannelConfig) channel.Channel {
@@ -242,6 +246,12 @@ func TestBuildRuntimeRegistersSignalWhatsAppAndTelegramTogether(t *testing.T) {
 		}
 		return &runtimeLoginStatusChannel{name: "telegram", status: channel.Status{State: "connected"}}, nil
 	}
+	newDiscordChannel = func(cfg config.DiscordChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "discord-bot-token" {
+			t.Fatalf("unexpected discord config %#v", cfg)
+		}
+		return &runtimeLoginStatusChannel{name: "discord", status: channel.Status{State: "connected"}}, nil
+	}
 
 	port := freePort(t)
 	cfg := config.DefaultConfig()
@@ -255,6 +265,8 @@ func TestBuildRuntimeRegistersSignalWhatsAppAndTelegramTogether(t *testing.T) {
 	cfg.Channels.WhatsApp.DeviceName = "smolbot-test"
 	cfg.Channels.Telegram.Enabled = true
 	cfg.Channels.Telegram.BotToken = "telegram-bot-token"
+	cfg.Channels.Discord.Enabled = true
+	cfg.Channels.Discord.BotToken = "discord-bot-token"
 
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	if err := writeConfigFile(cfgPath, &cfg); err != nil {
@@ -272,11 +284,11 @@ func TestBuildRuntimeRegistersSignalWhatsAppAndTelegramTogether(t *testing.T) {
 	}
 	defer app.Close()
 
-	if got := strings.Join(app.channels.ChannelNames(), ","); got != "signal,telegram,whatsapp" {
-		t.Fatalf("registered channels = %q, want signal,telegram,whatsapp", got)
+	if got := strings.Join(app.channels.ChannelNames(), ","); got != "discord,signal,telegram,whatsapp" {
+		t.Fatalf("registered channels = %q, want discord,signal,telegram,whatsapp", got)
 	}
 	statuses := app.channels.Statuses(context.Background())
-	if statuses["signal"].State != "connected" || statuses["whatsapp"].State != "connected" || statuses["telegram"].State != "connected" {
+	if statuses["signal"].State != "connected" || statuses["whatsapp"].State != "connected" || statuses["telegram"].State != "connected" || statuses["discord"].State != "connected" {
 		t.Fatalf("unexpected channel statuses %#v", statuses)
 	}
 }
@@ -484,6 +496,55 @@ func TestBuildRuntimeConstructsConfiguredTelegramChannel(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeConstructsConfiguredDiscordChannel(t *testing.T) {
+	orig := newDiscordChannel
+	defer func() { newDiscordChannel = orig }()
+
+	fakeDiscord := &runtimeLoginStatusChannel{name: "discord", status: channel.Status{State: "connected"}}
+	newDiscordChannel = func(cfg config.DiscordChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "discord-bot-token" {
+			t.Fatalf("unexpected discord config %#v", cfg)
+		}
+		if got := strings.Join(cfg.AllowedChannelIDs, ","); got != "111,222" {
+			t.Fatalf("unexpected discord allowlist %#v", cfg.AllowedChannelIDs)
+		}
+		return fakeDiscord, nil
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Discord.Enabled = true
+	cfg.Channels.Discord.BotToken = "discord-bot-token"
+	cfg.Channels.Discord.AllowedChannelIDs = []string{"111", "222"}
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{
+		Provider: &fakeRuntimeProvider{},
+	})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	defer app.Close()
+
+	if got := strings.Join(app.channels.ChannelNames(), ","); got != "discord" {
+		t.Fatalf("registered channels = %q, want discord", got)
+	}
+	if state := app.channels.Statuses(context.Background())["discord"].State; state != "connected" {
+		t.Fatalf("discord status = %q, want connected", state)
+	}
+}
+
 func TestRunChannelLoginUsesConfiguredTelegramChannel(t *testing.T) {
 	orig := newTelegramChannel
 	defer func() { newTelegramChannel = orig }()
@@ -515,6 +576,44 @@ func TestRunChannelLoginUsesConfiguredTelegramChannel(t *testing.T) {
 	}
 	if fakeTelegram.logins != 1 {
 		t.Fatalf("telegram login calls = %d, want 1", fakeTelegram.logins)
+	}
+}
+
+func TestRunChannelLoginUsesConfiguredDiscordChannel(t *testing.T) {
+	orig := newDiscordChannel
+	defer func() { newDiscordChannel = orig }()
+
+	fakeDiscord := &runtimeDiscordLoginChannel{name: "discord"}
+	newDiscordChannel = func(cfg config.DiscordChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "discord-bot-token" {
+			t.Fatalf("unexpected discord config %#v", cfg)
+		}
+		return fakeDiscord, nil
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Discord.Enabled = true
+	cfg.Channels.Discord.BotToken = "discord-bot-token"
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	var out strings.Builder
+	if err := runChannelLoginImpl(context.Background(), rootOptions{configPath: cfgPath}, "discord", &out); err != nil {
+		t.Fatalf("runChannelLoginImpl: %v", err)
+	}
+	if fakeDiscord.logins != 1 {
+		t.Fatalf("discord login calls = %d, want 1", fakeDiscord.logins)
+	}
+	if got := out.String(); !strings.Contains(got, "connected: Bot: @smolbot") {
+		t.Fatalf("expected discord login status in output %q", got)
 	}
 }
 
@@ -631,6 +730,40 @@ func TestRunChannelLoginUsesConfiguredWhatsAppChannelWhenDisabled(t *testing.T) 
 	}
 }
 
+func TestRunChannelLoginUsesConfiguredDiscordChannelWhenDisabled(t *testing.T) {
+	orig := newDiscordChannel
+	defer func() { newDiscordChannel = orig }()
+
+	fakeDiscord := &runtimeDiscordLoginChannel{name: "discord"}
+	newDiscordChannel = func(cfg config.DiscordChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "discord-bot-token" {
+			t.Fatalf("unexpected discord config %#v", cfg)
+		}
+		return fakeDiscord, nil
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Discord.Enabled = false
+	cfg.Channels.Discord.BotToken = "discord-bot-token"
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	if err := runChannelLoginImpl(context.Background(), rootOptions{configPath: cfgPath}, "discord", io.Discard); err != nil {
+		t.Fatalf("runChannelLoginImpl: %v", err)
+	}
+	if fakeDiscord.logins != 1 {
+		t.Fatalf("discord login calls = %d, want 1", fakeDiscord.logins)
+	}
+}
+
 func TestRunChannelLoginIgnoresDisabledBrokenWhatsAppWhenLoggingIntoSignal(t *testing.T) {
 	origSignal := newSignalChannel
 	origWhatsApp := newWhatsAppChannel
@@ -730,6 +863,43 @@ func TestBuildRuntimeReturnsConfiguredTelegramChannelError(t *testing.T) {
 	cfg.Gateway.Port = port
 	cfg.Channels.Telegram.Enabled = true
 	cfg.Channels.Telegram.BotToken = "telegram-bot-token"
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	_, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{
+		Provider: &fakeRuntimeProvider{},
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("buildRuntime error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestBuildRuntimeReturnsConfiguredDiscordChannelError(t *testing.T) {
+	orig := newDiscordChannel
+	defer func() { newDiscordChannel = orig }()
+
+	wantErr := errors.New("discord seam failed")
+	newDiscordChannel = func(cfg config.DiscordChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken == "" {
+			t.Fatalf("expected bot token in discord config %#v", cfg)
+		}
+		return nil, wantErr
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Discord.Enabled = true
+	cfg.Channels.Discord.BotToken = "discord-bot-token"
 
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	if err := writeConfigFile(cfgPath, &cfg); err != nil {
@@ -877,4 +1047,28 @@ func (f *runtimeStatusOnlyTelegramChannel) Send(context.Context, channel.Outboun
 
 func (f *runtimeStatusOnlyTelegramChannel) Status(context.Context) (channel.Status, error) {
 	return channel.Status{State: "registered", Detail: "status only"}, nil
+}
+
+type runtimeDiscordLoginChannel struct {
+	name   string
+	status channel.Status
+	logins int
+}
+
+func (f *runtimeDiscordLoginChannel) Name() string { return f.name }
+
+func (f *runtimeDiscordLoginChannel) Start(context.Context, channel.Handler) error { return nil }
+
+func (f *runtimeDiscordLoginChannel) Stop(context.Context) error { return nil }
+
+func (f *runtimeDiscordLoginChannel) Send(context.Context, channel.OutboundMessage) error { return nil }
+
+func (f *runtimeDiscordLoginChannel) Status(context.Context) (channel.Status, error) {
+	return f.status, nil
+}
+
+func (f *runtimeDiscordLoginChannel) Login(context.Context) error {
+	f.logins++
+	f.status = channel.Status{State: "connected", Detail: "Bot: @smolbot"}
+	return nil
 }

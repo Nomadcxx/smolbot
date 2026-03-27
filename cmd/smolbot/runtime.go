@@ -17,6 +17,7 @@ import (
 
 	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
+	discordchannel "github.com/Nomadcxx/smolbot/pkg/channel/discord"
 	signalchannel "github.com/Nomadcxx/smolbot/pkg/channel/signal"
 	telegramchannel "github.com/Nomadcxx/smolbot/pkg/channel/telegram"
 	whatsappchannel "github.com/Nomadcxx/smolbot/pkg/channel/whatsapp"
@@ -76,21 +77,21 @@ type runtimeDeps struct {
 }
 
 type runtimeApp struct {
-	config          *config.Config
-	paths           *config.Paths
-	sessions        *session.Store
-	channels        *channel.Manager
-	tools           *tool.Registry
-	agent           *agent.AgentLoop
+	config           *config.Config
+	paths            *config.Paths
+	sessions         *session.Store
+	channels         *channel.Manager
+	tools            *tool.Registry
+	agent            *agent.AgentLoop
 	providerRegistry *provider.Registry
-	cron            *cron.Service
-	heartbeat       *heartbeat.Service
-	runCron         func(context.Context, time.Time) error
-	runBeat         func(context.Context) error
-	cronEvery       time.Duration
-	beatEvery       time.Duration
-	beatOn          bool
-	gateway         *gateway.Server
+	cron             *cron.Service
+	heartbeat        *heartbeat.Service
+	runCron          func(context.Context, time.Time) error
+	runBeat          func(context.Context) error
+	cronEvery        time.Duration
+	beatEvery        time.Duration
+	beatOn           bool
+	gateway          *gateway.Server
 }
 
 type runtimeSpawner struct {
@@ -127,6 +128,10 @@ var newWhatsAppChannel = func(cfg config.WhatsAppChannelConfig) (channel.Channel
 
 var newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
 	return telegramchannel.NewProductionAdapter(cfg)
+}
+
+var newDiscordChannel = func(cfg config.DiscordChannelConfig) (channel.Channel, error) {
+	return discordchannel.NewProductionAdapter(cfg)
 }
 
 var runChatRuntimeDeps = func() runtimeDeps {
@@ -874,6 +879,8 @@ func channelEnabled(cfg *config.Config, name string) bool {
 		return cfg.Channels.WhatsApp.Enabled
 	case "telegram":
 		return cfg.Channels.Telegram.Enabled
+	case "discord":
+		return cfg.Channels.Discord.Enabled
 	default:
 		return true
 	}
@@ -902,6 +909,13 @@ func configuredChannels(cfg *config.Config, includeDisabled bool) ([]channel.Cha
 		}
 		out = append(out, telegram)
 	}
+	if includeDisabled || cfg.Channels.Discord.Enabled {
+		discord, err := newDiscordChannel(cfg.Channels.Discord)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, discord)
+	}
 	return out, nil
 }
 
@@ -922,6 +936,10 @@ func configuredChannel(cfg *config.Config, name string, includeDisabled bool) (c
 	case "telegram":
 		if includeDisabled || cfg.Channels.Telegram.Enabled {
 			return newTelegramChannel(cfg.Channels.Telegram)
+		}
+	case "discord":
+		if includeDisabled || cfg.Channels.Discord.Enabled {
+			return newDiscordChannel(cfg.Channels.Discord)
 		}
 	}
 	return nil, nil
