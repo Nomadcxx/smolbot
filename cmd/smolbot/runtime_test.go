@@ -518,6 +518,85 @@ func TestRunChannelLoginUsesConfiguredTelegramChannel(t *testing.T) {
 	}
 }
 
+func TestRunChannelLoginUsesInteractiveTelegramLogin(t *testing.T) {
+	orig := newTelegramChannel
+	defer func() { newTelegramChannel = orig }()
+
+	fakeTelegram := &runtimeInteractiveTelegramChannel{name: "telegram"}
+	newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "telegram-bot-token" {
+			t.Fatalf("unexpected telegram config %#v", cfg)
+		}
+		return fakeTelegram, nil
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Telegram.Enabled = true
+	cfg.Channels.Telegram.BotToken = "telegram-bot-token"
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	var out strings.Builder
+	if err := runChannelLoginImpl(context.Background(), rootOptions{configPath: cfgPath}, "telegram", &out); err != nil {
+		t.Fatalf("runChannelLoginImpl: %v", err)
+	}
+	if fakeTelegram.interactiveLogins != 1 {
+		t.Fatalf("telegram interactive login calls = %d, want 1", fakeTelegram.interactiveLogins)
+	}
+	if fakeTelegram.loginCalls != 0 {
+		t.Fatalf("telegram fallback login calls = %d, want 0", fakeTelegram.loginCalls)
+	}
+	rendered := out.String()
+	if !strings.Contains(rendered, "connecting: Validating bot token...") {
+		t.Fatalf("expected interactive login updates in output %q", rendered)
+	}
+	if !strings.Contains(rendered, "connected: Bot: @smolbot") {
+		t.Fatalf("expected connected status in output %q", rendered)
+	}
+}
+
+func TestRunChannelLoginReportsStatusOnlyTelegramLoginClearly(t *testing.T) {
+	orig := newTelegramChannel
+	defer func() { newTelegramChannel = orig }()
+
+	newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "telegram-bot-token" {
+			t.Fatalf("unexpected telegram config %#v", cfg)
+		}
+		return &runtimeStatusOnlyTelegramChannel{name: "telegram"}, nil
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Telegram.Enabled = true
+	cfg.Channels.Telegram.BotToken = "telegram-bot-token"
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	err := runChannelLoginImpl(context.Background(), rootOptions{configPath: cfgPath}, "telegram", io.Discard)
+	if err == nil {
+		t.Fatal("expected telegram login to fail for status-only channel")
+	}
+	if got := err.Error(); !strings.Contains(got, "telegram") || !strings.Contains(got, "does not support login") {
+		t.Fatalf("unexpected error %q", got)
+	}
+}
+
 func TestRunChannelLoginUsesConfiguredWhatsAppChannelWhenDisabled(t *testing.T) {
 	orig := newWhatsAppChannel
 	defer func() { newWhatsAppChannel = orig }()
@@ -735,4 +814,67 @@ func (f *runtimeLoginStatusChannel) Status(context.Context) (channel.Status, err
 func (f *runtimeLoginStatusChannel) Login(context.Context) error {
 	f.logins++
 	return nil
+}
+
+type runtimeInteractiveTelegramChannel struct {
+	name              string
+	status            channel.Status
+	interactiveLogins int
+	loginCalls        int
+}
+
+func (f *runtimeInteractiveTelegramChannel) Name() string { return f.name }
+
+func (f *runtimeInteractiveTelegramChannel) Start(context.Context, channel.Handler) error { return nil }
+
+func (f *runtimeInteractiveTelegramChannel) Stop(context.Context) error { return nil }
+
+func (f *runtimeInteractiveTelegramChannel) Send(context.Context, channel.OutboundMessage) error {
+	return nil
+}
+
+func (f *runtimeInteractiveTelegramChannel) Status(context.Context) (channel.Status, error) {
+	return f.status, nil
+}
+
+func (f *runtimeInteractiveTelegramChannel) Login(context.Context) error {
+	f.loginCalls++
+	return nil
+}
+
+func (f *runtimeInteractiveTelegramChannel) LoginWithUpdates(ctx context.Context, report func(channel.Status) error) error {
+	f.interactiveLogins++
+	connecting := channel.Status{State: "connecting", Detail: "Validating bot token..."}
+	f.status = connecting
+	if report != nil {
+		if err := report(connecting); err != nil {
+			return err
+		}
+	}
+	connected := channel.Status{State: "connected", Detail: "Bot: @smolbot"}
+	f.status = connected
+	if report != nil {
+		if err := report(connected); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type runtimeStatusOnlyTelegramChannel struct {
+	name string
+}
+
+func (f *runtimeStatusOnlyTelegramChannel) Name() string { return f.name }
+
+func (f *runtimeStatusOnlyTelegramChannel) Start(context.Context, channel.Handler) error { return nil }
+
+func (f *runtimeStatusOnlyTelegramChannel) Stop(context.Context) error { return nil }
+
+func (f *runtimeStatusOnlyTelegramChannel) Send(context.Context, channel.OutboundMessage) error {
+	return nil
+}
+
+func (f *runtimeStatusOnlyTelegramChannel) Status(context.Context) (channel.Status, error) {
+	return channel.Status{State: "registered", Detail: "status only"}, nil
 }
