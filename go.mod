@@ -14,6 +14,8 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/go-telegram/bot v1.19.0
+	github.com/bwmarrin/discordgo v0.29.0
 	github.com/mattn/go-sqlite3 v1.14.37
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e

@@ -50,6 +50,8 @@ type ChannelsConfig struct {
 	SendToolHints bool                  `json:"sendToolHints"`
 	Signal        SignalChannelConfig   `json:"signal"`
 	WhatsApp      WhatsAppChannelConfig `json:"whatsapp"`
+	Telegram      TelegramChannelConfig `json:"telegram"`
+	Discord       DiscordChannelConfig  `json:"discord"`
 }
 
 type SignalChannelConfig struct {
@@ -64,6 +66,20 @@ type WhatsAppChannelConfig struct {
 	DeviceName     string   `json:"deviceName,omitempty"`
 	StorePath      string   `json:"storePath,omitempty"`
 	AllowedChatIDs []string `json:"allowedChatIDs,omitempty"`
+}
+
+type TelegramChannelConfig struct {
+	Enabled        bool     `json:"enabled"`
+	BotToken       string   `json:"botToken,omitempty"`
+	TokenFile      string   `json:"tokenFile,omitempty"`
+	AllowedChatIDs []string `json:"allowedChatIDs,omitempty"`
+}
+
+type DiscordChannelConfig struct {
+	Enabled           bool     `json:"enabled"`
+	BotToken          string   `json:"botToken,omitempty"`
+	TokenFile         string   `json:"tokenFile,omitempty"`
+	AllowedChannelIDs []string `json:"allowedChannelIDs,omitempty"`
 }
 
 type GatewayConfig struct {
@@ -139,6 +155,8 @@ func DefaultConfig() Config {
 				DeviceName: "smolbot",
 				StorePath:  filepath.Join(home, ".smolbot", "whatsapp.db"),
 			},
+			Telegram: TelegramChannelConfig{},
+			Discord:  DiscordChannelConfig{},
 		},
 		Gateway: GatewayConfig{
 			Host: "127.0.0.1",

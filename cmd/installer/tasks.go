@@ -10,11 +10,21 @@ import (
 	"time"
 )
 
+func writeFileWithPerm(path string, data []byte, perm os.FileMode) error {
+	if err := os.WriteFile(path, data, perm); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, perm); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Task: Clone repository
 func cloneRepository(m *model) error {
 	// Create a subdirectory for the clone
 	cloneDir := filepath.Join(m.projectDir, "smolbot")
-	
+
 	setLastCommand("git", "clone", "--depth", "1", "https://github.com/Nomadcxx/smolbot.git", cloneDir)
 
 	result := runCommand(m, "git", "clone", "--depth", "1",
@@ -153,18 +163,69 @@ func removeWorkspace(m *model) error {
 	if err := os.RemoveAll(baseDir); err != nil {
 		return fmt.Errorf("remove workspace: %w", err)
 	}
-	
+
 	// Also remove legacy nanobot directory if it exists
 	legacyDir := filepath.Join(os.Getenv("HOME"), ".nanobot")
 	if err := os.RemoveAll(legacyDir); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove legacy workspace: %w", err)
 	}
-	
+
+	return nil
+}
+
+func validateTelegramTokenFile(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read Telegram token file %q: %w", path, err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return fmt.Errorf("read Telegram token file %q: empty or whitespace-only", path)
+	}
+
+	return nil
+}
+
+func validateDiscordTokenFile(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read Discord token file %q: %w", path, err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return fmt.Errorf("read Discord token file %q: empty or whitespace-only", path)
+	}
+
 	return nil
 }
 
 // Task: Write config file with full structure
 func writeConfig(m *model) error {
+	if m.telegramEnabled {
+		tokenFile := strings.TrimSpace(m.telegramTokenFile)
+		if tokenFile == "" {
+			return fmt.Errorf("telegram token file is required when Telegram is enabled")
+		}
+		if err := validateTelegramTokenFile(tokenFile); err != nil {
+			return err
+		}
+	}
+	if m.discordEnabled {
+		tokenFile := strings.TrimSpace(m.discordTokenFile)
+		if tokenFile == "" {
+			return fmt.Errorf("discord token file is required when Discord is enabled")
+		}
+		if err := validateDiscordTokenFile(tokenFile); err != nil {
+			return err
+		}
+	}
+
 	config := map[string]interface{}{
 		"agents": map[string]interface{}{
 			"defaults": map[string]interface{}{
@@ -182,9 +243,9 @@ func writeConfig(m *model) error {
 				},
 			},
 		},
-		"providers":    map[string]interface{}{},
+		"providers": map[string]interface{}{},
 		"channels": map[string]interface{}{
-			"sendProgress": true,
+			"sendProgress":  true,
 			"sendToolHints": true,
 			"signal": map[string]interface{}{
 				"enabled": false,
@@ -196,6 +257,12 @@ func writeConfig(m *model) error {
 				"enabled":    false,
 				"deviceName": "smolbot",
 				"storePath":  filepath.Join(os.Getenv("HOME"), ".smolbot", "whatsapp.db"),
+			},
+			"telegram": map[string]interface{}{
+				"enabled": false,
+			},
+			"discord": map[string]interface{}{
+				"enabled": false,
 			},
 		},
 		"gateway": map[string]interface{}{
@@ -213,10 +280,10 @@ func writeConfig(m *model) error {
 				"maxResults":    5,
 			},
 			"exec": map[string]interface{}{
-				"defaultTimeout":       60,
-				"maxTimeout":           600,
-				"denyPatterns":         []string{"rm -rf /", "dd if="},
-				"restrictToWorkspace":  true,
+				"defaultTimeout":      60,
+				"maxTimeout":          600,
+				"denyPatterns":        []string{"rm -rf /", "dd if="},
+				"restrictToWorkspace": true,
 			},
 			"mcpServers": map[string]interface{}{},
 		},
@@ -254,19 +321,29 @@ func writeConfig(m *model) error {
 
 	// Update channel settings if enabled
 	channels := config["channels"].(map[string]interface{})
-	if signalEnabled {
+	if m.signalEnabled {
 		signalConfig := channels["signal"].(map[string]interface{})
 		signalConfig["enabled"] = true
 		if m.signalCLIPath != "" {
 			signalConfig["cliPath"] = m.signalCLIPath
 		}
 	}
-	if whatsappEnabled {
+	if m.whatsappEnabled {
 		whatsappConfig := channels["whatsapp"].(map[string]interface{})
 		whatsappConfig["enabled"] = true
 		if m.whatsappDBPath != "" {
 			whatsappConfig["storePath"] = m.whatsappDBPath
 		}
+	}
+	if m.telegramEnabled {
+		telegramConfig := channels["telegram"].(map[string]interface{})
+		telegramConfig["enabled"] = true
+		telegramConfig["tokenFile"] = strings.TrimSpace(m.telegramTokenFile)
+	}
+	if m.discordEnabled {
+		discordConfig := channels["discord"].(map[string]interface{})
+		discordConfig["enabled"] = true
+		discordConfig["tokenFile"] = strings.TrimSpace(m.discordTokenFile)
 	}
 
 	// Marshal to JSON
@@ -281,7 +358,7 @@ func writeConfig(m *model) error {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
-	if err := os.WriteFile(m.configPath, configData, 0644); err != nil {
+	if err := writeFileWithPerm(m.configPath, configData, 0600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 
@@ -294,13 +371,13 @@ func removeConfig(m *model) error {
 	if err := os.Remove(m.configPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove config: %w", err)
 	}
-	
+
 	// Also remove legacy config if it exists
 	legacyConfigPath := filepath.Join(os.Getenv("HOME"), ".nanobot", "config.json")
 	if err := os.Remove(legacyConfigPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove legacy config: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -310,6 +387,7 @@ func setupSystemd(m *model) error {
 	if err := os.MkdirAll(serviceDir, 0755); err != nil {
 		return fmt.Errorf("create systemd dir: %w", err)
 	}
+	currentPath := os.Getenv("PATH")
 
 	serviceContent := fmt.Sprintf(`[Unit]
 Description=smolbot - AI coding assistant
@@ -321,10 +399,11 @@ ExecStart=%s/.local/bin/smolbot run --config %s --workspace %s --port %d
 Restart=on-failure
 RestartSec=5
 Environment=HOME=%s
+Environment=PATH=%s
 
 [Install]
 WantedBy=default.target
-`, os.Getenv("HOME"), m.configPath, m.workspacePath, m.port, os.Getenv("HOME"))
+`, os.Getenv("HOME"), m.configPath, m.workspacePath, m.port, os.Getenv("HOME"), currentPath)
 
 	servicePath := filepath.Join(serviceDir, "smolbot.service")
 	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
@@ -399,7 +478,7 @@ func backupConfig(m *model) error {
 
 	timestamp := time.Now().Format("20060102_150405")
 	backupPath := m.configPath + ".backup." + timestamp
-	if err := os.WriteFile(backupPath, data, 0644); err != nil {
+	if err := writeFileWithPerm(backupPath, data, 0600); err != nil {
 		return fmt.Errorf("backup config: %w", err)
 	}
 

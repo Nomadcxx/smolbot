@@ -209,6 +209,26 @@ func TestStdioTransportSubprocessExit(t *testing.T) {
 	}
 }
 
+func TestStdioTransportIncludesChildStderrInReadError(t *testing.T) {
+	transport, err := NewStdioTransport(context.Background(), "sh", []string{"-c", "echo loader boom >&2; exit 1"}, nil)
+	if err != nil {
+		t.Fatalf("new stdio transport: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = transport.Close()
+	})
+
+	_, err = transport.Send(context.Background(), "initialize", map[string]any{
+		"protocolVersion": "2024-11-05",
+	})
+	if err == nil {
+		t.Fatal("expected initialize to fail")
+	}
+	if !strings.Contains(err.Error(), "loader boom") {
+		t.Fatalf("expected child stderr in error, got %v", err)
+	}
+}
+
 func TestStdioTransportClose(t *testing.T) {
 	transport := newMockTransport(t)
 	if err := transport.Close(); err != nil {
