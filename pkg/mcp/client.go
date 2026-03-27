@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -67,6 +68,7 @@ func WrapName(serverName, toolName string) string {
 
 func (m *Manager) DiscoverAndRegister(ctx context.Context, registry *tool.Registry, servers map[string]config.MCPServerConfig) ([]string, error) {
 	if m.client == nil {
+		slog.Warn("mcp manager has no discovery client, skipping tool registration", "servers", len(servers))
 		return nil, nil
 	}
 
@@ -82,6 +84,10 @@ func (m *Manager) DiscoverAndRegister(ctx context.Context, registry *tool.Regist
 		spec := connectionSpec(serverName, cfg)
 		remoteTools, err := m.client.Discover(ctx, spec)
 		if err != nil {
+			if IsUnsupportedTransport(err) {
+				warnings = append(warnings, fmt.Sprintf("mcp server %s uses unsupported transport %q; skipping", serverName, spec.Transport))
+				continue
+			}
 			return warnings, fmt.Errorf("discover mcp tools for %s: %w", serverName, err)
 		}
 
