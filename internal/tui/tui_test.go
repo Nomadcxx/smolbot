@@ -1275,49 +1275,79 @@ func TestEventMsgUpdatesToolLifecycle(t *testing.T) {
 	}
 }
 
-func TestDelegatedAgentPayloadsCompileAndRoundTrip(t *testing.T) {
-	t.Run("spawned", func(t *testing.T) {
-		want := client.AgentSpawnedPayload{
-			ID:            "child-1",
-			Name:          "Bernoulli",
-			AgentType:     "explorer",
-			Model:         "gpt-5.4 high",
-			Description:   "Spec review Gate 6",
-			PromptPreview: "Review ONLY the Gate 6 changes.",
-		}
-		raw, err := json.Marshal(want)
-		if err != nil {
-			t.Fatalf("marshal spawned payload: %v", err)
-		}
-		var got client.AgentSpawnedPayload
-		if err := json.Unmarshal(raw, &got); err != nil {
-			t.Fatalf("unmarshal spawned payload: %v", err)
-		}
-		if got != want {
-			t.Fatalf("spawned payload mismatch: got %#v want %#v", got, want)
-		}
-	})
+func TestDelegatedAgentEventsAreToleratedBeforeTask6(t *testing.T) {
+	model := New(app.Config{})
+	initialView := plain(model.messages.View())
 
-	t.Run("waiting", func(t *testing.T) {
-		want := client.AgentWaitStartedPayload{
-			Count: 2,
-			Agents: []client.AgentWaitAgent{
-				{ID: "child-1", Name: "Bernoulli", AgentType: "explorer"},
-				{ID: "child-2", Name: "Averroes", AgentType: "explorer"},
+	events := []struct {
+		name    string
+		payload any
+	}{
+		{
+			name: "agent.spawned",
+			payload: client.AgentSpawnedPayload{
+				ID:              "child-1",
+				Name:            "Bernoulli",
+				AgentType:       "explorer",
+				Model:           "gpt-5.4",
+				ReasoningEffort: "high",
+				Description:     "Spec review Gate 6",
+				PromptPreview:   "Review ONLY the Gate 6 changes.",
 			},
-		}
-		raw, err := json.Marshal(want)
+		},
+		{
+			name: "agent.completed",
+			payload: client.AgentCompletedPayload{
+				ID:            "child-1",
+				Name:          "Bernoulli",
+				AgentType:     "explorer",
+				Status:        "completed",
+				Description:   "Spec review Gate 6",
+				PromptPreview: "Review ONLY the Gate 6 changes.",
+				Summary:       "✅ Spec compliant",
+			},
+		},
+		{
+			name: "agent.wait.started",
+			payload: client.AgentWaitStartedPayload{
+				Count: 2,
+				Agents: []client.AgentWaitAgent{
+					{ID: "child-1", Name: "Bernoulli", AgentType: "explorer"},
+					{ID: "child-2", Name: "Averroes", AgentType: "explorer"},
+				},
+			},
+		},
+		{
+			name: "agent.wait.completed",
+			payload: client.AgentWaitCompletedPayload{
+				Count: 2,
+				Results: []client.AgentWaitResult{
+					{ID: "child-1", Name: "Bernoulli", AgentType: "explorer", Status: "completed", Description: "Spec review Gate 6", Summary: "✅ Spec compliant"},
+					{ID: "child-2", Name: "Averroes", AgentType: "explorer", Status: "completed", Description: "Code-quality review Gate 6", Summary: "✅ Approved"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range events {
+		raw, err := json.Marshal(tc.payload)
 		if err != nil {
-			t.Fatalf("marshal wait-started payload: %v", err)
+			t.Fatalf("marshal %s payload: %v", tc.name, err)
 		}
-		var got client.AgentWaitStartedPayload
-		if err := json.Unmarshal(raw, &got); err != nil {
-			t.Fatalf("unmarshal wait-started payload: %v", err)
-		}
-		if got.Count != want.Count || len(got.Agents) != len(want.Agents) {
-			t.Fatalf("wait-started payload mismatch: got %#v want %#v", got, want)
-		}
-	})
+		updated, _ := model.Update(EventMsg{
+			Event: client.Event{
+				Type:    client.FrameEvent,
+				Event:   tc.name,
+				Payload: raw,
+				Seq:     1,
+			},
+		})
+		model = updated.(Model)
+	}
+
+	if got := plain(model.messages.View()); got != initialView {
+		t.Fatalf("expected delegated-agent events to be ignored before Task 6, got transcript diff:\nBEFORE:\n%s\nAFTER:\n%s", initialView, got)
+	}
 }
 
 func TestWaitForEventIsResubscribedAfterDisconnect(t *testing.T) {

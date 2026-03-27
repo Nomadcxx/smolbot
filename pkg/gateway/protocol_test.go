@@ -308,11 +308,13 @@ func TestDelegatedAgentPayloadsRoundTrip(t *testing.T) {
 
 	t.Run("completed", func(t *testing.T) {
 		want := client.AgentCompletedPayload{
-			ID:        "child-1",
-			Name:      "Bernoulli",
-			AgentType: "explorer",
-			Status:    "completed",
-			Summary:   "✅ Spec compliant",
+			ID:            "child-1",
+			Name:          "Bernoulli",
+			AgentType:     "explorer",
+			Status:        "completed",
+			Description:   "Spec review Gate 6",
+			PromptPreview: "Review ONLY the Gate 6 changes.",
+			Summary:       "✅ Spec compliant",
 		}
 		raw, err := json.Marshal(want)
 		if err != nil {
@@ -344,8 +346,16 @@ func TestDelegatedAgentPayloadsRoundTrip(t *testing.T) {
 		if err := json.Unmarshal(raw, &got); err != nil {
 			t.Fatalf("unmarshal wait-started payload: %v", err)
 		}
-		if got.Count != want.Count || len(got.Agents) != len(want.Agents) {
+		if got.Count != want.Count {
+			t.Fatalf("wait-started count mismatch: got %#v want %#v", got, want)
+		}
+		if len(got.Agents) != len(want.Agents) {
 			t.Fatalf("wait-started payload mismatch: got %#v want %#v", got, want)
+		}
+		for i := range want.Agents {
+			if got.Agents[i] != want.Agents[i] {
+				t.Fatalf("wait-started agent[%d] mismatch: got %#v want %#v", i, got.Agents[i], want.Agents[i])
+			}
 		}
 	})
 
@@ -353,8 +363,24 @@ func TestDelegatedAgentPayloadsRoundTrip(t *testing.T) {
 		want := client.AgentWaitCompletedPayload{
 			Count: 2,
 			Results: []client.AgentWaitResult{
-				{ID: "child-1", Name: "Bernoulli", AgentType: "explorer", Status: "completed", Summary: "✅ Spec compliant"},
-				{ID: "child-2", Name: "Averroes", AgentType: "explorer", Status: "completed", Summary: "✅ Approved"},
+				{
+					ID:            "child-1",
+					Name:          "Bernoulli",
+					AgentType:     "explorer",
+					Status:        "completed",
+					Description:   "Spec review Gate 6",
+					PromptPreview: "Review ONLY the Gate 6 changes.",
+					Summary:       "✅ Spec compliant",
+				},
+				{
+					ID:            "child-2",
+					Name:          "Averroes",
+					AgentType:     "explorer",
+					Status:        "completed",
+					Description:   "Code-quality review Gate 6",
+					PromptPreview: "Review ONLY script changes.",
+					Summary:       "✅ Approved",
+				},
 			},
 		}
 		raw, err := json.Marshal(want)
@@ -365,8 +391,16 @@ func TestDelegatedAgentPayloadsRoundTrip(t *testing.T) {
 		if err := json.Unmarshal(raw, &got); err != nil {
 			t.Fatalf("unmarshal wait-completed payload: %v", err)
 		}
-		if got.Count != want.Count || len(got.Results) != len(want.Results) {
+		if got.Count != want.Count {
+			t.Fatalf("wait-completed count mismatch: got %#v want %#v", got, want)
+		}
+		if len(got.Results) != len(want.Results) {
 			t.Fatalf("wait-completed payload mismatch: got %#v want %#v", got, want)
+		}
+		for i := range want.Results {
+			if got.Results[i] != want.Results[i] {
+				t.Fatalf("wait-completed result[%d] mismatch: got %#v want %#v", i, got.Results[i], want.Results[i])
+			}
 		}
 	})
 }

@@ -93,6 +93,8 @@ type AgentCompletedPayload struct {
 	Name      string `json:"name"`
 	AgentType string `json:"agentType"`
 	Status    string `json:"status"`
+	Description   string `json:"description,omitempty"`
+	PromptPreview string `json:"promptPreview,omitempty"`
 	Summary   string `json:"summary,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
@@ -116,6 +118,8 @@ type AgentWaitResult struct {
 	Name      string `json:"name"`
 	AgentType string `json:"agentType"`
 	Status    string `json:"status"`
+	Description   string `json:"description,omitempty"`
+	PromptPreview string `json:"promptPreview,omitempty"`
 	Summary   string `json:"summary,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
