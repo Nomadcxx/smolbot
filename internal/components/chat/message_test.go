@@ -188,6 +188,96 @@ func TestToolArtifactCardsUseSemanticThemeTokens(t *testing.T) {
 	_ = doneIcon
 }
 
+func TestRenderSpawnedAgentArtifact(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+
+	rendered := stripANSI(renderAgentArtifact(AgentArtifact{
+		Kind: SpawnedAgentArtifact,
+		Agents: []AgentArtifactAgent{{
+			Name:            "Bernoulli",
+			AgentType:       "explorer",
+			Model:           "gpt-5.4",
+			ReasoningEffort: "high",
+			Description:     "Spec review Gate 6 in the current working tree.",
+		}},
+	}, 80))
+
+	if !strings.Contains(rendered, "Spawned Bernoulli [explorer] (gpt-5.4 high)") {
+		t.Fatalf("expected spawned header, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "Spec review Gate 6") {
+		t.Fatalf("expected spawned description, got %q", rendered)
+	}
+}
+
+func TestRenderWaitingAgentArtifact(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+
+	rendered := stripANSI(renderAgentArtifact(AgentArtifact{
+		Kind:  WaitingAgentsArtifact,
+		Count: 2,
+		Agents: []AgentArtifactAgent{
+			{Name: "Bernoulli", AgentType: "explorer"},
+			{Name: "Averroes", AgentType: "explorer"},
+		},
+	}, 80))
+
+	if !strings.Contains(rendered, "Waiting for 2 agents") {
+		t.Fatalf("expected waiting header, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "Bernoulli [explorer]") || !strings.Contains(rendered, "Averroes [explorer]") {
+		t.Fatalf("expected waiting agent list, got %q", rendered)
+	}
+}
+
+func TestRenderFinishedWaitingArtifact(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+
+	rendered := stripANSI(renderAgentArtifact(AgentArtifact{
+		Kind:  FinishedWaitingArtifact,
+		Count: 2,
+		Agents: []AgentArtifactAgent{
+			{Name: "Bernoulli", AgentType: "explorer", Status: "completed", Summary: "✅ Spec compliant"},
+			{Name: "Averroes", AgentType: "explorer", Status: "completed", Summary: "✅ Approved"},
+		},
+	}, 80))
+
+	if !strings.Contains(rendered, "Finished waiting") {
+		t.Fatalf("expected finished header, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "Bernoulli [explorer]: Completed - ✅ Spec compliant") {
+		t.Fatalf("expected finished result summary, got %q", rendered)
+	}
+}
+
+func TestRenderAgentArtifactTruncatesReadablePreview(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+
+	rendered := stripANSI(renderAgentArtifact(AgentArtifact{
+		Kind: SpawnedAgentArtifact,
+		Agents: []AgentArtifactAgent{{
+			Name:        "Curie",
+			AgentType:   "explorer",
+			Description: strings.Repeat("very long delegated task summary ", 8),
+		}},
+	}, 38))
+
+	if !strings.Contains(rendered, "Spawned Curie [explorer]") {
+		t.Fatalf("expected spawned artifact to render, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "  └ ") {
+		t.Fatalf("expected nested preview line, got %q", rendered)
+	}
+}
+
 func TestTranscriptRoleBlocksUseSemanticThemeTokens(t *testing.T) {
 	useSemanticTranscriptTheme(t)
 

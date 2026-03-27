@@ -33,6 +33,8 @@ type messageCache struct {
 
 type MessagesModel struct {
 	messages      []ChatMessage
+	artifacts     []AgentArtifact
+	timeline      []transcriptItem
 	tools         []ToolCall
 	width         int
 	height        int
@@ -51,6 +53,18 @@ type MessagesModel struct {
 	plainLines    []string
 	plainOffsets  []int
 	selection     selectionRange
+}
+
+type transcriptItemKind string
+
+const (
+	transcriptMessageItem  transcriptItemKind = "message"
+	transcriptArtifactItem transcriptItemKind = "artifact"
+)
+
+type transcriptItem struct {
+	kind  transcriptItemKind
+	index int
 }
 
 type selectionPoint struct {
@@ -89,6 +103,7 @@ func (m *MessagesModel) SetSize(w, h int) {
 
 func (m *MessagesModel) AppendUser(content string) {
 	m.messages = append(m.messages, ChatMessage{Role: "user", Content: content})
+	m.timeline = append(m.timeline, transcriptItem{kind: transcriptMessageItem, index: len(m.messages) - 1})
 	m.progress = ""
 	m.thinking = ""
 	if len(m.cache) != len(m.messages)-1 {
@@ -99,6 +114,7 @@ func (m *MessagesModel) AppendUser(content string) {
 
 func (m *MessagesModel) AppendAssistant(content string) {
 	m.messages = append(m.messages, ChatMessage{Role: "assistant", Content: content})
+	m.timeline = append(m.timeline, transcriptItem{kind: transcriptMessageItem, index: len(m.messages) - 1})
 	m.progress = ""
 	m.thinking = ""
 	m.tools = nil
@@ -110,6 +126,7 @@ func (m *MessagesModel) AppendAssistant(content string) {
 
 func (m *MessagesModel) AppendError(content string) {
 	m.messages = append(m.messages, ChatMessage{Role: "error", Content: content})
+	m.timeline = append(m.timeline, transcriptItem{kind: transcriptMessageItem, index: len(m.messages) - 1})
 	m.progress = ""
 	m.thinking = ""
 	if len(m.cache) != len(m.messages)-1 {
@@ -123,6 +140,7 @@ func (m *MessagesModel) AppendSystem(content string) {
 		return
 	}
 	m.messages = append(m.messages, ChatMessage{Role: "system", Content: content})
+	m.timeline = append(m.timeline, transcriptItem{kind: transcriptMessageItem, index: len(m.messages) - 1})
 	m.progress = ""
 	m.thinking = ""
 	if len(m.cache) != len(m.messages)-1 {
@@ -141,6 +159,7 @@ func (m *MessagesModel) AppendThinking(content string) {
 		m.thinkingStart = time.Time{}
 	}
 	m.messages = append(m.messages, ChatMessage{Role: "thinking", Content: content, Duration: dur})
+	m.timeline = append(m.timeline, transcriptItem{kind: transcriptMessageItem, index: len(m.messages) - 1})
 	if len(m.cache) != len(m.messages)-1 {
 		m.messageBody = ""
 	}
@@ -173,6 +192,11 @@ func (m *MessagesModel) GetProgress() string {
 
 func (m *MessagesModel) ReplaceHistory(history []ChatMessage) {
 	m.messages = append([]ChatMessage(nil), history...)
+	m.artifacts = nil
+	m.timeline = m.timeline[:0]
+	for i := range m.messages {
+		m.timeline = append(m.timeline, transcriptItem{kind: transcriptMessageItem, index: i})
+	}
 	m.tools = nil
 	m.progress = ""
 	m.thinking = ""
@@ -180,6 +204,41 @@ func (m *MessagesModel) ReplaceHistory(history []ChatMessage) {
 	m.messageBody = ""
 	m.clearSelection()
 	m.sync(true)
+}
+
+func (m *MessagesModel) AppendSpawnedAgent(agent AgentArtifactAgent) {
+	m.artifacts = append(m.artifacts, AgentArtifact{
+		Kind:   SpawnedAgentArtifact,
+		Agents: []AgentArtifactAgent{agent},
+	})
+	m.timeline = append(m.timeline, transcriptItem{kind: transcriptArtifactItem, index: len(m.artifacts) - 1})
+	m.sync(m.viewport.AtBottom())
+}
+
+func (m *MessagesModel) AppendWaitingAgents(agents []AgentArtifactAgent) {
+	if len(agents) == 0 {
+		return
+	}
+	m.artifacts = append(m.artifacts, AgentArtifact{
+		Kind:   WaitingAgentsArtifact,
+		Count:  len(agents),
+		Agents: append([]AgentArtifactAgent(nil), agents...),
+	})
+	m.timeline = append(m.timeline, transcriptItem{kind: transcriptArtifactItem, index: len(m.artifacts) - 1})
+	m.sync(m.viewport.AtBottom())
+}
+
+func (m *MessagesModel) AppendFinishedWaiting(agents []AgentArtifactAgent) {
+	if len(agents) == 0 {
+		return
+	}
+	m.artifacts = append(m.artifacts, AgentArtifact{
+		Kind:   FinishedWaitingArtifact,
+		Count:  len(agents),
+		Agents: append([]AgentArtifactAgent(nil), agents...),
+	})
+	m.timeline = append(m.timeline, transcriptItem{kind: transcriptArtifactItem, index: len(m.artifacts) - 1})
+	m.sync(m.viewport.AtBottom())
 }
 
 func (m *MessagesModel) StartTool(id, name, input string) {
@@ -402,8 +461,17 @@ func (m *MessagesModel) renderTranscript() (string, []string, []int) {
 
 	blocks := make([]string, 0, len(m.messages)+len(m.tools)+2)
 	signature := transcriptRenderSignature()
-	for i, msg := range m.messages {
-		blocks = append(blocks, m.renderCachedMessage(i, msg, t, signature))
+	for _, item := range m.timeline {
+		switch item.kind {
+		case transcriptMessageItem:
+			if item.index >= 0 && item.index < len(m.messages) {
+				blocks = append(blocks, m.renderCachedMessage(item.index, m.messages[item.index], t, signature))
+			}
+		case transcriptArtifactItem:
+			if item.index >= 0 && item.index < len(m.artifacts) {
+				blocks = append(blocks, renderAgentArtifact(m.artifacts[item.index], m.width))
+			}
+		}
 	}
 	if m.progress != "" {
 		blocks = append(blocks, renderRoleBlock("ASSISTANT", m.renderAssistant(m.progress), t.TranscriptStreaming, m.width))
@@ -530,6 +598,10 @@ func plainMessageBlock(msg ChatMessage, width int) []string {
 	default:
 		return wrapPlainText(msg.Content, max(20, width-2))
 	}
+}
+
+func plainAgentArtifactBlock(artifact AgentArtifact, width int) []string {
+	return plainAgentLines(artifact, width)
 }
 
 func plainRoleBlock(label, body string, width int) []string {
@@ -843,7 +915,7 @@ func (m *MessagesModel) renderContent() string {
 	}
 
 	sections := make([]string, 0, len(m.tools)+3)
-	if body := m.renderMessageBody(t); body != "" {
+	if body := m.renderTranscriptBody(t); body != "" {
 		sections = append(sections, body)
 	}
 	if m.progress != "" {
@@ -859,27 +931,27 @@ func (m *MessagesModel) renderContent() string {
 	return strings.Join(sections, "\n\n")
 }
 
-func (m *MessagesModel) renderMessageBody(t *theme.Theme) string {
+func (m *MessagesModel) renderTranscriptBody(t *theme.Theme) string {
 	signature := transcriptRenderSignature()
 	if len(m.cache) > len(m.messages) {
 		m.cache = m.cache[:len(m.messages)]
 	}
-	if len(m.messages) == 0 {
+	if len(m.timeline) == 0 {
 		m.messageBody = ""
 		return ""
 	}
-	if len(m.cache) == len(m.messages) && m.messageBody != "" {
-		return m.messageBody
-	}
-	if len(m.cache) == len(m.messages)-1 && m.messageBody != "" {
-		block := m.renderCachedMessage(len(m.messages)-1, m.messages[len(m.messages)-1], t, signature)
-		m.messageBody = m.messageBody + "\n\n" + block
-		return m.messageBody
-	}
-
-	blocks := make([]string, 0, len(m.messages))
-	for i, msg := range m.messages {
-		blocks = append(blocks, m.renderCachedMessage(i, msg, t, signature))
+	blocks := make([]string, 0, len(m.timeline))
+	for _, item := range m.timeline {
+		switch item.kind {
+		case transcriptMessageItem:
+			if item.index >= 0 && item.index < len(m.messages) {
+				blocks = append(blocks, m.renderCachedMessage(item.index, m.messages[item.index], t, signature))
+			}
+		case transcriptArtifactItem:
+			if item.index >= 0 && item.index < len(m.artifacts) {
+				blocks = append(blocks, renderAgentArtifact(m.artifacts[item.index], m.width))
+			}
+		}
 	}
 	m.cache = m.cache[:len(m.messages)]
 	m.messageBody = strings.Join(blocks, "\n\n")

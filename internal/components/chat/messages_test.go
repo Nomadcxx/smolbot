@@ -52,6 +52,76 @@ func TestMessagesModelRendersToolLifecycle(t *testing.T) {
 	}
 }
 
+func TestMessagesModelRendersDelegatedAgentArtifactsWithToolBlocks(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+
+	model := NewMessages()
+	model.SetSize(80, 20)
+	model.AppendUser("delegate work")
+	model.AppendSpawnedAgent(AgentArtifactAgent{
+		Name:            "Bernoulli",
+		AgentType:       "explorer",
+		Model:           "gpt-5.4",
+		ReasoningEffort: "high",
+		Description:     "Spec review Gate 6 in the current working tree.",
+	})
+	model.AppendWaitingAgents([]AgentArtifactAgent{
+		{Name: "Bernoulli", AgentType: "explorer"},
+		{Name: "Averroes", AgentType: "explorer"},
+	})
+	model.AppendFinishedWaiting([]AgentArtifactAgent{
+		{Name: "Bernoulli", AgentType: "explorer", Status: "completed", Summary: "✅ Spec compliant"},
+	})
+	model.StartTool("tc1", "read_file", `{"path":"/etc/smolbot.yaml"}`)
+	model.FinishTool("tc1", "read_file", "done", "loaded config")
+
+	view := stripANSI(model.View())
+	if !strings.Contains(view, "Spawned Bernoulli [explorer] (gpt-5.4 high)") {
+		t.Fatalf("expected spawned artifact, got %q", view)
+	}
+	if !strings.Contains(view, "Waiting for 2 agents") {
+		t.Fatalf("expected waiting artifact, got %q", view)
+	}
+	if !strings.Contains(view, "Finished waiting") {
+		t.Fatalf("expected finished-waiting artifact, got %q", view)
+	}
+	if !strings.Contains(view, "Read smolbot.yaml") {
+		t.Fatalf("expected normal tool block to coexist, got %q", view)
+	}
+}
+
+func TestMessagesModelPreservesArtifactAppendOrderWithLaterAssistantReply(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+
+	model := NewMessages()
+	model.SetSize(80, 20)
+	model.AppendUser("delegate work")
+	model.AppendSpawnedAgent(AgentArtifactAgent{
+		Name:        "Bernoulli",
+		AgentType:   "explorer",
+		Description: "Spec review Gate 6.",
+	})
+	model.AppendFinishedWaiting([]AgentArtifactAgent{
+		{Name: "Bernoulli", AgentType: "explorer", Status: "completed", Summary: "✅ Spec compliant"},
+	})
+	model.AppendAssistant("Final answer after waiting.")
+
+	view := stripANSI(model.View())
+	spawned := strings.Index(view, "Spawned Bernoulli [explorer]")
+	finished := strings.Index(view, "Finished waiting")
+	final := strings.Index(view, "Final answer after waiting.")
+	if spawned == -1 || finished == -1 || final == -1 {
+		t.Fatalf("expected spawned, finished, and final reply in view, got %q", view)
+	}
+	if !(spawned < finished && finished < final) {
+		t.Fatalf("expected artifact timeline order to be preserved, got %q", view)
+	}
+}
+
 func TestMarkdownStyleConfigUsesSemanticThemeTokens(t *testing.T) {
 	useSemanticMarkdownTheme(t)
 
