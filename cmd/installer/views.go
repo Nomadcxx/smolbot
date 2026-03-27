@@ -65,6 +65,8 @@ func (m model) View() string {
 		mainContent = m.renderChannels()
 	case stepTelegramSetup:
 		mainContent = m.renderTelegramSetup()
+	case stepDiscordSetup:
+		mainContent = m.renderDiscordSetup()
 	case stepWhatsAppSetup:
 		mainContent = m.renderWhatsAppSetup()
 	case stepService:
@@ -369,6 +371,22 @@ func (m model) renderChannels() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Uses a bot token file"))
 	b.WriteString("\n\n")
 
+	// Discord
+	discordStyle := lipgloss.NewStyle()
+	discordMarker := "○"
+	if m.channelIndex == 3 {
+		discordMarker = "●"
+		discordStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	}
+	discordStatus := "[ ] Disabled"
+	if m.discordEnabled {
+		discordStatus = "[✓] Enabled"
+	}
+	b.WriteString(discordStyle.Render(fmt.Sprintf("  %s Discord Integration   %s", discordMarker, discordStatus)))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Uses a bot token file"))
+	b.WriteString("\n\n")
+
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Note: Can be configured later"))
 
 	return b.String()
@@ -387,6 +405,22 @@ func (m model) renderTelegramSetup() string {
 		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  ✗ %s\n\n", m.telegramTokenInput.Err)))
 	}
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Leave it empty to skip Telegram."))
+	return b.String()
+}
+
+func (m model) renderDiscordSetup() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render("Discord Setup"))
+	b.WriteString("\n\n")
+	b.WriteString("  Discord reads its bot token from a file.\n")
+	b.WriteString("  Enter the token file path below.\n\n")
+	b.WriteString("  " + m.discordTokenInput.View())
+	b.WriteString("\n\n")
+	if m.discordTokenInput.Err != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  ✗ %s\n\n", m.discordTokenInput.Err)))
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Leave it empty to skip Discord."))
 	return b.String()
 }
 

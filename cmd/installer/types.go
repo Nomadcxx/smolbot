@@ -22,6 +22,7 @@ const (
 	stepConfiguration
 	stepChannels
 	stepTelegramSetup
+	stepDiscordSetup
 	stepWhatsAppSetup
 	stepService
 	stepInstalling
@@ -61,6 +62,7 @@ const (
 type taskCompleteMsg struct {
 	index   int
 	success bool
+	skipped bool
 	err     error
 }
 
@@ -149,10 +151,13 @@ type model struct {
 	signalEnabled      bool
 	whatsappEnabled    bool
 	telegramEnabled    bool
+	discordEnabled     bool
 	signalCLIPath      string
 	whatsappDBPath     string
 	telegramTokenFile  string
 	telegramTokenInput textinput.Model
+	discordTokenFile   string
+	discordTokenInput  textinput.Model
 
 	// WhatsApp setup state
 	whatsappQRCode string
