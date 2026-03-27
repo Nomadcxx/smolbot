@@ -25,15 +25,30 @@ func TestMessagesModelRendersToolLifecycle(t *testing.T) {
 	model := NewMessages()
 	model.SetSize(80, 20)
 	model.AppendUser("hello")
-	model.StartTool("tc1", "read_file", "")
+	model.StartTool("tc1", "read_file", `{"path": "/etc/smolbot.yaml", "offset": 0, "limit": 20}`)
+
+	runningView := model.View()
+	if !strings.Contains(runningView, "Read smolbot.yaml") {
+		t.Fatalf("expected dispatch title in running view, got %q", runningView)
+	}
+	if !strings.Contains(runningView, "running") {
+		t.Fatalf("expected running state in running view, got %q", runningView)
+	}
+	if !strings.Contains(runningView, "/etc/smolbot.yaml") {
+		t.Fatalf("expected tool input to be preserved while running, got %q", runningView)
+	}
+
 	model.FinishTool("tc1", "read_file", "done", "loaded config")
 
 	view := model.View()
-	if !strings.Contains(view, "read_file") {
-		t.Fatalf("expected tool name in view, got %q", view)
+	if !strings.Contains(view, "Read smolbot.yaml") {
+		t.Fatalf("expected dispatch title in view, got %q", view)
 	}
 	if !strings.Contains(view, "loaded config") {
 		t.Fatalf("expected tool output in view, got %q", view)
+	}
+	if !strings.Contains(view, "/etc/smolbot.yaml") {
+		t.Fatalf("expected tool input to persist after done, got %q", view)
 	}
 }
 
@@ -166,8 +181,8 @@ func TestToolBlocksUseSemanticChromeByStatus(t *testing.T) {
 	done := renderToolCall(ToolCall{Name: "search", Status: "done"}, 80, false)
 	failed := renderToolCall(ToolCall{Name: "search", Status: "error"}, 80, false)
 
-	if !strings.Contains(running, "●") {
-		t.Fatalf("expected running icon, got %q", running)
+	if !strings.Contains(running, "◐") {
+		t.Fatalf("expected running spinner, got %q", running)
 	}
 	if !strings.Contains(done, "✓") {
 		t.Fatalf("expected done icon, got %q", done)
@@ -269,7 +284,7 @@ func TestToolInputIsDisplayedInToolBlock(t *testing.T) {
 	model.StartTool("tc2", "read_file", `{"path": "/etc/smolbot.yaml"}`)
 	model.FinishTool("tc2", "read_file", "done", "config loaded")
 	view := model.View()
-	if !strings.Contains(view, `"path"`) {
+	if !strings.Contains(view, "PATH: /etc/smolbot.yaml") {
 		t.Fatalf("expected tool input to appear in view, got %q", view)
 	}
 }

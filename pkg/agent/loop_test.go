@@ -367,12 +367,15 @@ func TestAgentLoopPassesRoutingDepsAndUsesToolOutput(t *testing.T) {
 	loop, store, _ := newTestAgentLoop(t, fakeProvider, captureTool)
 	defer store.Close()
 
+	var events []Event
 	_, err := loop.ProcessDirect(context.Background(), Request{
 		Content:    "run tool",
 		SessionKey: "s1",
 		Channel:    "gateway",
 		ChatID:     "chat-1",
-	}, nil)
+	}, func(ev Event) {
+		events = append(events, ev)
+	})
 	if err != nil {
 		t.Fatalf("ProcessDirect: %v", err)
 	}
@@ -403,6 +406,96 @@ func TestAgentLoopPassesRoutingDepsAndUsesToolOutput(t *testing.T) {
 	if !foundTool {
 		t.Fatal("expected tool message in history")
 	}
+
+	for _, ev := range events {
+		if ev.Type != EventToolDone {
+			continue
+		}
+		if got, _ := ev.Data["output"].(string); got != "tool output" {
+			t.Fatalf("tool.done output = %q, want tool output", got)
+		}
+		if got, _ := ev.Data["error"].(string); got != "" {
+			t.Fatalf("tool.done error = %q, want empty", got)
+		}
+		return
+	}
+	t.Fatal("expected tool.done event")
+}
+
+func TestAgentLoopEmitsToolErrorsToTranscriptAndEvents(t *testing.T) {
+	fakeProvider := &fakeStreamProvider{
+		streams: []fakeStreamScript{
+			{
+				deltas: []*provider.StreamDelta{
+					{
+						ToolCalls: []provider.ToolCall{{
+							ID:    "call1",
+							Index: 0,
+							Function: provider.FunctionCall{
+								Name:      "capture",
+								Arguments: `{}`,
+							},
+						}},
+						FinishReason: stringPtr("tool_calls"),
+					},
+				},
+			},
+			{
+				deltas: []*provider.StreamDelta{
+					{Content: "done"},
+					{FinishReason: stringPtr("stop")},
+				},
+			},
+		},
+	}
+
+	captureTool := &capturingTool{
+		name:   "capture",
+		result: &tool.Result{Error: "permission denied"},
+	}
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, captureTool)
+	defer store.Close()
+
+	var events []Event
+	_, err := loop.ProcessDirect(context.Background(), Request{
+		Content:    "run tool",
+		SessionKey: "s1",
+	}, func(ev Event) {
+		events = append(events, ev)
+	})
+	if err != nil {
+		t.Fatalf("ProcessDirect: %v", err)
+	}
+
+	history, err := store.GetHistory("s1", 100)
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	for _, msg := range history {
+		if msg.Role != "tool" {
+			continue
+		}
+		if !strings.Contains(msg.StringContent(), "permission denied") {
+			t.Fatalf("tool message content = %q, want to contain permission denied", msg.StringContent())
+		}
+		goto foundHistory
+	}
+	t.Fatal("expected tool message in history")
+
+foundHistory:
+	for _, ev := range events {
+		if ev.Type != EventToolDone {
+			continue
+		}
+		if got, _ := ev.Data["error"].(string); !strings.Contains(got, "permission denied") {
+			t.Fatalf("tool.done error = %q, want to contain permission denied", got)
+		}
+		if got, _ := ev.Data["output"].(string); got != "" {
+			t.Fatalf("tool.done output = %q, want empty", got)
+		}
+		return
+	}
+	t.Fatal("expected tool.done event")
 }
 
 func TestAgentLoopEmitsUsageEventsFromStreamDeltas(t *testing.T) {
