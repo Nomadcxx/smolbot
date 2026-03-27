@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -136,6 +137,10 @@ func (s *Store) RecordCompletion(ctx context.Context, record CompletionRecord) e
 	if err := record.validate(); err != nil {
 		return err
 	}
+	recordedAt := record.RecordedAt.UTC()
+	if recordedAt.IsZero() {
+		recordedAt = time.Now().UTC()
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -148,8 +153,8 @@ func (s *Store) RecordCompletion(ctx context.Context, record CompletionRecord) e
 		`INSERT INTO usage_records (
 			session_key, provider_id, model_name, request_type,
 			prompt_tokens, completion_tokens, total_tokens, duration_ms,
-			status, usage_source
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			status, usage_source, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.SessionKey,
 		record.ProviderID,
 		record.ModelName,
@@ -160,8 +165,17 @@ func (s *Store) RecordCompletion(ctx context.Context, record CompletionRecord) e
 		record.DurationMS,
 		record.Status,
 		record.UsageSource,
+		recordedAt,
 	); err != nil {
 		return fmt.Errorf("insert usage record: %w", err)
+	}
+
+	if err := updateDailyRollupTx(ctx, tx, record, recordedAt); err != nil {
+		return err
+	}
+
+	if err := s.processBudgetAlertsTx(ctx, tx, record, recordedAt); err != nil {
+		return err
 	}
 
 	if err := tx.Commit(); err != nil {
