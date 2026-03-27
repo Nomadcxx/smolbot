@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -80,6 +81,7 @@ type runtimeApp struct {
 	config           *config.Config
 	paths            *config.Paths
 	sessions         *session.Store
+	mcpCleanup       func()
 	channels         *channel.Manager
 	tools            *tool.Registry
 	agent            *agent.AgentLoop
@@ -102,8 +104,9 @@ type mcpDiscoveryManager interface {
 	DiscoverAndRegister(ctx context.Context, registry *tool.Registry, servers map[string]config.MCPServerConfig) ([]string, error)
 }
 
-var newMCPMgr = func() mcpDiscoveryManager {
-	return mcp.NewManager(nil)
+var newMCPMgr = func() (mcpDiscoveryManager, func()) {
+	client := mcp.NewStdioDiscoveryClient(slog.Default())
+	return mcp.NewManager(client), client.Close
 }
 
 var launchRuntimeDeps = func() runtimeDeps {
@@ -579,11 +582,24 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	}
 	tools := tool.NewRegistry()
 	registerRuntimeTools(tools, cfg)
+	mcpCleanup := func() {}
 	if len(cfg.Tools.MCPServers) > 0 {
-		mgr := newMCPMgr()
-		if _, err := mgr.DiscoverAndRegister(context.Background(), tools, cfg.Tools.MCPServers); err != nil {
-			_ = sessions.Close()
-			return nil, fmt.Errorf("mcp discovery: %w", err)
+		mgr, cleanup := newMCPMgr()
+		mcpCleanup = cleanup
+		warnings, err := mgr.DiscoverAndRegister(context.Background(), tools, cfg.Tools.MCPServers)
+		if err != nil {
+			slog.Warn("mcp discovery failed; continuing without discovered tools", "error", err)
+		} else {
+			for _, warning := range warnings {
+				slog.Warn("mcp discovery warning", "msg", warning)
+			}
+			registered := make([]string, 0)
+			for _, def := range tools.Definitions() {
+				if strings.HasPrefix(def.Name, "mcp_") {
+					registered = append(registered, def.Name)
+				}
+			}
+			slog.Info("mcp discovery completed", "servers", len(cfg.Tools.MCPServers), "count", len(registered), "tools", registered)
 		}
 	}
 	spawner := &runtimeSpawner{}
@@ -626,19 +642,20 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	})
 
 	app := &runtimeApp{
-		config:    cfg,
-		paths:     paths,
-		sessions:  sessions,
-		channels:  channels,
-		tools:     tools,
-		agent:     loop,
-		cron:      cronService,
-		heartbeat: heartbeatService,
-		runCron:   cronService.RunDue,
-		runBeat:   heartbeatService.RunOnce,
-		cronEvery: time.Second,
-		beatEvery: time.Duration(cfg.Gateway.Heartbeat.Interval) * time.Minute,
-		beatOn:    cfg.Gateway.Heartbeat.Enabled,
+		config:     cfg,
+		paths:      paths,
+		sessions:   sessions,
+		mcpCleanup: mcpCleanup,
+		channels:   channels,
+		tools:      tools,
+		agent:      loop,
+		cron:       cronService,
+		heartbeat:  heartbeatService,
+		runCron:    cronService.RunDue,
+		runBeat:    heartbeatService.RunOnce,
+		cronEvery:  time.Second,
+		beatEvery:  time.Duration(cfg.Gateway.Heartbeat.Interval) * time.Minute,
+		beatOn:     cfg.Gateway.Heartbeat.Enabled,
 		gateway: gateway.NewServer(gateway.ServerDeps{
 			Agent:     loop,
 			Sessions:  sessions,
@@ -981,6 +998,10 @@ func registerRuntimeTools(registry *tool.Registry, cfg *config.Config) {
 func (a *runtimeApp) Close() error {
 	if a == nil {
 		return nil
+	}
+	if a.mcpCleanup != nil {
+		a.mcpCleanup()
+		a.mcpCleanup = nil
 	}
 	if a.sessions != nil {
 		return a.sessions.Close()
