@@ -42,6 +42,11 @@ func TestConfigRoundTrip(t *testing.T) {
 				"enabled": true,
 				"tokenFile": "/tmp/nanobot-telegram.token",
 				"allowedChatIDs": ["123456789"]
+			},
+			"discord": {
+				"enabled": true,
+				"tokenFile": "/tmp/nanobot-discord.token",
+				"allowedChannelIDs": ["987654321"]
 			}
 		},
 		"gateway": {
@@ -93,6 +98,12 @@ func TestConfigRoundTrip(t *testing.T) {
 	if got := cfg.Channels.Telegram.AllowedChatIDs; len(got) != 1 || got[0] != "123456789" {
 		t.Errorf("telegram allowedChatIDs = %#v", got)
 	}
+	if !cfg.Channels.Discord.Enabled || cfg.Channels.Discord.TokenFile != "/tmp/nanobot-discord.token" {
+		t.Errorf("discord config = %+v", cfg.Channels.Discord)
+	}
+	if got := cfg.Channels.Discord.AllowedChannelIDs; len(got) != 1 || got[0] != "987654321" {
+		t.Errorf("discord allowedChannelIDs = %#v", got)
+	}
 	if !cfg.Tools.RestrictToWorkspace {
 		t.Error("restrictToWorkspace should be true")
 	}
@@ -131,6 +142,15 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.Channels.Telegram.TokenFile != "" {
 		t.Fatalf("telegram defaults = %+v, want empty token file", cfg.Channels.Telegram)
 	}
+	if cfg.Channels.Discord.Enabled {
+		t.Fatalf("discord defaults = %+v, want disabled", cfg.Channels.Discord)
+	}
+	if cfg.Channels.Discord.TokenFile != "" || cfg.Channels.Discord.BotToken != "" {
+		t.Fatalf("discord defaults = %+v, want empty token settings", cfg.Channels.Discord)
+	}
+	if len(cfg.Channels.Discord.AllowedChannelIDs) != 0 {
+		t.Fatalf("discord defaults = %+v, want no allowlist", cfg.Channels.Discord)
+	}
 }
 
 func TestLoadTelegramConfig(t *testing.T) {
@@ -163,6 +183,39 @@ func TestLoadTelegramConfig(t *testing.T) {
 	}
 	if got := cfg.Channels.Telegram.AllowedChatIDs; len(got) != 1 || got[0] != "42" {
 		t.Fatalf("telegram allowedChatIDs = %#v", got)
+	}
+}
+
+func TestLoadDiscordConfig(t *testing.T) {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	input := `{
+		"channels": {
+			"discord": {
+				"enabled": true,
+				"botToken": "bot-token",
+				"allowedChannelIDs": ["42", "  43 "]
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Channels.Discord.Enabled {
+		t.Fatal("discord should be enabled after loading config")
+	}
+	if cfg.Channels.Discord.BotToken != "bot-token" {
+		t.Fatalf("discord botToken = %q, want %q", cfg.Channels.Discord.BotToken, "bot-token")
+	}
+	if got := cfg.Channels.Discord.AllowedChannelIDs; len(got) != 2 || got[0] != "42" || got[1] != "  43 " {
+		t.Fatalf("discord allowedChannelIDs = %#v", got)
 	}
 }
 

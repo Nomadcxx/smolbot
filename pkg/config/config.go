@@ -51,6 +51,7 @@ type ChannelsConfig struct {
 	Signal        SignalChannelConfig   `json:"signal"`
 	WhatsApp      WhatsAppChannelConfig `json:"whatsapp"`
 	Telegram      TelegramChannelConfig `json:"telegram"`
+	Discord       DiscordChannelConfig  `json:"discord"`
 }
 
 type SignalChannelConfig struct {
@@ -72,6 +73,13 @@ type TelegramChannelConfig struct {
 	BotToken       string   `json:"botToken,omitempty"`
 	TokenFile      string   `json:"tokenFile,omitempty"`
 	AllowedChatIDs []string `json:"allowedChatIDs,omitempty"`
+}
+
+type DiscordChannelConfig struct {
+	Enabled           bool     `json:"enabled"`
+	BotToken          string   `json:"botToken,omitempty"`
+	TokenFile         string   `json:"tokenFile,omitempty"`
+	AllowedChannelIDs []string `json:"allowedChannelIDs,omitempty"`
 }
 
 type GatewayConfig struct {
@@ -148,6 +156,7 @@ func DefaultConfig() Config {
 				StorePath:  filepath.Join(home, ".smolbot", "whatsapp.db"),
 			},
 			Telegram: TelegramChannelConfig{},
+			Discord:  DiscordChannelConfig{},
 		},
 		Gateway: GatewayConfig{
 			Host: "127.0.0.1",
