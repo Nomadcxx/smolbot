@@ -23,8 +23,8 @@ func TestBuildRuntimeMCPToolsRegistered(t *testing.T) {
 			{Name: "memory_get", Description: "Get memory", InputSchema: map[string]any{"type": "object"}},
 		},
 	}
-	newMCPMgr = func() mcpDiscoveryManager {
-		return &fakeMCPDisonveryClientManager{client: fakeClient}
+	newMCPMgr = func() (mcpDiscoveryManager, func()) {
+		return &fakeMCPDisonveryClientManager{client: fakeClient}, func() {}
 	}
 
 	port := freePort(t)
@@ -35,8 +35,8 @@ func TestBuildRuntimeMCPToolsRegistered(t *testing.T) {
 	cfg.Gateway.Port = port
 	cfg.Tools.MCPServers = map[string]config.MCPServerConfig{
 		"hybrid-memory": {
-			URL:         "https://example.com/mcp",
-			ToolTimeout: 30,
+			URL:          "https://example.com/mcp",
+			ToolTimeout:  30,
 			EnabledTools: []string{"*"},
 		},
 	}
@@ -77,8 +77,8 @@ func TestBuildRuntimeMCPCoexistsWithBuiltinAndCronTools(t *testing.T) {
 			{Name: "remote_tool", Description: "Remote", InputSchema: map[string]any{"type": "object"}},
 		},
 	}
-	newMCPMgr = func() mcpDiscoveryManager {
-		return &fakeMCPDisonveryClientManager{client: fakeClient}
+	newMCPMgr = func() (mcpDiscoveryManager, func()) {
+		return &fakeMCPDisonveryClientManager{client: fakeClient}, func() {}
 	}
 
 	port := freePort(t)
@@ -89,8 +89,8 @@ func TestBuildRuntimeMCPCoexistsWithBuiltinAndCronTools(t *testing.T) {
 	cfg.Gateway.Port = port
 	cfg.Tools.MCPServers = map[string]config.MCPServerConfig{
 		"remote-server": {
-			URL:         "https://example.com/mcp",
-			ToolTimeout: 30,
+			URL:          "https://example.com/mcp",
+			ToolTimeout:  30,
 			EnabledTools: []string{"*"},
 		},
 	}
@@ -145,10 +145,10 @@ func TestBuildRuntimeMCPEnabledToolsWarning(t *testing.T) {
 		},
 	}
 	var capturedWarnings []string
-	newMCPMgr = func() mcpDiscoveryManager {
+	newMCPMgr = func() (mcpDiscoveryManager, func()) {
 		return &fakeMCPDisonveryClientManager{client: fakeClient, onDiscover: func(warnings []string) {
 			capturedWarnings = warnings
-		}}
+		}}, func() {}
 	}
 
 	port := freePort(t)
@@ -159,8 +159,8 @@ func TestBuildRuntimeMCPEnabledToolsWarning(t *testing.T) {
 	cfg.Gateway.Port = port
 	cfg.Tools.MCPServers = map[string]config.MCPServerConfig{
 		"test-server": {
-			URL:         "https://example.com/mcp",
-			ToolTimeout: 30,
+			URL:          "https://example.com/mcp",
+			ToolTimeout:  30,
 			EnabledTools: []string{"actual_tool", "nonexistent_tool"},
 		},
 	}
@@ -203,8 +203,8 @@ func TestMCPToolExecution(t *testing.T) {
 			{Name: "echo", Description: "Echo args", InputSchema: map[string]any{"type": "object"}},
 		},
 	}
-	newMCPMgr = func() mcpDiscoveryManager {
-		return &fakeMCPDisonveryClientManager{client: fakeClient}
+	newMCPMgr = func() (mcpDiscoveryManager, func()) {
+		return &fakeMCPDisonveryClientManager{client: fakeClient}, func() {}
 	}
 
 	port := freePort(t)
@@ -215,8 +215,8 @@ func TestMCPToolExecution(t *testing.T) {
 	cfg.Gateway.Port = port
 	cfg.Tools.MCPServers = map[string]config.MCPServerConfig{
 		"echo-server": {
-			URL:         "https://example.com/mcp",
-			ToolTimeout: 30,
+			URL:          "https://example.com/mcp",
+			ToolTimeout:  30,
 			EnabledTools: []string{"*"},
 		},
 	}
@@ -247,6 +247,54 @@ func TestMCPToolExecution(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeCallsMCPCleanupOnClose(t *testing.T) {
+	origNewMCPMgr := newMCPMgr
+	t.Cleanup(func() { newMCPMgr = origNewMCPMgr })
+
+	cleanupCalled := 0
+	newMCPMgr = func() (mcpDiscoveryManager, func()) {
+		return &fakeMCPDisonveryClientManager{client: &fakeMCPDisonveryClient{}}, func() {
+			cleanupCalled++
+		}
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Tools.MCPServers = map[string]config.MCPServerConfig{
+		"cleanup-server": {
+			Command:     "echo",
+			ToolTimeout: 30,
+		},
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	if cleanupCalled != 0 {
+		t.Fatalf("expected cleanup to defer until runtime close, got %d", cleanupCalled)
+	}
+
+	if err := app.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if cleanupCalled != 1 {
+		t.Fatalf("expected cleanup once on runtime close, got %d", cleanupCalled)
+	}
+}
+
 type fakeMCPDisonveryClient struct {
 	tools           []mcp.RemoteTool
 	lastInvokedTool string
@@ -262,8 +310,8 @@ func (f *fakeMCPDisonveryClient) Invoke(_ context.Context, _ mcp.ConnectionSpec,
 }
 
 type fakeMCPDisonveryClientManager struct {
-	client      *fakeMCPDisonveryClient
-	onDiscover  func([]string)
+	client     *fakeMCPDisonveryClient
+	onDiscover func([]string)
 }
 
 func (m *fakeMCPDisonveryClientManager) DiscoverAndRegister(ctx context.Context, registry *tool.Registry, servers map[string]config.MCPServerConfig) ([]string, error) {

@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"testing"
 
 	"github.com/Nomadcxx/smolbot/pkg/config"
@@ -97,6 +99,55 @@ func TestEnabledToolsWildcard(t *testing.T) {
 	}
 	if len(registry.Definitions()) != 2 {
 		t.Fatalf("expected all tools registered, got %#v", registry.Definitions())
+	}
+}
+
+func TestDiscoverAndRegisterNilClientLogsWarning(t *testing.T) {
+	orig := slog.Default()
+	t.Cleanup(func() {
+		slog.SetDefault(orig)
+	})
+
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+	manager := NewManager(nil)
+	registry := tool.NewRegistry()
+	warnings, err := manager.DiscoverAndRegister(context.Background(), registry, map[string]config.MCPServerConfig{
+		"test": {Command: "echo"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warnings != nil {
+		t.Fatalf("expected nil warnings, got %v", warnings)
+	}
+	if len(registry.Definitions()) != 0 {
+		t.Fatalf("expected no tools registered")
+	}
+	if got := buf.String(); got == "" || !bytes.Contains(buf.Bytes(), []byte("mcp manager has no discovery client")) {
+		t.Fatal("expected nil-client warning to be logged")
+	}
+}
+
+func TestDiscoverAndRegisterSkipsUnsupportedTransport(t *testing.T) {
+	client := NewStdioDiscoveryClient(nil)
+	manager := NewManager(client)
+	registry := tool.NewRegistry()
+
+	warnings, err := manager.DiscoverAndRegister(context.Background(), registry, map[string]config.MCPServerConfig{
+		"remote": {
+			URL: "https://example.com/mcp",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(registry.Definitions()) != 0 {
+		t.Fatalf("expected no tools registered, got %#v", registry.Definitions())
+	}
+	if len(warnings) != 1 || !bytes.Contains([]byte(warnings[0]), []byte("unsupported transport")) {
+		t.Fatalf("expected unsupported transport warning, got %#v", warnings)
 	}
 }
 
