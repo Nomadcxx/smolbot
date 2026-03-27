@@ -5,12 +5,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	viewport "charm.land/bubbles/v2/viewport"
 	glamour "charm.land/glamour/v2"
 	"charm.land/glamour/v2/ansi"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/Nomadcxx/smolbot/internal/theme"
+	uv "github.com/charmbracelet/ultraviolet"
+	xansi "github.com/charmbracelet/x/ansi"
 )
 
 type ChatMessage struct {
@@ -45,6 +48,20 @@ type MessagesModel struct {
 	expandedTools map[string]bool
 	cache         []messageCache
 	messageBody   string
+	plainLines    []string
+	plainOffsets  []int
+	selection     selectionRange
+}
+
+type selectionPoint struct {
+	line int
+	col  int
+}
+
+type selectionRange struct {
+	active bool
+	anchor selectionPoint
+	focus  selectionPoint
 }
 
 func NewMessages() MessagesModel {
@@ -161,6 +178,7 @@ func (m *MessagesModel) ReplaceHistory(history []ChatMessage) {
 	m.thinking = ""
 	m.cache = nil
 	m.messageBody = ""
+	m.clearSelection()
 	m.sync(true)
 }
 
@@ -198,6 +216,129 @@ func (m *MessagesModel) ToggleToolExpand(index int) {
 
 func (m *MessagesModel) ScrollToBottom() {
 	m.sync(true)
+}
+
+func (m *MessagesModel) Height() int {
+	return m.height
+}
+
+func (m *MessagesModel) HandleMouseDown(x, y int) bool {
+	point, ok := m.selectionPointAt(x, y)
+	if !ok {
+		return false
+	}
+	m.selection = selectionRange{
+		active: true,
+		anchor: point,
+		focus:  point,
+	}
+	m.dirty = true
+	return true
+}
+
+func (m *MessagesModel) HandleMouseDrag(x, y int) bool {
+	if !m.selection.active {
+		return false
+	}
+	point, ok := m.selectionPointAt(x, y)
+	if !ok {
+		return false
+	}
+	m.selection.focus = point
+	m.dirty = true
+	return true
+}
+
+func (m *MessagesModel) HandleMouseUp(x, y int) bool {
+	if !m.selection.active {
+		return false
+	}
+	point, ok := m.selectionPointAt(x, y)
+	if ok {
+		m.selection.focus = point
+	}
+	m.dirty = true
+	return m.HasSelection()
+}
+
+func (m *MessagesModel) HasSelection() bool {
+	if !m.selection.active || len(m.plainLines) == 0 {
+		return false
+	}
+	start, end := m.normalizedSelection()
+	return start.line != end.line || start.col != end.col
+}
+
+func (m *MessagesModel) SelectedText() string {
+	if !m.HasSelection() {
+		return ""
+	}
+	start, end := m.normalizedSelection()
+	if start.line < 0 || end.line < 0 || start.line >= len(m.plainLines) || end.line >= len(m.plainLines) {
+		return ""
+	}
+
+	var out strings.Builder
+	for line := start.line; line <= end.line; line++ {
+		if line > start.line {
+			out.WriteByte('\n')
+		}
+		text := m.plainLines[line]
+		from := 0
+		to := runeCount(text)
+		if line == start.line {
+			from = clampInt(start.col, 0, to)
+		}
+		if line == end.line {
+			to = clampInt(end.col, 0, to)
+		}
+		if from < to {
+			out.WriteString(sliceRunes(text, from, to))
+		}
+	}
+	return out.String()
+}
+
+func (m *MessagesModel) ClearSelection() {
+	m.clearSelection()
+	m.dirty = true
+}
+
+func (m *MessagesModel) clearSelection() {
+	m.selection = selectionRange{}
+}
+
+func (m *MessagesModel) thinkingDuration() time.Duration {
+	if m.thinkingStart.IsZero() {
+		return 0
+	}
+	return time.Since(m.thinkingStart)
+}
+
+func (m *MessagesModel) selectionPointAt(x, y int) (selectionPoint, bool) {
+	if len(m.plainLines) == 0 {
+		return selectionPoint{}, false
+	}
+	line := m.viewport.YOffset() + max(0, y)
+	if line < 0 || line >= len(m.plainLines) {
+		return selectionPoint{}, false
+	}
+	text := m.plainLines[line]
+	offset := 0
+	if line < len(m.plainOffsets) {
+		offset = m.plainOffsets[line]
+	}
+	col := clampInt(max(0, x-offset), 0, runeCount(text))
+	return selectionPoint{line: line, col: col}, true
+}
+
+func (m *MessagesModel) normalizedSelection() (selectionPoint, selectionPoint) {
+	start := m.selection.anchor
+	end := m.selection.focus
+	if end.line < start.line || (end.line == start.line && end.col < start.col) {
+		start, end = end, start
+	}
+	return start, end
 }
 
 func (m *MessagesModel) ViewportOffset() int {
@@ -243,7 +384,7 @@ func (m *MessagesModel) HandleKey(key string) {
 
 func (m *MessagesModel) sync(follow bool) {
 	offset := m.viewport.YOffset()
-	m.rendered = m.renderContent()
+	m.rendered, m.plainLines, m.plainOffsets = m.renderTranscript()
 	m.viewport.SetContent(m.rendered)
 	if follow {
 		m.viewport.GotoBottom()
@@ -251,6 +392,448 @@ func (m *MessagesModel) sync(follow bool) {
 		m.viewport.SetYOffset(offset)
 	}
 	m.dirty = false
+}
+
+func (m *MessagesModel) renderTranscript() (string, []string, []int) {
+	t := theme.Current()
+	if t == nil {
+		return "", nil, nil
+	}
+
+	blocks := make([]string, 0, len(m.messages)+len(m.tools)+2)
+	signature := transcriptRenderSignature()
+	for i, msg := range m.messages {
+		blocks = append(blocks, m.renderCachedMessage(i, msg, t, signature))
+	}
+	if m.progress != "" {
+		blocks = append(blocks, renderRoleBlock("ASSISTANT", m.renderAssistant(m.progress), t.TranscriptStreaming, m.width))
+	}
+	if m.thinking != "" {
+		duration := m.thinkingDuration()
+		blocks = append(blocks, renderThinkingBlock(m.thinking, duration, t.TranscriptThinking, m.width))
+	}
+	for i, tool := range m.tools {
+		expanded := m.expandedTools[strconv.Itoa(i)]
+		blocks = append(blocks, renderToolCall(tool, m.width, expanded))
+	}
+
+	rendered := strings.Join(blocks, "\n\n")
+	lines, offsets := visibleTranscriptLines(rendered)
+	if m.selection.active && len(lines) > 0 {
+		start, end := m.normalizedSelection()
+		rendered = highlightRenderedTranscript(rendered, offsets, start, end)
+		lines, offsets = visibleTranscriptLines(rendered)
+	}
+	return rendered, lines, offsets
+}
+
+func visibleTranscriptLines(rendered string) ([]string, []int) {
+	if rendered == "" {
+		return nil, nil
+	}
+	rawLines := strings.Split(strings.ReplaceAll(rendered, "\r\n", "\n"), "\n")
+	lines := make([]string, len(rawLines))
+	offsets := make([]int, len(rawLines))
+	for i, line := range rawLines {
+		stripped := strings.TrimRight(xansi.Strip(line), " ")
+		offset := transcriptLineOffset(stripped)
+		offsets[i] = offset
+		lines[i] = strings.TrimRight(sliceRunes(stripped, offset, runeCount(stripped)), " ")
+	}
+	return lines, offsets
+}
+
+func highlightRenderedTranscript(rendered string, offsets []int, start, end selectionPoint) string {
+	lines, computedOffsets := visibleTranscriptLines(rendered)
+	if len(lines) == 0 {
+		return rendered
+	}
+	if len(offsets) != len(lines) {
+		offsets = computedOffsets
+	}
+
+	width := 0
+	for _, line := range lines {
+		width = max(width, lipgloss.Width(line))
+	}
+	if width == 0 {
+		return rendered
+	}
+
+	buf := uv.NewScreenBuffer(width, len(lines))
+	uv.NewStyledString(rendered).Draw(&buf, uv.Rect(0, 0, width, len(lines)))
+
+	for y := start.line; y <= end.line && y < len(lines); y++ {
+		if y < 0 {
+			continue
+		}
+		lineWidth := lipgloss.Width(lines[y])
+		colStart := 0
+		if y == start.line {
+			colStart = clampInt(start.col, 0, lineWidth)
+		}
+		colEnd := lineWidth
+		if y == end.line {
+			colEnd = clampInt(end.col, 0, lineWidth)
+		}
+		if colStart >= colEnd {
+			continue
+		}
+		lineOffset := 0
+		if y < len(offsets) {
+			lineOffset = offsets[y]
+		}
+		for x := colStart; x < colEnd; x++ {
+			cell := buf.Line(y).At(x + lineOffset)
+			if cell == nil || cell.Content == "" || cell.Content == " " {
+				continue
+			}
+			applySelectionHighlight(cell)
+		}
+	}
+	return buf.Render()
+}
+
+func transcriptLineOffset(line string) int {
+	switch {
+	case strings.HasPrefix(line, "┃  "), strings.HasPrefix(line, "│  "):
+		return 3
+	case strings.HasPrefix(line, "┃ "), strings.HasPrefix(line, "│ "), strings.HasPrefix(line, "▌ "):
+		return 2
+	default:
+		return 0
+	}
+}
+
+func applySelectionHighlight(cell *uv.Cell) {
+	t := theme.Current()
+	if t == nil || cell == nil {
+		return
+	}
+	cell.Style.Fg = t.Background
+	cell.Style.Bg = t.Accent
+	cell.Style.Attrs |= uv.AttrBold
+}
+
+func plainMessageBlock(msg ChatMessage, width int) []string {
+	switch msg.Role {
+	case "user":
+		return plainRoleBlock("USER", msg.Content, width)
+	case "assistant":
+		return plainRoleBlock("ASSISTANT", msg.Content, width)
+	case "system":
+		return plainSystemBlock(msg.Content, width)
+	case "error":
+		return plainErrorBlock(msg.Content, width)
+	case "thinking":
+		return plainThinkingBlock(msg.Content, msg.Duration, width)
+	default:
+		return wrapPlainText(msg.Content, max(20, width-2))
+	}
+}
+
+func plainRoleBlock(label, body string, width int) []string {
+	lines := []string{label}
+	lines = append(lines, wrapPlainText(body, max(20, width-2))...)
+	return trimTrailingEmpty(lines)
+}
+
+func plainSystemBlock(body string, width int) []string {
+	lines := []string{"SYSTEM"}
+	lines = append(lines, wrapPlainText(body, max(20, width-2))...)
+	return trimTrailingEmpty(lines)
+}
+
+func plainErrorBlock(body string, width int) []string {
+	lines := []string{"ERROR"}
+	lines = append(lines, wrapPlainText(body, max(20, width-2))...)
+	return trimTrailingEmpty(lines)
+}
+
+func plainThinkingBlock(body string, dur time.Duration, width int) []string {
+	lines := []string{"THINKING"}
+	lines = append(lines, wrapPlainText(body, max(20, width-2))...)
+	if dur > 0 {
+		lines = append(lines, "Thought for "+formatDuration(dur))
+	}
+	return trimTrailingEmpty(lines)
+}
+
+func plainToolBlock(tc ToolCall, expanded bool, width int) []string {
+	lines := []string{toolDisplayTitle(tc)}
+	input := toolInputSummary(tc.Name, tc.Input)
+	if strings.TrimSpace(input) != "" {
+		lines = append(lines, "INPUT")
+		lines = append(lines, wrapPlainText(input, max(20, width-2))...)
+	}
+	output := toolOutputSummary(tc.Status, tc.Output, expanded)
+	if strings.TrimSpace(output) != "" {
+		lines = append(lines, toolOutputLabel(tc.Name, tc.Status))
+		lines = append(lines, wrapPlainText(output, max(20, width-2))...)
+	} else if strings.EqualFold(strings.TrimSpace(tc.Status), "running") {
+		lines = append(lines, "STATUS")
+		lines = append(lines, "running...")
+	}
+	return trimTrailingEmpty(lines)
+}
+
+func wrapPlainText(body string, width int) []string {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	if width <= 0 {
+		return strings.Split(body, "\n")
+	}
+
+	paras := strings.Split(body, "\n")
+	lines := make([]string, 0, len(paras))
+	for _, para := range paras {
+		if para == "" {
+			lines = append(lines, "")
+			continue
+		}
+		lines = append(lines, wrapParagraph(para, width)...)
+	}
+	return trimTrailingEmpty(lines)
+}
+
+func wrapParagraph(text string, width int) []string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+
+	lines := make([]string, 0, len(words))
+	current := words[0]
+	for _, word := range words[1:] {
+		candidate := current + " " + word
+		if displayWidth(candidate) <= width {
+			current = candidate
+			continue
+		}
+		lines = append(lines, current)
+		if displayWidth(word) > width {
+			chunks := hardWrapWord(word, width)
+			if len(chunks) > 0 {
+				current = chunks[len(chunks)-1]
+				if len(chunks) > 1 {
+					lines = append(lines, chunks[:len(chunks)-1]...)
+				}
+				continue
+			}
+		}
+		current = word
+	}
+	lines = append(lines, current)
+	return lines
+}
+
+func hardWrapWord(word string, width int) []string {
+	if width <= 0 {
+		return []string{word}
+	}
+	runes := []rune(word)
+	if len(runes) == 0 {
+		return []string{""}
+	}
+	chunks := make([]string, 0, (len(runes)/width)+1)
+	for len(runes) > 0 {
+		end := minInt(len(runes), width)
+		chunks = append(chunks, string(runes[:end]))
+		runes = runes[end:]
+	}
+	return chunks
+}
+
+func trimTrailingEmpty(lines []string) []string {
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func displayWidth(value string) int {
+	return lipgloss.Width(value)
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func runeCount(value string) int {
+	return utf8.RuneCountInString(value)
+}
+
+func sliceRunes(value string, from, to int) string {
+	if from < 0 {
+		from = 0
+	}
+	runes := []rune(value)
+	if from > len(runes) {
+		from = len(runes)
+	}
+	if to > len(runes) {
+		to = len(runes)
+	}
+	if from >= to {
+		return ""
+	}
+	return string(runes[from:to])
+}
+
+type selectionSpan struct {
+	start int
+	end   int
+}
+
+func selectionSpanForLine(text string, line int, start, end selectionPoint) (selectionSpan, bool) {
+	if line < start.line || line > end.line {
+		return selectionSpan{}, false
+	}
+	from := 0
+	to := runeCount(text)
+	if line == start.line {
+		from = clampInt(start.col, 0, to)
+	}
+	if line == end.line {
+		to = clampInt(end.col, 0, to)
+	}
+	if from == to {
+		return selectionSpan{}, false
+	}
+	return selectionSpan{start: from, end: to}, true
+}
+
+func renderSelectableRoleBlock(label string, bodyLines []string, accent color.Color, width int, selections map[int]selectionSpan) string {
+	t := theme.Current()
+	if t == nil {
+		return label + "\n" + strings.Join(bodyLines, "\n")
+	}
+
+	innerWidth := cappedWidth(width)
+	headerText := renderSelectableText(label, selections[0], t.Background, true)
+	badge := lipgloss.NewStyle().
+		Background(accent).
+		Foreground(t.Background).
+		Bold(true).
+		Padding(0, 1).
+		Render(headerText)
+	header := lipgloss.NewStyle().
+		Background(subtleWash(accent)).
+		Width(innerWidth).
+		Padding(0, 1).
+		Render(badge)
+
+	body := make([]string, 0, len(bodyLines))
+	for i, line := range bodyLines {
+		body = append(body, lipgloss.NewStyle().
+			Width(innerWidth).
+			Padding(0, 1).
+			Render(renderSelectableText(line, selections[i+1], t.Text, false)))
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, append([]string{header}, body...)...)
+	style := lipgloss.NewStyle().
+		Border(lipgloss.ThickBorder(), false, false, false, true).
+		BorderForeground(accent)
+	if width > 4 {
+		style = style.Width(width - 2)
+	}
+	return style.Render(content)
+}
+
+func renderSelectableMessageBlock(label string, bodyLines []string, accent color.Color, width int, boldLabel bool, selections map[int]selectionSpan) string {
+	t := theme.Current()
+	if t == nil {
+		return label + "\n" + strings.Join(bodyLines, "\n")
+	}
+
+	head := lipgloss.NewStyle().
+		Foreground(accent).
+		Bold(boldLabel).
+		Render(renderSelectableText(label, selections[0], accent, false))
+	bodyRows := make([]string, 0, len(bodyLines)+1)
+	bodyRows = append(bodyRows, head)
+	for i, line := range bodyLines {
+		bodyRows = append(bodyRows, renderSelectableText(line, selections[i+1], t.Text, false))
+	}
+
+	style := lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(accent).
+		Padding(0, 1).
+		Width(cappedWidth(width))
+	return style.Render(lipgloss.JoinVertical(lipgloss.Left, bodyRows...))
+}
+
+func renderSelectableSystemBlock(bodyLines []string, width int, selections map[int]selectionSpan) string {
+	t := theme.Current()
+	if t == nil {
+		return strings.Join(bodyLines, "\n")
+	}
+
+	lineWidth := cappedWidth(width)
+	rows := []string{
+		lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Width(lineWidth).
+			Align(lipgloss.Center).
+			Render("─── system ───"),
+	}
+	for i, line := range bodyLines {
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(t.TextMuted).
+			Width(lineWidth).
+			Align(lipgloss.Center).
+			Render(renderSelectableText(line, selections[i+1], t.TextMuted, false)))
+	}
+	if width <= 4 {
+		return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	}
+	return lipgloss.NewStyle().Width(width - 2).Render(lipgloss.JoinVertical(lipgloss.Left, rows...))
+}
+
+func renderSelectableText(text string, span selectionSpan, normal color.Color, preserveBackground bool) string {
+	t := theme.Current()
+	if t == nil {
+		return text
+	}
+
+	if span.end <= span.start {
+		return lipgloss.NewStyle().Foreground(normal).Render(text)
+	}
+
+	total := runeCount(text)
+	start := clampInt(span.start, 0, total)
+	end := clampInt(span.end, 0, total)
+	if start >= end {
+		return lipgloss.NewStyle().Foreground(normal).Render(text)
+	}
+
+	base := lipgloss.NewStyle().Foreground(normal)
+	selected := lipgloss.NewStyle().
+		Foreground(t.Background).
+		Background(t.Accent).
+		Bold(true)
+	if preserveBackground {
+		selected = selected.Background(t.Panel)
+	}
+
+	before := sliceRunes(text, 0, start)
+	middle := sliceRunes(text, start, end)
+	after := sliceRunes(text, end, total)
+	return base.Render(before) + selected.Render(middle) + base.Render(after)
 }
 
 func (m *MessagesModel) renderContent() string {

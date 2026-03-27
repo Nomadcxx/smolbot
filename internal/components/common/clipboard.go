@@ -1,14 +1,17 @@
 package common
 
-import (
-	"encoding/base64"
-	"fmt"
-	"io"
-)
+import "github.com/atotto/clipboard"
 
-// WriteOSC52 writes text to the terminal clipboard using the OSC 52 sequence.
-func WriteOSC52(w io.Writer, text string) error {
-	encoded := base64.StdEncoding.EncodeToString([]byte(text))
-	_, err := fmt.Fprintf(w, "\033]52;c;%s\a", encoded)
-	return err
+// ClipboardWriter writes text to the system clipboard.
+type ClipboardWriter func(string) error
+
+var nativeClipboardWrite = clipboard.WriteAll
+
+// WriteClipboard writes text using the configured native clipboard writer.
+// It is intentionally small so callers can inject a test double.
+func WriteClipboard(text string, writer ClipboardWriter) error {
+	if writer == nil {
+		writer = nativeClipboardWrite
+	}
+	return writer(text)
 }

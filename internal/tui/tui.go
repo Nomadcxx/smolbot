@@ -3,7 +3,6 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -80,7 +79,7 @@ type CompactDoneMsg struct {
 }
 type CompactErrorMsg struct{ Err error }
 type CompactionTickMsg struct{}
-type ClipboardCopiedMsg struct{}
+type ClipboardCopiedMsg struct{ Text string }
 type ClipboardErrorMsg struct{ Err error }
 type flashClearMsg struct{ Seq int }
 type flushProgressMsg struct{ Seq int }
@@ -121,7 +120,6 @@ type Model struct {
 	footer               status.FooterModel
 	dialog               Dialog
 	eventCh              chan tea.Msg
-	clipboardOut         io.Writer
 	connected            bool
 	reconnectWait        time.Duration
 	streaming            bool
@@ -143,6 +141,7 @@ type Model struct {
 	footerWidth          int
 	messagesWidth        int
 	sidebar              sidebarcmp.Model
+	clipboardWrite       func(string) error
 }
 
 func New(cfg app.Config) Model {
@@ -165,7 +164,6 @@ func New(cfg app.Config) Model {
 		status:         status.New(a),
 		footer:         status.NewFooter(a),
 		eventCh:        eventCh,
-		clipboardOut:   os.Stdout,
 		sidebarVisible: a.SidebarVisible,
 		sidebar:        newSidebar(a, cfg.MCPServers),
 	}
@@ -314,16 +312,23 @@ func (m Model) flashClearCmd(seq int) tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return flashClearMsg{Seq: seq} })
 }
 
-func (m Model) copyLastAssistantCmd() tea.Cmd {
-	content := m.messages.LastAssistantContent()
+func (m Model) copyTextCmd(content string) tea.Cmd {
 	if strings.TrimSpace(content) == "" {
 		return nil
 	}
 	return func() tea.Msg {
-		if err := common.WriteOSC52(m.clipboardOut, content); err != nil {
-			return ClipboardErrorMsg{Err: err}
-		}
-		return ClipboardCopiedMsg{}
+		return ClipboardCopiedMsg{Text: content}
+	}
+}
+
+func (m Model) copyLastAssistantCmd() tea.Cmd {
+	return m.copyTextCmd(m.messages.LastAssistantContent())
+}
+
+func (m Model) nativeClipboardCmd(text string) tea.Cmd {
+	return func() tea.Msg {
+		_ = common.WriteClipboard(text, m.clipboardWrite)
+		return nil
 	}
 }
 
@@ -450,9 +455,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.progressBuffer = ""
 		return m, nil
 	case ClipboardCopiedMsg:
+		m.messages.ClearSelection()
 		m.flashSeq++
 		m.status.SetFlash("Copied to clipboard")
-		return m, m.flashClearCmd(m.flashSeq)
+		return m, tea.Sequence(
+			tea.SetClipboard(msg.Text),
+			m.nativeClipboardCmd(msg.Text),
+			m.flashClearCmd(m.flashSeq),
+		)
 	case ClipboardErrorMsg:
 		if msg.Err != nil {
 			m.messages.AppendError("Clipboard copy failed: " + msg.Err.Error())
@@ -717,6 +727,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.MouseWheelDown:
 				m.messages.HandleKey("pgdown")
 			}
+		}
+		return m, nil
+	case tea.MouseClickMsg:
+		if m.dialog != nil {
+			return m, nil
+		}
+		mouse := msg.Mouse()
+		if m.shouldConsumeMouse(mouse) {
+			return m, nil
+		}
+		if x, y, ok := m.transcriptMousePoint(mouse); ok && m.messages.HandleMouseDown(x, y) {
+			return m, nil
+		}
+	case tea.MouseMotionMsg:
+		if m.dialog != nil {
+			return m, nil
+		}
+		mouse := msg.Mouse()
+		if x, y, ok := m.transcriptMousePoint(mouse); ok && m.messages.HandleMouseDrag(x, y) {
+			return m, nil
+		}
+	case tea.MouseReleaseMsg:
+		if m.dialog != nil {
+			return m, nil
+		}
+		mouse := msg.Mouse()
+		x, y, ok := m.transcriptMousePoint(mouse)
+		if !ok {
+			x = mouse.X
+			y = mouse.Y
+		}
+		if m.messages.HandleMouseUp(x, y) {
+			return m, m.copyTextCmd(m.messages.SelectedText())
 		}
 		return m, nil
 	case tea.MouseMsg:
@@ -1249,6 +1292,30 @@ func (m Model) shouldConsumeMouse(mouse tea.Mouse) bool {
 		return false
 	}
 	return mouse.X >= m.mainWidth
+}
+
+func (m Model) transcriptMousePoint(mouse tea.Mouse) (int, int, bool) {
+	if m.width <= 0 || m.height <= 0 {
+		return 0, 0, false
+	}
+	if mouse.X < 0 || mouse.X >= m.mainWidth {
+		return 0, 0, false
+	}
+	headerH := m.header.Height()
+	y := mouse.Y - headerH
+	if y < 0 {
+		return 0, 0, false
+	}
+	if m.messages.HasContentAbove() {
+		if y == 0 {
+			return 0, 0, false
+		}
+		y--
+	}
+	if y < 0 || y >= m.messages.Height() {
+		return 0, 0, false
+	}
+	return mouse.X, y, true
 }
 
 func (m Model) renderSidebarSeparator(height int) string {
