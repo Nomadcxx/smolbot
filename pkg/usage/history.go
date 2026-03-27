@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -82,8 +83,61 @@ func (s *Store) PruneOlderThan(ctx context.Context, cutoff time.Time) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM daily_usage_rollups WHERE date < ?`, cutoff.UTC().Format("2006-01-02")); err != nil {
 		return fmt.Errorf("prune daily rollups: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM budget_alerts WHERE sent_at < ?`, cutoff.UTC()); err != nil {
-		return fmt.Errorf("prune budget alerts: %w", err)
+	if err := s.pruneBudgetAlertsOlderThan(ctx, cutoff.UTC()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) pruneBudgetAlertsOlderThan(ctx context.Context, cutoff time.Time) error {
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT id, budget_id, sent_at
+		FROM budget_alerts
+		WHERE sent_at < ?
+		ORDER BY id ASC`,
+		cutoff,
+	)
+	if err != nil {
+		return fmt.Errorf("query budget alerts for pruning: %w", err)
+	}
+	defer rows.Close()
+
+	type pruneCandidate struct {
+		id       int64
+		budgetID string
+		sentAt   time.Time
+	}
+
+	var candidates []pruneCandidate
+	for rows.Next() {
+		var candidate pruneCandidate
+		if err := rows.Scan(&candidate.id, &candidate.budgetID, &candidate.sentAt); err != nil {
+			return fmt.Errorf("scan budget alert prune candidate: %w", err)
+		}
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate budget alerts for pruning: %w", err)
+	}
+
+	for _, candidate := range candidates {
+		budget, err := s.GetBudget(ctx, candidate.budgetID)
+		switch {
+		case err == nil:
+			_, windowEnd := budgetWindow(budget, candidate.sentAt.UTC())
+			if windowEnd.After(cutoff) {
+				continue
+			}
+		case err == sql.ErrNoRows:
+			// Orphaned alerts are safe to prune.
+		default:
+			return fmt.Errorf("load budget for alert pruning: %w", err)
+		}
+
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM budget_alerts WHERE id = ?`, candidate.id); err != nil {
+			return fmt.Errorf("delete budget alert %d: %w", candidate.id, err)
+		}
 	}
 	return nil
 }

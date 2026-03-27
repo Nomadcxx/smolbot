@@ -183,6 +183,9 @@ func (s *Store) processBudgetAlertsTx(ctx context.Context, tx *sql.Tx, record Co
 		return fmt.Errorf("iterate budgets: %w", err)
 	}
 	for _, budget := range budgets {
+		if !budgetActiveAt(budget, recordedAt.UTC()) {
+			continue
+		}
 		if !budgetMatchesRecord(budget, record) {
 			continue
 		}
