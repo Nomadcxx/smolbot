@@ -220,6 +220,7 @@ func newDiscordGoSeam(cfg config.DiscordChannelConfig) (clientSeam, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create discord session: %w", err)
 	}
+	session.Identify.Intents = discordgo.MakeIntent(session.Identify.Intents | discordgo.IntentMessageContent)
 	return &discordGoSeam{session: session}, nil
 }
 

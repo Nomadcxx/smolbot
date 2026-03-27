@@ -10,6 +10,7 @@ import (
 
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/bwmarrin/discordgo"
 )
 
 func TestDiscordAdapterImplementsChannelStatusAndLogin(t *testing.T) {
@@ -51,6 +52,24 @@ func TestDiscordNewProductionAdapterLoadsTokenFromFile(t *testing.T) {
 	}
 	if gotCfg.BotToken != "discord-token-from-file" {
 		t.Fatalf("bot token passed to seam = %q, want %q", gotCfg.BotToken, "discord-token-from-file")
+	}
+}
+
+func TestDiscordGoSeamEnablesMessageContentIntent(t *testing.T) {
+	seam, err := newDiscordGoSeam(config.DiscordChannelConfig{BotToken: "token"})
+	if err != nil {
+		t.Fatalf("newDiscordGoSeam: %v", err)
+	}
+
+	got, ok := seam.(*discordGoSeam)
+	if !ok {
+		t.Fatalf("unexpected seam type %T", seam)
+	}
+	if got.session == nil {
+		t.Fatal("expected session to be initialized")
+	}
+	if got.session.Identify.Intents&discordgo.IntentMessageContent == 0 {
+		t.Fatalf("message content intent not enabled: %#v", got.session.Identify.Intents)
 	}
 }
 
