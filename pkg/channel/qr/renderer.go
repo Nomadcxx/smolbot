@@ -3,7 +3,6 @@ package qr
 import (
 	"bytes"
 	"image"
-	"image/color"
 	"image/png"
 
 	"github.com/skip2/go-qrcode"
@@ -64,16 +63,9 @@ func (r *Renderer) pixelColor(img image.Image, x, y int) bool {
 	if x >= img.Bounds().Dx() || y >= img.Bounds().Dy() {
 		return false
 	}
-	rgba := img.At(x, y)
-	var monochrome bool
-	switch c := rgba.(type) {
-	case color.Gray:
-		monochrome = c.Y > 128
-	case color.RGBA:
-		monochrome = (uint32(c.R)+uint32(c.G)+uint32(c.B))/3 > 128
-	default:
-		ir, _, _, a := rgba.RGBA()
-		monochrome = ir > 32896 && a > 128
+	ir, ig, ib, a := img.At(x, y).RGBA()
+	if a == 0 {
+		return false
 	}
-	return monochrome
+	return (ir+ig+ib)/3 < 32896
 }

@@ -1,11 +1,13 @@
 package qr
 
 import (
+	"image"
+	"image/color"
 	"strings"
 	"testing"
 )
 
-func TestRendererRenderToASCIIEmptyDataReturnsEmptyString(t *testing.T) {
+func TestQRRendererRenderToASCIIEmptyDataReturnsEmptyString(t *testing.T) {
 	renderer := New(256)
 
 	got, err := renderer.RenderToASCII("")
@@ -17,7 +19,7 @@ func TestRendererRenderToASCIIEmptyDataReturnsEmptyString(t *testing.T) {
 	}
 }
 
-func TestRendererRenderToASCIIReturnsStableNonEmptyOutput(t *testing.T) {
+func TestQRRendererRenderToASCIIReturnsStableNonEmptyOutput(t *testing.T) {
 	renderer := New(256)
 	const data = "signal://provisioning-token"
 
@@ -41,5 +43,23 @@ func TestRendererRenderToASCIIReturnsStableNonEmptyOutput(t *testing.T) {
 	}
 	if !strings.Contains(first, "█") {
 		t.Fatalf("expected block characters in output, got %q", first)
+	}
+}
+
+func TestQRRendererImageToBlocksUsesDarkModules(t *testing.T) {
+	renderer := New(256)
+
+	dark := image.NewRGBA(image.Rect(0, 0, 1, 2))
+	dark.SetRGBA(0, 0, color.RGBA{R: 0, G: 0, B: 0, A: 255})
+	dark.SetRGBA(0, 1, color.RGBA{R: 0, G: 0, B: 0, A: 255})
+	if got := renderer.imageToBlocks(dark); got != "█" {
+		t.Fatalf("expected dark modules to render as filled blocks, got %q", got)
+	}
+
+	light := image.NewRGBA(image.Rect(0, 0, 1, 2))
+	light.SetRGBA(0, 0, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+	light.SetRGBA(0, 1, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+	if got := renderer.imageToBlocks(light); got != " " {
+		t.Fatalf("expected light modules to stay empty, got %q", got)
 	}
 }
