@@ -38,6 +38,17 @@ type Theme struct {
 	SyntaxString  color.Color
 	SyntaxComment color.Color
 
+	// Diff colors
+	DiffAdded            color.Color
+	DiffRemoved          color.Color
+	DiffAddedBg          color.Color
+	DiffRemovedBg        color.Color
+	DiffContext          color.Color
+	DiffContextBg        color.Color
+	DiffHighlightAdded   color.Color
+	DiffHighlightRemoved color.Color
+	DiffLineNumber       color.Color
+
 	// Tool state colors
 	ToolStateRunning color.Color
 	ToolStateDone    color.Color

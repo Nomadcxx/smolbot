@@ -32,6 +32,90 @@ func TestRenderToolCallIncludesStatusAndOutput(t *testing.T) {
 	}
 }
 
+func TestRenderEditToolCallShowsDiff(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+
+	rendered := stripANSI(renderToolCall(ToolCall{
+		Name:   "edit_file",
+		Status: "done",
+		Input:  `{"path":"internal/tui/tui.go","old_string":"old line\n","new_string":"new line\n"}`,
+		Output: "updated internal/tui/tui.go",
+	}, 100, false))
+
+	if !strings.Contains(rendered, "Edit tui.go (edit_file)") {
+		t.Fatalf("expected edit title in render, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "--- a/internal/tui/tui.go") || !strings.Contains(rendered, "+++ b/internal/tui/tui.go") {
+		t.Fatalf("expected diff headers in render, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "old line") || !strings.Contains(rendered, "new line") {
+		t.Fatalf("expected diff body in render, got %q", rendered)
+	}
+}
+
+func TestRenderToolCallDispatchesByToolName(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+
+	cases := []struct {
+		name       string
+		wantTitle  string
+		wantPieces []string
+	}{
+		{
+			name:       "read_file",
+			wantTitle:  "Read smolbot.yaml",
+			wantPieces: []string{"/etc/smolbot.yaml", "OFFSET", "LIMIT"},
+		},
+		{
+			name:       "write_file",
+			wantTitle:  "Write output.txt",
+			wantPieces: []string{"/tmp/output.txt", "CONTENT"},
+		},
+		{
+			name:       "edit_file",
+			wantTitle:  "Edit output.txt",
+			wantPieces: []string{"/tmp/output.txt", "hello", "goodbye"},
+		},
+		{
+			name:       "exec",
+			wantTitle:  "Shell",
+			wantPieces: []string{"go test ./...", "TIMEOUT"},
+		},
+		{
+			name:       "web_search",
+			wantTitle:  "Search smolbot",
+			wantPieces: []string{"smolbot", "MAX RESULTS"},
+		},
+		{
+			name:       "web_fetch",
+			wantTitle:  "Fetch https://example.com",
+			wantPieces: []string{"https://example.com"},
+		},
+	}
+
+	for _, tc := range cases {
+		rendered := renderToolCall(ToolCall{
+			Name:   tc.name,
+			Input:  toolInputForCase(tc.name),
+			Status: "done",
+			Output: "tool output",
+		}, 80, false)
+
+		if !strings.Contains(rendered, tc.wantTitle) {
+			t.Fatalf("expected %s title in render, got %q", tc.wantTitle, rendered)
+		}
+		for _, want := range tc.wantPieces {
+			if !strings.Contains(rendered, want) {
+				t.Fatalf("expected %q in %s render, got %q", want, tc.name, rendered)
+			}
+		}
+	}
+}
+
 func TestToolBlocksUseSemanticStates(t *testing.T) {
 	if !theme.Set("nord") {
 		t.Fatal("expected nord theme to be registered")
@@ -41,8 +125,8 @@ func TestToolBlocksUseSemanticStates(t *testing.T) {
 	done := renderToolCall(ToolCall{Name: "search", Status: "done"}, 80, false)
 	failed := renderToolCall(ToolCall{Name: "search", Status: "error"}, 80, false)
 
-	if !strings.Contains(running, "●") {
-		t.Fatalf("expected running icon in render, got %q", running)
+	if !strings.Contains(running, "◐") {
+		t.Fatalf("expected running spinner in render, got %q", running)
 	}
 	if !strings.Contains(done, "✓") {
 		t.Fatalf("expected done icon in render, got %q", done)
@@ -52,6 +136,25 @@ func TestToolBlocksUseSemanticStates(t *testing.T) {
 	}
 	if !strings.Contains(running, "search") || !strings.Contains(done, "search") || !strings.Contains(failed, "search") {
 		t.Fatalf("expected tool name in render")
+	}
+}
+
+func toolInputForCase(name string) string {
+	switch name {
+	case "read_file":
+		return `{"path":"/etc/smolbot.yaml","offset":12,"limit":40}`
+	case "write_file":
+		return `{"path":"/tmp/output.txt","content":"hello"}`
+	case "edit_file":
+		return `{"path":"/tmp/output.txt","old_string":"hello","new_string":"goodbye","replace_all":true}`
+	case "exec":
+		return `{"command":"go test ./...","timeout":30}`
+	case "web_search":
+		return `{"query":"smolbot","maxResults":3}`
+	case "web_fetch":
+		return `{"url":"https://example.com"}`
+	default:
+		return `{}`
 	}
 }
 

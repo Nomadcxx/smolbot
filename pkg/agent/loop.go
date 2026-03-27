@@ -201,7 +201,9 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 					return "", err
 				}
 
-				content := truncateString(firstNonEmptyString(result.Output, result.Content), 16000)
+				output := truncateString(firstNonEmptyString(result.Output, result.Content), 16000)
+				errText := truncateString(result.Error, 16000)
+				content := firstNonEmptyString(output, errText)
 				toolMsg := provider.Message{
 					Role:       "tool",
 					Content:    content,
@@ -224,6 +226,8 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 					Data: map[string]any{
 						"deliveredToRequestTarget": delivered,
 						"id":                       toolCall.ID,
+						"output":                   output,
+						"error":                    errText,
 					},
 				})
 			}

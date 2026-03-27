@@ -1,14 +1,19 @@
 package chat
 
 import (
+	"encoding/json"
 	"fmt"
 	"image/color"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/Nomadcxx/smolbot/internal/theme"
+	"github.com/pmezard/go-difflib/difflib"
 )
 
 const maxTextWidth = 120
@@ -40,47 +45,19 @@ func renderToolCall(tc ToolCall, width int, expanded bool) string {
 		return tc.Name
 	}
 
-	icon, iconColor := toolIcon(tc.Status, t)
-	iconStr := lipgloss.NewStyle().Foreground(iconColor).Bold(true).Render(icon)
-	nameStr := lipgloss.NewStyle().Foreground(t.ToolName).Bold(true).Render(tc.Name)
-
-	header := "  " + iconStr + " " + nameStr
-
-	bodyText := tc.Output
-	if strings.TrimSpace(bodyText) == "" {
-		if tc.Status == "running" {
-			bodyText = "running…"
-		} else {
-			return header
-		}
+	title := toolDisplayTitle(tc)
+	if raw := strings.TrimSpace(tc.Name); raw != "" && !strings.Contains(title, raw) {
+		title = fmt.Sprintf("%s (%s)", title, raw)
 	}
-
-	truncHint := ""
-	if !expanded {
-		outputLines := strings.Split(bodyText, "\n")
-		if len(outputLines) > maxToolOutputLines {
-			hidden := len(outputLines) - maxToolOutputLines
-			bodyText = strings.Join(outputLines[:maxToolOutputLines], "\n")
-			truncHint = fmt.Sprintf("… (%d lines hidden)", hidden)
-		}
-	}
-
-	bodyStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
-	indent := "    "
-	var lines []string
-	lines = append(lines, header)
-
-	if strings.TrimSpace(tc.Input) != "" {
-		lines = append(lines, bodyStyle.Render(indent+tc.Input))
-	}
-
-	for _, line := range strings.Split(bodyText, "\n") {
-		lines = append(lines, bodyStyle.Render(indent+line))
-	}
-	if truncHint != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render(indent+truncHint))
-	}
-	return strings.Join(lines, "\n")
+	content := toolBlockContent(tc, width, expanded, t)
+	state := toolBlockState(tc.Status)
+	return RenderToolBlock(ToolBlockOpts{
+		Title:        title,
+		Content:      content,
+		State:        state,
+		Width:        width,
+		SpinnerFrame: 0,
+	}, t)
 }
 
 func toolIcon(status string, t *theme.Theme) (string, color.Color) {
@@ -94,6 +71,382 @@ func toolIcon(status string, t *theme.Theme) (string, color.Color) {
 	default:
 		return "•", t.TextMuted
 	}
+}
+
+func toolBlockState(status string) ToolBlockState {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running":
+		return ToolBlockRunning
+	case "done":
+		return ToolBlockDone
+	case "error":
+		return ToolBlockError
+	default:
+		return ToolBlockDone
+	}
+}
+
+func toolDisplayTitle(tc ToolCall) string {
+	switch normalizeToolName(tc.Name) {
+	case "read_file":
+		return formatFileToolTitle("Read", extractJSONField(tc.Input, "path"))
+	case "write_file":
+		return formatFileToolTitle("Write", extractJSONField(tc.Input, "path"))
+	case "edit_file":
+		return formatFileToolTitle("Edit", extractJSONField(tc.Input, "path"))
+	case "list_dir":
+		path := strings.TrimSpace(extractJSONField(tc.Input, "path"))
+		if path == "" {
+			return "LIST DIR"
+		}
+		return "List " + filepath.Base(path)
+	case "exec":
+		return "Shell"
+	case "web_search":
+		query := strings.TrimSpace(extractJSONField(tc.Input, "query"))
+		if query == "" {
+			return "Web Search"
+		}
+		return "Search " + truncatePreview(query, 48)
+	case "web_fetch":
+		target := strings.TrimSpace(extractJSONField(tc.Input, "url"))
+		if target == "" {
+			return "Web Fetch"
+		}
+		return "Fetch " + truncatePreview(target, 48)
+	case "message":
+		return "Message"
+	case "cron":
+		return "Cron"
+	default:
+		return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(tc.Name), "_", " "))
+	}
+}
+
+func formatFileToolTitle(verb, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return strings.ToUpper(verb + " FILE")
+	}
+	base := filepath.Base(path)
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		return verb + " " + path
+	}
+	return verb + " " + base
+}
+
+func toolBlockContent(tc ToolCall, width int, expanded bool, t *theme.Theme) string {
+	switch normalizeToolName(tc.Name) {
+	case "edit_file":
+		if content, ok := renderEditToolContent(tc, width, expanded, t); ok {
+			return content
+		}
+	}
+
+	sections := make([]string, 0, 2)
+
+	if input := toolInputSummary(tc.Name, tc.Input); strings.TrimSpace(input) != "" {
+		sections = append(sections, "INPUT\n"+input)
+	}
+
+	if output := toolOutputSummary(tc.Status, tc.Output, expanded); strings.TrimSpace(output) != "" {
+		sections = append(sections, toolOutputLabel(tc.Name, tc.Status)+"\n"+output)
+	} else if strings.EqualFold(strings.TrimSpace(tc.Status), "running") {
+		sections = append(sections, "STATUS\nrunning...")
+	}
+
+	return strings.Join(sections, "\n\n")
+}
+
+func renderEditToolContent(tc ToolCall, width int, expanded bool, t *theme.Theme) (string, bool) {
+	fields, ok := parseJSONObject(strings.TrimSpace(tc.Input))
+	if !ok {
+		return "", false
+	}
+
+	oldText := coerceString(fields["old_string"])
+	newText := coerceString(fields["new_string"])
+	if strings.EqualFold(strings.TrimSpace(tc.Status), "done") && (oldText != "" || newText != "") {
+		diff := generateEditDiff(extractJSONField(tc.Input, "path"), oldText, newText)
+		content := RenderDiff(diff, max(24, cappedWidth(width)-4), t)
+		if meta := summarizeToolFields(fields, []string{"path", "replace_all"}); strings.TrimSpace(meta) != "" {
+			content = "INPUT\n" + meta + "\n\nDIFF\n" + content
+		}
+		return content, true
+	}
+
+	if strings.EqualFold(strings.TrimSpace(tc.Status), "running") {
+		meta := summarizeToolFields(fields, []string{"path", "replace_all"})
+		if strings.TrimSpace(meta) == "" {
+			meta = "Preparing edit..."
+		}
+		return "INPUT\n" + meta + "\n\nSTATUS\nPreparing diff...", true
+	}
+
+	return "", false
+}
+
+func toolInputSummary(name, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	fields, ok := parseJSONObject(raw)
+	if !ok {
+		return raw
+	}
+
+	switch normalizeToolName(name) {
+	case "read_file":
+		return summarizeToolFields(fields, []string{"path", "offset", "limit", "extraAllowedDirs"})
+	case "write_file":
+		return summarizeToolFields(fields, []string{"path", "content"})
+	case "edit_file":
+		return summarizeToolFields(fields, []string{"path", "replace_all"})
+	case "list_dir":
+		return summarizeToolFields(fields, []string{"path", "recursive", "max_depth"})
+	case "exec":
+		return summarizeToolFields(fields, []string{"command", "timeout"})
+	case "web_search":
+		return summarizeToolFields(fields, []string{"query", "maxResults"})
+	case "web_fetch":
+		return summarizeToolFields(fields, []string{"url"})
+	case "message":
+		return summarizeToolFields(fields, []string{"channel", "chat_id", "content"})
+	case "cron":
+		return summarizeToolFields(fields, []string{"action", "id", "name", "schedule", "timezone", "reminder", "channel", "chat_id", "isEnabled"})
+	default:
+		return prettyJSON(raw)
+	}
+}
+
+func toolOutputSummary(status, output string, expanded bool) string {
+	output = strings.TrimRight(strings.TrimSpace(output), "\n")
+	if output == "" {
+		if strings.EqualFold(strings.TrimSpace(status), "running") {
+			return "running..."
+		}
+		return ""
+	}
+
+	if expanded {
+		return output
+	}
+
+	lines := strings.Split(output, "\n")
+	if len(lines) <= maxToolOutputLines {
+		return output
+	}
+
+	hidden := len(lines) - maxToolOutputLines
+	return strings.Join(lines[:maxToolOutputLines], "\n") + fmt.Sprintf("\n… (%d lines hidden)", hidden)
+}
+
+func toolOutputLabel(name, status string) string {
+	if strings.EqualFold(strings.TrimSpace(status), "error") {
+		return "ERROR"
+	}
+
+	switch normalizeToolName(name) {
+	case "read_file", "web_fetch":
+		return "CONTENT"
+	case "write_file", "edit_file":
+		return "RESULT"
+	case "exec":
+		return "OUTPUT"
+	case "web_search":
+		return "RESULTS"
+	case "message":
+		return "DELIVERY"
+	default:
+		return "OUTPUT"
+	}
+}
+
+func summarizeToolFields(fields map[string]any, orderedKeys []string) string {
+	if len(fields) == 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, len(fields))
+	seen := make(map[string]struct{}, len(fields))
+	appendField := func(key string) {
+		value, ok := fields[key]
+		if !ok {
+			return
+		}
+		lines = append(lines, formatToolField(key, value))
+		seen[key] = struct{}{}
+	}
+
+	for _, key := range orderedKeys {
+		appendField(key)
+	}
+
+	extras := make([]string, 0, len(fields)-len(seen))
+	for key := range fields {
+		if _, ok := seen[key]; !ok {
+			extras = append(extras, key)
+		}
+	}
+	sort.Strings(extras)
+	for _, key := range extras {
+		appendField(key)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func formatToolField(key string, value any) string {
+	label := humanizeToolKey(key)
+	return label + ": " + formatToolValue(value)
+}
+
+func formatToolValue(value any) string {
+	switch v := value.(type) {
+	case string:
+		return truncatePreview(v, 160)
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			parts = append(parts, formatToolValue(item))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case map[string]any:
+		pretty, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprint(v)
+		}
+		return string(pretty)
+	default:
+		pretty, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprint(v)
+		}
+		return string(pretty)
+	}
+}
+
+func truncatePreview(value string, limit int) string {
+	if limit <= 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "…"
+}
+
+func parseJSONObject(raw string) (map[string]any, bool) {
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil, false
+	}
+	return fields, true
+}
+
+func prettyJSON(raw string) string {
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return raw
+	}
+	pretty, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return raw
+	}
+	return string(pretty)
+}
+
+func extractJSONField(raw, key string) string {
+	fields, ok := parseJSONObject(strings.TrimSpace(raw))
+	if !ok {
+		return ""
+	}
+	return coerceString(fields[key])
+}
+
+func coerceString(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	default:
+		return ""
+	}
+}
+
+func generateEditDiff(path, oldText, newText string) string {
+	path = strings.TrimSpace(path)
+	label := path
+	if label == "" {
+		label = "file"
+	}
+	diff, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+		A:        difflib.SplitLines(ensureTrailingNewline(oldText)),
+		B:        difflib.SplitLines(ensureTrailingNewline(newText)),
+		FromFile: "a/" + label,
+		ToFile:   "b/" + label,
+		Context:  3,
+	})
+	if err != nil || strings.TrimSpace(diff) == "" {
+		return strings.Join([]string{
+			"--- a/" + label,
+			"+++ b/" + label,
+			"@@",
+			"-" + oldText,
+			"+" + newText,
+		}, "\n")
+	}
+	return strings.TrimRight(diff, "\n")
+}
+
+func ensureTrailingNewline(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	if strings.HasSuffix(value, "\n") {
+		return value
+	}
+	return value + "\n"
+}
+
+func normalizeToolName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func humanizeToolKey(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+
+	parts := strings.Fields(strings.ReplaceAll(key, "_", " "))
+	for i, part := range parts {
+		parts[i] = camelToWords(part)
+	}
+	return strings.ToUpper(strings.Join(parts, " "))
+}
+
+func camelToWords(value string) string {
+	var out []rune
+	var prev rune
+	for i, r := range value {
+		if i > 0 && unicode.IsUpper(r) && (unicode.IsLower(prev) || unicode.IsDigit(prev)) {
+			out = append(out, ' ')
+		}
+		out = append(out, r)
+		prev = r
+	}
+	return string(out)
 }
 
 func renderRoleBlock(label, body string, accent color.Color, width int) string {
