@@ -757,17 +757,22 @@ func runChannelLoginImpl(ctx context.Context, opts rootOptions, channelName stri
 
 	deps := launchRuntimeDeps()
 	manager := channel.NewManager()
+	var selected channel.Channel
 	if configured, err := configuredChannel(cfg, channelName, true); err != nil {
 		return err
 	} else if configured != nil {
+		selected = configured
 		manager.Register(configured)
 	}
 	for _, registered := range deps.Channels {
 		if registered != nil && channelEnabled(cfg, registered.Name()) {
+			if strings.EqualFold(strings.TrimSpace(registered.Name()), strings.TrimSpace(channelName)) {
+				selected = registered
+			}
 			manager.Register(registered)
 		}
 	}
-	return manager.LoginWithUpdates(ctx, channelName, func(status channel.Status) error {
+	err = manager.LoginWithUpdates(ctx, channelName, func(status channel.Status) error {
 		if out == nil || status.State == "" {
 			return nil
 		}
@@ -778,6 +783,18 @@ func runChannelLoginImpl(ctx context.Context, opts rootOptions, channelName stri
 		_, err := fmt.Fprintf(out, "%s\n", status.State)
 		return err
 	})
+	if err != nil && selected != nil {
+		if reporter, ok := selected.(channel.StatusReporter); ok && out != nil {
+			if status, statusErr := reporter.Status(ctx); statusErr == nil && status.State != "" {
+				if status.Detail != "" {
+					_, _ = fmt.Fprintf(out, "%s: %s\n", status.State, status.Detail)
+				} else {
+					_, _ = fmt.Fprintf(out, "%s\n", status.State)
+				}
+			}
+		}
+	}
+	return err
 }
 
 func loadRuntimeConfig(configPath, workspace string, port int) (*config.Config, *config.Paths, error) {

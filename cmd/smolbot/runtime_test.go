@@ -617,6 +617,51 @@ func TestRunChannelLoginUsesConfiguredDiscordChannel(t *testing.T) {
 	}
 }
 
+func TestRunChannelLoginReportsDiscordStatusWhenLoginFails(t *testing.T) {
+	orig := newDiscordChannel
+	defer func() { newDiscordChannel = orig }()
+
+	wantErr := errors.New("invalid discord token")
+	fakeDiscord := &runtimeDiscordLoginChannel{
+		name:     "discord",
+		status:   channel.Status{State: "auth-required", Detail: "Invalid token: invalid discord token"},
+		loginErr: wantErr,
+	}
+	newDiscordChannel = func(cfg config.DiscordChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "discord-bot-token" {
+			t.Fatalf("unexpected discord config %#v", cfg)
+		}
+		return fakeDiscord, nil
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Discord.Enabled = true
+	cfg.Channels.Discord.BotToken = "discord-bot-token"
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	var out strings.Builder
+	err := runChannelLoginImpl(context.Background(), rootOptions{configPath: cfgPath}, "discord", &out)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("runChannelLoginImpl error = %v, want %v", err, wantErr)
+	}
+	rendered := out.String()
+	if !strings.Contains(rendered, "auth-required") || !strings.Contains(rendered, "Invalid token: invalid discord token") {
+		t.Fatalf("expected discord auth-required status in output %q", rendered)
+	}
+	if fakeDiscord.logins != 1 {
+		t.Fatalf("discord login calls = %d, want 1", fakeDiscord.logins)
+	}
+}
+
 func TestRunChannelLoginUsesInteractiveTelegramLogin(t *testing.T) {
 	orig := newTelegramChannel
 	defer func() { newTelegramChannel = orig }()
@@ -1050,9 +1095,10 @@ func (f *runtimeStatusOnlyTelegramChannel) Status(context.Context) (channel.Stat
 }
 
 type runtimeDiscordLoginChannel struct {
-	name   string
-	status channel.Status
-	logins int
+	name     string
+	status   channel.Status
+	logins   int
+	loginErr error
 }
 
 func (f *runtimeDiscordLoginChannel) Name() string { return f.name }
@@ -1069,6 +1115,9 @@ func (f *runtimeDiscordLoginChannel) Status(context.Context) (channel.Status, er
 
 func (f *runtimeDiscordLoginChannel) Login(context.Context) error {
 	f.logins++
+	if f.loginErr != nil {
+		return f.loginErr
+	}
 	f.status = channel.Status{State: "connected", Detail: "Bot: @smolbot"}
 	return nil
 }
