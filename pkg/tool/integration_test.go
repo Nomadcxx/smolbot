@@ -20,10 +20,11 @@ func TestToolRegistryIntegration(t *testing.T) {
 	registry.Register(NewMessageTool())
 	registry.Register(NewSpawnTool(func() string { return "child1" }))
 	registry.Register(NewTaskTool(func() string { return "child2" }))
+	registry.Register(NewWaitTool())
 
 	defs := registry.Definitions()
-	if len(defs) != 6 {
-		t.Fatalf("expected six tool definitions, got %#v", defs)
+	if len(defs) != 7 {
+		t.Fatalf("expected seven tool definitions, got %#v", defs)
 	}
 	if defs[0].Name != "exec" || defs[len(defs)-1].Name != "write_file" {
 		t.Fatalf("expected stable sorted definitions, got %#v", defs)
@@ -97,6 +98,15 @@ func TestToolRegistryIntegration(t *testing.T) {
 	}
 	if taskResult.Metadata["agentType"] != "explorer" {
 		t.Fatalf("unexpected task result %#v", taskResult)
+	}
+
+	waitRaw, _ := json.Marshal(map[string]any{})
+	waitResult, err := registry.Execute(context.Background(), "wait", waitRaw, ToolContext{SessionKey: "parent", Spawner: spawner})
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if waitResult.Metadata["count"] != 2 {
+		t.Fatalf("unexpected wait result %#v", waitResult)
 	}
 
 	if _, err := os.Stat(filepath.Join(workspace, "notes.txt")); err != nil {

@@ -106,8 +106,9 @@ type runtimeSpawner struct {
 	mu      sync.Mutex
 	runs    map[string]*runtimeChildRun
 	childrenByParent map[string]map[string]*runtimeChildRun
-	waiting map[string]map[string]struct{}
+	waiting map[string]map[string]int
 	nameIdx map[string]int
+	orderIdx map[string]int
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -1017,6 +1018,7 @@ func registerRuntimeTools(registry *tool.Registry, cfg *config.Config) {
 	registry.Register(tool.NewMessageTool())
 	registry.Register(tool.NewSpawnTool(uuid.NewString))
 	registry.Register(tool.NewTaskTool(uuid.NewString))
+	registry.Register(tool.NewWaitTool())
 }
 
 func (a *runtimeApp) Close() error {

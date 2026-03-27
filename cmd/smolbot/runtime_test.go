@@ -416,6 +416,87 @@ func TestRuntimeSpawnerDoesNotLaunchChildWhenCallerContextCanceled(t *testing.T)
 	}
 }
 
+func TestRuntimeSpawnerWaitReturnsResultsInSpawnOrder(t *testing.T) {
+	releaseA := make(chan struct{})
+	releaseB := make(chan struct{})
+	spawner := &runtimeSpawner{
+		process: func(ctx context.Context, req agent.Request) (string, error) {
+			switch req.Content {
+			case "first":
+				<-releaseA
+				return "first done", nil
+			case "second":
+				<-releaseB
+				return "second done", nil
+			default:
+				return "unknown", nil
+			}
+		},
+	}
+
+	first, err := spawner.Spawn(context.Background(), tool.SpawnRequest{
+		ParentSessionKey: "parent",
+		ChildSessionKey:  "task:parent:child-a",
+		Description:      "First review",
+		Prompt:           "first",
+		AgentType:        "explorer",
+	})
+	if err != nil {
+		t.Fatalf("Spawn first: %v", err)
+	}
+	second, err := spawner.Spawn(context.Background(), tool.SpawnRequest{
+		ParentSessionKey: "parent",
+		ChildSessionKey:  "task:parent:child-b",
+		Description:      "Second review",
+		Prompt:           "second",
+		AgentType:        "explorer",
+	})
+	if err != nil {
+		t.Fatalf("Spawn second: %v", err)
+	}
+
+	waitDone := make(chan *tool.WaitResult, 1)
+	waitErr := make(chan error, 1)
+	go func() {
+		result, err := spawner.Wait(context.Background(), tool.WaitRequest{ParentSessionKey: "parent"})
+		if err != nil {
+			waitErr <- err
+			return
+		}
+		waitDone <- result
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	close(releaseB)
+	time.Sleep(20 * time.Millisecond)
+	close(releaseA)
+
+	select {
+	case err := <-waitErr:
+		t.Fatalf("Wait: %v", err)
+	case result := <-waitDone:
+		if result.Count != 2 {
+			t.Fatalf("unexpected wait result %#v", result)
+		}
+		if len(result.Results) != 2 || result.Results[0].ID != first.ID || result.Results[1].ID != second.ID {
+			t.Fatalf("expected spawn order results, got %#v", result.Results)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("wait did not complete")
+	}
+}
+
+func TestRuntimeSpawnerWaitReturnsImmediatelyWhenNoChildrenOutstanding(t *testing.T) {
+	spawner := &runtimeSpawner{}
+	result, err := spawner.Wait(context.Background(), tool.WaitRequest{ParentSessionKey: "parent"})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if result.Count != 0 || len(result.Results) != 0 {
+		t.Fatalf("expected empty wait result, got %#v", result)
+	}
+}
+
 func TestBuildRuntimeRegistersSignalWhatsAppAndTelegramTogether(t *testing.T) {
 	origSignal := newSignalChannel
 	origWhatsApp := newWhatsAppChannel

@@ -885,6 +885,10 @@ func (fakeSpawner) ProcessDirect(context.Context, tool.SpawnRequest) (string, er
 	return "spawned", nil
 }
 
+func (fakeSpawner) Wait(context.Context, tool.WaitRequest) (*tool.WaitResult, error) {
+	return &tool.WaitResult{}, nil
+}
+
 type fakeLoopMemory struct {
 	calls int
 }

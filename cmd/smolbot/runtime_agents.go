@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Nomadcxx/smolbot/pkg/agent"
@@ -25,6 +26,7 @@ type runtimeChildRun struct {
 	id               string
 	parentSessionKey string
 	sessionKey       string
+	order            int
 	name             string
 	agentType        string
 	model            string
@@ -71,6 +73,7 @@ func (s *runtimeSpawner) Spawn(ctx context.Context, req tool.SpawnRequest) (*too
 		id:               childID,
 		parentSessionKey: req.ParentSessionKey,
 		sessionKey:       childSessionKey,
+		order:            s.allocateChildOrder(req.ParentSessionKey),
 		name:             s.allocateChildName(req.ParentSessionKey),
 		agentType:        firstNonEmpty(strings.TrimSpace(req.AgentType), "explorer"),
 		model:            strings.TrimSpace(req.Model),
@@ -111,6 +114,50 @@ func (s *runtimeSpawner) ProcessDirect(ctx context.Context, req tool.SpawnReques
 	return strings.TrimSpace(summary), err
 }
 
+func (s *runtimeSpawner) Wait(ctx context.Context, req tool.WaitRequest) (*tool.WaitResult, error) {
+	targets := s.waitTargets(req.ParentSessionKey, req.AgentIDs)
+	if len(targets) == 0 {
+		return &tool.WaitResult{}, nil
+	}
+
+	ids := make([]string, 0, len(targets))
+	for _, run := range targets {
+		ids = append(ids, run.id)
+	}
+	s.SetWaiting(req.ParentSessionKey, ids)
+	defer s.ClearWaiting(req.ParentSessionKey, ids)
+
+	for _, run := range targets {
+		if run.done {
+			continue
+		}
+		select {
+		case <-run.completed:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	results := make([]tool.WaitResultItem, 0, len(targets))
+	for _, run := range targets {
+		results = append(results, tool.WaitResultItem{
+			ID:            run.id,
+			Name:          run.name,
+			AgentType:     run.agentType,
+			Status:        childRunStatus(run),
+			Description:   run.description,
+			PromptPreview: run.promptPreview,
+			Summary:       run.summary,
+			Error:         firstErrString(run.err),
+		})
+	}
+
+	return &tool.WaitResult{
+		Count:   len(results),
+		Results: results,
+	}, nil
+}
+
 func (s *runtimeSpawner) CleanupParent(parentSessionKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -124,6 +171,7 @@ func (s *runtimeSpawner) CleanupParent(parentSessionKey string) {
 	}
 	delete(s.childrenByParent, parentSessionKey)
 	delete(s.nameIdx, parentSessionKey)
+	delete(s.orderIdx, parentSessionKey)
 	delete(s.waiting, parentSessionKey)
 }
 
@@ -139,6 +187,7 @@ func (s *runtimeSpawner) Close() {
 	s.runs = nil
 	s.childrenByParent = nil
 	s.nameIdx = nil
+	s.orderIdx = nil
 	s.waiting = nil
 	if s.cancel != nil {
 		s.cancel()
@@ -167,24 +216,49 @@ func (s *runtimeSpawner) SetWaiting(parentSessionKey string, childIDs []string) 
 	defer s.mu.Unlock()
 
 	if s.waiting == nil {
-		s.waiting = make(map[string]map[string]struct{})
+		s.waiting = make(map[string]map[string]int)
 	}
 	if len(childIDs) == 0 {
 		delete(s.waiting, parentSessionKey)
 		return
 	}
-	waiting := make(map[string]struct{}, len(childIDs))
+	waiting := s.waiting[parentSessionKey]
+	if waiting == nil {
+		waiting = make(map[string]int, len(childIDs))
+		s.waiting[parentSessionKey] = waiting
+	}
 	for _, id := range childIDs {
-		if strings.TrimSpace(id) == "" {
+		id = strings.TrimSpace(id)
+		if id == "" {
 			continue
 		}
-		waiting[id] = struct{}{}
+		waiting[id]++
 	}
-	s.waiting[parentSessionKey] = waiting
 }
 
-func (s *runtimeSpawner) ClearWaiting(parentSessionKey string) {
-	s.SetWaiting(parentSessionKey, nil)
+func (s *runtimeSpawner) ClearWaiting(parentSessionKey string, childIDs []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	waiting := s.waiting[parentSessionKey]
+	if len(waiting) == 0 {
+		delete(s.waiting, parentSessionKey)
+		return
+	}
+	for _, id := range childIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if waiting[id] <= 1 {
+			delete(waiting, id)
+			continue
+		}
+		waiting[id]--
+	}
+	if len(waiting) == 0 {
+		delete(s.waiting, parentSessionKey)
+	}
 }
 
 func (s *runtimeSpawner) allocateChildName(parentSessionKey string) string {
@@ -202,6 +276,18 @@ func (s *runtimeSpawner) allocateChildName(parentSessionKey string) string {
 	name := delegatedAgentNames[idx%len(delegatedAgentNames)]
 	s.nameIdx[parentSessionKey] = idx + 1
 	return name
+}
+
+func (s *runtimeSpawner) allocateChildOrder(parentSessionKey string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.orderIdx == nil {
+		s.orderIdx = make(map[string]int)
+	}
+	order := s.orderIdx[parentSessionKey]
+	s.orderIdx[parentSessionKey] = order + 1
+	return order
 }
 
 func summarizePrompt(prompt string) string {
@@ -293,6 +379,48 @@ func (s *runtimeSpawner) finishRun(run *runtimeChildRun, summary string, err err
 	close(run.completed)
 }
 
+func (s *runtimeSpawner) waitTargets(parentSessionKey string, ids []string) []*runtimeChildRun {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	children := s.childrenByParent[parentSessionKey]
+	if len(children) == 0 {
+		return nil
+	}
+
+	var targets []*runtimeChildRun
+	if len(ids) == 0 {
+		for _, run := range children {
+			if run.done {
+				continue
+			}
+			targets = append(targets, run)
+		}
+	} else {
+		seen := make(map[string]struct{}, len(ids))
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			run := children[id]
+			if run == nil || run.done {
+				continue
+			}
+			targets = append(targets, run)
+		}
+	}
+
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].order < targets[j].order
+	})
+	return targets
+}
+
 func snapshotRun(run *runtimeChildRun) runtimeChildSnapshot {
 	snap := runtimeChildSnapshot{
 		ID:              run.id,
@@ -309,4 +437,21 @@ func snapshotRun(run *runtimeChildRun) runtimeChildSnapshot {
 		snap.Error = run.err.Error()
 	}
 	return snap
+}
+
+func childRunStatus(run *runtimeChildRun) string {
+	if run.err != nil {
+		return "error"
+	}
+	if run.done {
+		return "completed"
+	}
+	return "running"
+}
+
+func firstErrString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

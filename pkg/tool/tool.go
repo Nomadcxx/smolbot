@@ -40,6 +40,7 @@ type Tool interface {
 type Spawner interface {
 	Spawn(ctx context.Context, req SpawnRequest) (*SpawnResult, error)
 	ProcessDirect(ctx context.Context, req SpawnRequest) (string, error)
+	Wait(ctx context.Context, req WaitRequest) (*WaitResult, error)
 }
 
 type SpawnRequest struct {
@@ -63,6 +64,27 @@ type SpawnResult struct {
 	ReasoningEffort string
 	Description     string
 	PromptPreview   string
+}
+
+type WaitRequest struct {
+	ParentSessionKey string
+	AgentIDs         []string
+}
+
+type WaitResult struct {
+	Count   int
+	Results []WaitResultItem
+}
+
+type WaitResultItem struct {
+	ID            string
+	Name          string
+	AgentType     string
+	Status        string
+	Description   string
+	PromptPreview string
+	Summary       string
+	Error         string
 }
 
 type MessageRouter interface {

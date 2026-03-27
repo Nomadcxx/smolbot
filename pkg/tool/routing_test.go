@@ -99,6 +99,28 @@ func TestRoutingTools(t *testing.T) {
 		}
 	})
 
+	t.Run("wait delegates to spawner and preserves requested agent ids", func(t *testing.T) {
+		spawner := &fakeSpawner{}
+		tool := NewWaitTool()
+		raw, _ := json.Marshal(map[string]any{
+			"agent_ids": []string{"child-b", "child-a"},
+		})
+
+		result, err := tool.Execute(context.Background(), raw, ToolContext{SessionKey: "parent-session", Spawner: spawner})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if spawner.waitCalls != 1 {
+			t.Fatalf("expected wait call, got %d", spawner.waitCalls)
+		}
+		if len(spawner.waitReq.AgentIDs) != 2 || spawner.waitReq.AgentIDs[0] != "child-b" {
+			t.Fatalf("unexpected wait request %#v", spawner.waitReq)
+		}
+		if result.Metadata["count"] != 2 {
+			t.Fatalf("expected wait count metadata, got %#v", result.Metadata)
+		}
+	})
+
 	t.Run("cron rejects create inside cron context", func(t *testing.T) {
 		service := &fakeCronService{}
 		tool := NewCronTool(service)
@@ -167,6 +189,28 @@ func TestRoutingTools(t *testing.T) {
 	})
 }
 
+func TestWaitToolDelegatesToSpawner(t *testing.T) {
+	spawner := &fakeSpawner{}
+	tool := NewWaitTool()
+	raw, _ := json.Marshal(map[string]any{
+		"agent_ids": []string{"child-b", "child-a"},
+	})
+
+	result, err := tool.Execute(context.Background(), raw, ToolContext{SessionKey: "parent-session", Spawner: spawner})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if spawner.waitCalls != 1 {
+		t.Fatalf("expected wait call, got %d", spawner.waitCalls)
+	}
+	if len(spawner.waitReq.AgentIDs) != 2 || spawner.waitReq.AgentIDs[0] != "child-b" {
+		t.Fatalf("unexpected wait request %#v", spawner.waitReq)
+	}
+	if result.Metadata["count"] != 2 {
+		t.Fatalf("expected wait count metadata, got %#v", result.Metadata)
+	}
+}
+
 type fakeMessageRouter struct {
 	calls   int
 	channel string
@@ -183,8 +227,10 @@ func (f *fakeMessageRouter) Route(_ context.Context, channel, chatID, content st
 }
 
 type fakeSpawner struct {
-	calls int
-	req   SpawnRequest
+	calls     int
+	req       SpawnRequest
+	waitCalls int
+	waitReq   WaitRequest
 }
 
 func (f *fakeSpawner) Spawn(_ context.Context, req SpawnRequest) (*SpawnResult, error) {
@@ -206,6 +252,18 @@ func (f *fakeSpawner) ProcessDirect(_ context.Context, req SpawnRequest) (string
 	f.calls++
 	f.req = req
 	return "child finished", nil
+}
+
+func (f *fakeSpawner) Wait(_ context.Context, req WaitRequest) (*WaitResult, error) {
+	f.waitCalls++
+	f.waitReq = req
+	return &WaitResult{
+		Count: 2,
+		Results: []WaitResultItem{
+			{ID: "child-a", Name: "Bernoulli", AgentType: "explorer", Status: "completed", Summary: "ok"},
+			{ID: "child-b", Name: "Averroes", AgentType: "explorer", Status: "completed", Summary: "ok"},
+		},
+	}, nil
 }
 
 type fakeCronService struct {
