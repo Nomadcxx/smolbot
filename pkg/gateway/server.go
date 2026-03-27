@@ -242,7 +242,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"methods": []string{
 				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set", "compact", "skills.list", "mcps.list", "cron.list",
 			},
-			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "compact.start", "compact.done", "context.compressed"},
+			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "agent.spawned", "agent.completed", "agent.wait.started", "agent.wait.completed", "compact.start", "compact.done", "context.compressed"},
 		}, nil
 	case "status":
 		params := struct {
@@ -873,6 +873,9 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 		case agent.EventProgress:
 			s.emitEvent(state.owner, "chat.progress", map[string]any{"content": event.Content})
 		case agent.EventToolStart:
+			if delegatedToolEvent(event.Content) {
+				break
+			}
 			input, _ := event.Data["input"].(string)
 			toolID, _ := event.Data["id"].(string)
 			s.emitEvent(state.owner, "chat.tool.start", map[string]any{
@@ -881,6 +884,9 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 				"id":    toolID,
 			})
 		case agent.EventToolDone:
+			if delegatedToolEvent(event.Content) {
+				break
+			}
 			if flag, ok := event.Data["deliveredToRequestTarget"].(bool); ok && flag {
 				delivered = true
 			}
@@ -925,6 +931,14 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 				"totalTokens":      tt,
 				"contextWindow":    s.contextWindowTokens(ctx),
 			})
+		case agent.EventAgentSpawned:
+			s.emitEvent(state.owner, "agent.spawned", cloneEventData(event.Data))
+		case agent.EventAgentCompleted:
+			s.emitEvent(state.owner, "agent.completed", cloneEventData(event.Data))
+		case agent.EventAgentWaitStarted:
+			s.emitEvent(state.owner, "agent.wait.started", cloneEventData(event.Data))
+		case agent.EventAgentWaitCompleted:
+			s.emitEvent(state.owner, "agent.wait.completed", cloneEventData(event.Data))
 		}
 	})
 
@@ -946,6 +960,26 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 		s.lastUsage = lastUsage
 	}
 	s.mu.Unlock()
+}
+
+func cloneEventData(data map[string]any) map[string]any {
+	if len(data) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(data))
+	for k, v := range data {
+		cloned[k] = v
+	}
+	return cloned
+}
+
+func delegatedToolEvent(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "task", "wait":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) abortRun(runID string) error {

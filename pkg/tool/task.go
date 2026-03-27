@@ -82,6 +82,7 @@ func (t *TaskTool) Execute(ctx context.Context, raw json.RawMessage, tctx ToolCo
 		ReasoningEffort:  strings.TrimSpace(args.ReasoningEffort),
 		MaxIterations:    taskMaxIterations,
 		DisabledTools:    []string{"message", "spawn", "task"},
+		EmitEvent:        tctx.EmitEvent,
 	})
 	if err != nil {
 		return &Result{Error: fmt.Sprintf("delegate task: %v", err)}, nil

@@ -54,6 +54,7 @@ func (t *WaitTool) Execute(ctx context.Context, raw json.RawMessage, tctx ToolCo
 	waited, err := tctx.Spawner.Wait(ctx, WaitRequest{
 		ParentSessionKey: tctx.SessionKey,
 		AgentIDs:         append([]string(nil), args.AgentIDs...),
+		EmitEvent:        tctx.EmitEvent,
 	})
 	if err != nil {
 		return &Result{Error: fmt.Sprintf("wait for child agents: %v", err)}, nil

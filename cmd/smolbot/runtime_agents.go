@@ -38,6 +38,7 @@ type runtimeChildRun struct {
 	done             bool
 	completed        chan struct{}
 	cancel           context.CancelFunc
+	emitEvent        func(string, map[string]any)
 }
 
 type runtimeChildSnapshot struct {
@@ -82,8 +83,18 @@ func (s *runtimeSpawner) Spawn(ctx context.Context, req tool.SpawnRequest) (*too
 		promptPreview:    summarizePrompt(req.Prompt),
 		completed:        make(chan struct{}),
 		cancel:           cancel,
+		emitEvent:        req.EmitEvent,
 	}
 	s.registerRun(run)
+	emitRuntimeEvent(req.EmitEvent, string(agent.EventAgentSpawned), map[string]any{
+		"id":              run.id,
+		"name":            run.name,
+		"agentType":       run.agentType,
+		"model":           run.model,
+		"reasoningEffort": run.reasoningEffort,
+		"description":     firstNonEmpty(run.description, run.promptPreview),
+		"promptPreview":   run.promptPreview,
+	})
 
 	go func() {
 		summary, err := runChild(childCtx, s.buildChildRequest(req, childSessionKey, run))
@@ -121,11 +132,26 @@ func (s *runtimeSpawner) Wait(ctx context.Context, req tool.WaitRequest) (*tool.
 	}
 
 	ids := make([]string, 0, len(targets))
+	waitAgents := make([]map[string]any, 0, len(targets))
 	for _, run := range targets {
 		ids = append(ids, run.id)
+		waitAgents = append(waitAgents, map[string]any{
+			"id":        run.id,
+			"name":      run.name,
+			"agentType": run.agentType,
+		})
 	}
 	s.SetWaiting(req.ParentSessionKey, ids)
-	defer s.ClearWaiting(req.ParentSessionKey, ids)
+	cleared := false
+	defer func() {
+		if !cleared {
+			s.ClearWaiting(req.ParentSessionKey, ids)
+		}
+	}()
+	emitRuntimeEvent(req.EmitEvent, string(agent.EventAgentWaitStarted), map[string]any{
+		"count":  len(waitAgents),
+		"agents": waitAgents,
+	})
 
 	for _, run := range targets {
 		if run.done {
@@ -139,8 +165,9 @@ func (s *runtimeSpawner) Wait(ctx context.Context, req tool.WaitRequest) (*tool.
 	}
 
 	results := make([]tool.WaitResultItem, 0, len(targets))
+	eventResults := make([]map[string]any, 0, len(targets))
 	for _, run := range targets {
-		results = append(results, tool.WaitResultItem{
+		item := tool.WaitResultItem{
 			ID:            run.id,
 			Name:          run.name,
 			AgentType:     run.agentType,
@@ -149,8 +176,25 @@ func (s *runtimeSpawner) Wait(ctx context.Context, req tool.WaitRequest) (*tool.
 			PromptPreview: run.promptPreview,
 			Summary:       run.summary,
 			Error:         firstErrString(run.err),
+		}
+		results = append(results, item)
+		eventResults = append(eventResults, map[string]any{
+			"id":            item.ID,
+			"name":          item.Name,
+			"agentType":     item.AgentType,
+			"status":        item.Status,
+			"description":   item.Description,
+			"promptPreview": item.PromptPreview,
+			"summary":       item.Summary,
+			"error":         item.Error,
 		})
 	}
+	s.ClearWaiting(req.ParentSessionKey, ids)
+	cleared = true
+	emitRuntimeEvent(req.EmitEvent, string(agent.EventAgentWaitCompleted), map[string]any{
+		"count":   len(eventResults),
+		"results": eventResults,
+	})
 
 	return &tool.WaitResult{
 		Count:   len(results),
@@ -367,8 +411,6 @@ func (s *runtimeSpawner) registerRun(run *runtimeChildRun) {
 
 func (s *runtimeSpawner) finishRun(run *runtimeChildRun, summary string, err error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	run.summary = normalizeChildResult(summary, err)
 	run.err = err
 	run.done = true
@@ -377,6 +419,20 @@ func (s *runtimeSpawner) finishRun(run *runtimeChildRun, summary string, err err
 		run.cancel = nil
 	}
 	close(run.completed)
+	payload := map[string]any{
+		"id":            run.id,
+		"name":          run.name,
+		"agentType":     run.agentType,
+		"status":        childRunStatus(run),
+		"description":   run.description,
+		"promptPreview": run.promptPreview,
+		"summary":       run.summary,
+		"error":         firstErrString(run.err),
+	}
+	emitFn := run.emitEvent
+	s.mu.Unlock()
+
+	emitRuntimeEvent(emitFn, string(agent.EventAgentCompleted), payload)
 }
 
 func (s *runtimeSpawner) waitTargets(parentSessionKey string, ids []string) []*runtimeChildRun {
@@ -454,4 +510,11 @@ func firstErrString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func emitRuntimeEvent(fn func(string, map[string]any), name string, payload map[string]any) {
+	if fn == nil {
+		return
+	}
+	fn(name, payload)
 }

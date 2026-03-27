@@ -21,6 +21,7 @@ type ToolContext struct {
 	Spawner       Spawner
 	MessageRouter MessageRouter
 	IsCronContext bool
+	EmitEvent     func(name string, payload map[string]any)
 }
 
 type Result struct {
@@ -53,6 +54,7 @@ type SpawnRequest struct {
 	ReasoningEffort  string
 	MaxIterations    int
 	DisabledTools    []string
+	EmitEvent        func(name string, payload map[string]any)
 }
 
 type SpawnResult struct {
@@ -69,6 +71,7 @@ type SpawnResult struct {
 type WaitRequest struct {
 	ParentSessionKey string
 	AgentIDs         []string
+	EmitEvent        func(name string, payload map[string]any)
 }
 
 type WaitResult struct {

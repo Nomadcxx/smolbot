@@ -107,6 +107,33 @@ func TestGatewayConcurrency(t *testing.T) {
 		}
 	})
 
+	t.Run("delegated agent lifecycle events bridge through websocket", func(t *testing.T) {
+		writeFrame(t, conn, RequestFrame{
+			ID:     "5b",
+			Method: "chat.send",
+			Params: json.RawMessage(`{"session":"delegated","message":"go"}`),
+		})
+		resp := readFrame(t, conn)
+		if !strings.Contains(string(resp.Response.Result), `"runId":"run-delegated"`) {
+			t.Fatalf("unexpected run response %#v", resp)
+		}
+
+		processor.emit("delegated", agent.Event{Type: agent.EventAgentSpawned, Data: map[string]any{"id": "child-1", "name": "Bernoulli", "agentType": "explorer"}})
+		processor.emit("delegated", agent.Event{Type: agent.EventAgentCompleted, Data: map[string]any{"id": "child-1", "name": "Bernoulli", "agentType": "explorer", "status": "completed", "summary": "✅ Spec compliant"}})
+		processor.emit("delegated", agent.Event{Type: agent.EventAgentWaitStarted, Data: map[string]any{"count": 1, "agents": []map[string]any{{"id": "child-1", "name": "Bernoulli", "agentType": "explorer"}}}})
+		processor.emit("delegated", agent.Event{Type: agent.EventAgentWaitCompleted, Data: map[string]any{"count": 1, "results": []map[string]any{{"id": "child-1", "name": "Bernoulli", "agentType": "explorer", "status": "completed", "summary": "✅ Spec compliant"}}}})
+		processor.finish("delegated", "done")
+
+		spawned := readUntilEvent(t, conn, "agent.spawned")
+		if !strings.Contains(string(spawned.Event.Payload), `"name":"Bernoulli"`) {
+			t.Fatalf("unexpected delegated spawned event %#v", spawned)
+		}
+		waitCompleted := readUntilEvent(t, conn, "agent.wait.completed")
+		if !strings.Contains(string(waitCompleted.Event.Payload), `"count":1`) {
+			t.Fatalf("unexpected delegated wait-completed event %#v", waitCompleted)
+		}
+	})
+
 	t.Run("disconnect cancels websocket-owned runs", func(t *testing.T) {
 		otherConn := dialWebsocket(t, httpServer.URL+"/ws")
 		writeFrame(t, otherConn, RequestFrame{

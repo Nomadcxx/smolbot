@@ -712,6 +712,149 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestChatSendForwardsDelegatedAgentLifecycleEvents(t *testing.T) {
+	store, err := session.NewStore(filepath.Join(t.TempDir(), "sessions.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+	agentStub := &fakeAgentProcessor{
+		response: "done",
+		events: []agent.Event{
+			{Type: agent.EventAgentSpawned, Data: map[string]any{"id": "child-1", "name": "Bernoulli", "agentType": "explorer", "description": "Spec review Gate 6"}},
+			{Type: agent.EventAgentCompleted, Data: map[string]any{"id": "child-1", "name": "Bernoulli", "agentType": "explorer", "status": "completed", "summary": "✅ Spec compliant"}},
+			{Type: agent.EventAgentWaitStarted, Data: map[string]any{"count": 1, "agents": []map[string]any{{"id": "child-1", "name": "Bernoulli", "agentType": "explorer"}}}},
+			{Type: agent.EventAgentWaitCompleted, Data: map[string]any{"count": 1, "results": []map[string]any{{"id": "child-1", "name": "Bernoulli", "agentType": "explorer", "status": "completed", "summary": "✅ Spec compliant"}}}},
+		},
+	}
+	server := NewServer(ServerDeps{
+		Agent:    agentStub,
+		Sessions: store,
+		Config:   cfg,
+		Version:  "test",
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocketServer(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	helloServer(t, conn)
+	writeFrameServer(t, conn, RequestFrame{
+		ID:     "delegated-1",
+		Method: "chat.send",
+		Params: json.RawMessage(`{"session":"s1","message":"delegate work"}`),
+	})
+	var (
+		gotResponse   bool
+		spawned       *DecodedFrame
+		completed     *DecodedFrame
+		waitStarted   *DecodedFrame
+		waitCompleted *DecodedFrame
+	)
+	deadline := time.Now().Add(2 * time.Second)
+	_ = conn.SetReadDeadline(deadline)
+	for !gotResponse || spawned == nil || completed == nil || waitStarted == nil || waitCompleted == nil {
+		frame := readFrame(t, conn)
+		if frame.Kind == FrameResponse && frame.Response.ID == "delegated-1" {
+			gotResponse = true
+			continue
+		}
+		if frame.Kind != FrameEvent {
+			continue
+		}
+		switch frame.Event.EventName {
+		case "agent.spawned":
+			spawned = frame
+		case "agent.completed":
+			completed = frame
+		case "agent.wait.started":
+			waitStarted = frame
+		case "agent.wait.completed":
+			waitCompleted = frame
+		}
+	}
+
+	if !strings.Contains(string(spawned.Event.Payload), `"name":"Bernoulli"`) {
+		t.Fatalf("unexpected spawned payload %#v", spawned)
+	}
+	if !strings.Contains(string(completed.Event.Payload), `Spec compliant`) {
+		t.Fatalf("unexpected completed payload %#v", completed)
+	}
+	if !strings.Contains(string(waitStarted.Event.Payload), `"count":1`) {
+		t.Fatalf("unexpected wait-started payload %#v", waitStarted)
+	}
+	if !strings.Contains(string(waitCompleted.Event.Payload), `"count":1`) {
+		t.Fatalf("unexpected wait-completed payload %#v", waitCompleted)
+	}
+}
+
+func TestDelegatedAgentToolsDoNotEmitGenericToolFrames(t *testing.T) {
+	store, err := session.NewStore(filepath.Join(t.TempDir(), "sessions.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+	agentStub := &fakeAgentProcessor{
+		response: "done",
+		events: []agent.Event{
+			{Type: agent.EventToolStart, Content: "task", Data: map[string]any{"input": `{"description":"Spec review"}`}},
+			{Type: agent.EventToolDone, Content: "task", Data: map[string]any{"output": "delegated"}},
+			{Type: agent.EventAgentSpawned, Data: map[string]any{"id": "child-1", "name": "Bernoulli", "agentType": "explorer", "description": "Spec review Gate 6"}},
+		},
+	}
+	server := NewServer(ServerDeps{
+		Agent:    agentStub,
+		Sessions: store,
+		Config:   cfg,
+		Version:  "test",
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocketServer(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	helloServer(t, conn)
+	writeFrameServer(t, conn, RequestFrame{
+		ID:     "delegated-tool-1",
+		Method: "chat.send",
+		Params: json.RawMessage(`{"session":"s1","message":"delegate work"}`),
+	})
+
+	gotResponse := false
+	sawSpawned := false
+	deadline := time.Now().Add(500 * time.Millisecond)
+	_ = conn.SetReadDeadline(deadline)
+	for {
+		frame := readFrame(t, conn)
+		if frame.Kind == FrameResponse && frame.Response.ID == "delegated-tool-1" {
+			gotResponse = true
+			continue
+		}
+		if frame.Kind != FrameEvent {
+			continue
+		}
+		if frame.Event.EventName == "chat.tool.start" || frame.Event.EventName == "chat.tool.done" {
+			t.Fatalf("delegated tool leaked generic tool frame %#v", frame)
+		}
+		if frame.Event.EventName == "agent.spawned" {
+			sawSpawned = true
+		}
+		if gotResponse && sawSpawned {
+			return
+		}
+	}
+}
+
 type fakeAgentProcessor struct {
 	lastReq           agent.Request
 	response          string

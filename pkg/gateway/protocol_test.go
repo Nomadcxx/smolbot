@@ -200,6 +200,76 @@ func TestToolEventPayloadsAreRich(t *testing.T) {
 	}
 }
 
+func TestDelegatedAgentEventsAreForwarded(t *testing.T) {
+	store, err := session.NewStore(filepath.Join(t.TempDir(), "sessions.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+	server := NewServer(ServerDeps{
+		Agent:    &eventSpyAgent{},
+		Sessions: store,
+		Config:   cfg,
+		Version:  "test",
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocketServer(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	helloServer(t, conn)
+
+	writeFrameServer(t, conn, RequestFrame{
+		ID:     "agent-1",
+		Method: "chat.send",
+		Params: json.RawMessage(`{"session":"s1","message":"delegate work"}`),
+	})
+
+	got := make(map[string]map[string]any)
+	gotResponse := false
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for !gotResponse || got["agent.spawned"] == nil || got["agent.completed"] == nil || got["agent.wait.started"] == nil || got["agent.wait.completed"] == nil {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		frame, err := DecodeFrame(data)
+		if err != nil {
+			t.Fatalf("DecodeFrame: %v", err)
+		}
+		if frame.Kind == FrameResponse && frame.Response.ID == "agent-1" {
+			gotResponse = true
+			continue
+		}
+		if frame.Kind != FrameEvent {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(frame.Event.Payload, &payload); err != nil {
+			t.Fatalf("Unmarshal payload for %s: %v", frame.Event.EventName, err)
+		}
+		got[frame.Event.EventName] = payload
+	}
+
+	if got["agent.spawned"]["name"] != "Bernoulli" {
+		t.Fatalf("missing agent.spawned payload: %#v", got["agent.spawned"])
+	}
+	if got["agent.completed"]["summary"] != "✅ Spec compliant" {
+		t.Fatalf("missing agent.completed summary: %#v", got["agent.completed"])
+	}
+	if got["agent.wait.started"]["count"] == nil {
+		t.Fatalf("missing agent.wait.started payload: %#v", got["agent.wait.started"])
+	}
+	if got["agent.wait.completed"]["count"] == nil {
+		t.Fatalf("missing agent.wait.completed payload: %#v", got["agent.wait.completed"])
+	}
+}
+
 func TestStatusChannelStatesReturnsDetail(t *testing.T) {
 	store, err := session.NewStore(filepath.Join(t.TempDir(), "sessions.db"))
 	if err != nil {
@@ -477,6 +547,36 @@ func (a *eventSpyAgent) ProcessDirect(_ context.Context, req agent.Request, cb a
 		a.toolDoneCalls = append(a.toolDoneCalls, toolDoneInfo{name: doneEvent.Content, output: "result"})
 		cb(startEvent)
 		cb(doneEvent)
+		cb(agent.Event{Type: agent.EventAgentSpawned, Data: map[string]any{
+			"id":              "child-1",
+			"name":            "Bernoulli",
+			"agentType":       "explorer",
+			"model":           "gpt-5.4",
+			"reasoningEffort": "high",
+			"description":     "Spec review Gate 6",
+			"promptPreview":   "Review ONLY the Gate 6 changes.",
+		}})
+		cb(agent.Event{Type: agent.EventAgentCompleted, Data: map[string]any{
+			"id":            "child-1",
+			"name":          "Bernoulli",
+			"agentType":     "explorer",
+			"status":        "completed",
+			"description":   "Spec review Gate 6",
+			"promptPreview": "Review ONLY the Gate 6 changes.",
+			"summary":       "✅ Spec compliant",
+		}})
+		cb(agent.Event{Type: agent.EventAgentWaitStarted, Data: map[string]any{
+			"count": 1,
+			"agents": []map[string]any{
+				{"id": "child-1", "name": "Bernoulli", "agentType": "explorer"},
+			},
+		}})
+		cb(agent.Event{Type: agent.EventAgentWaitCompleted, Data: map[string]any{
+			"count": 1,
+			"results": []map[string]any{
+				{"id": "child-1", "name": "Bernoulli", "agentType": "explorer", "status": "completed", "summary": "✅ Spec compliant"},
+			},
+		}})
 	}
 	return "done", nil
 }

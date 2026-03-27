@@ -213,6 +213,18 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 					Spawner:       a.spawner,
 					MessageRouter: a.messageRouter,
 					IsCronContext: req.IsCronContext,
+					EmitEvent: func(name string, payload map[string]any) {
+						switch name {
+						case string(EventAgentSpawned):
+							emit(cb, Event{Type: EventAgentSpawned, Data: payload})
+						case string(EventAgentCompleted):
+							emit(cb, Event{Type: EventAgentCompleted, Data: payload})
+						case string(EventAgentWaitStarted):
+							emit(cb, Event{Type: EventAgentWaitStarted, Data: payload})
+						case string(EventAgentWaitCompleted):
+							emit(cb, Event{Type: EventAgentWaitCompleted, Data: payload})
+						}
+					},
 				})
 				if err != nil {
 					return "", err
