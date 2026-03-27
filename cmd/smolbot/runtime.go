@@ -18,7 +18,9 @@ import (
 
 	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
+	discordchannel "github.com/Nomadcxx/smolbot/pkg/channel/discord"
 	signalchannel "github.com/Nomadcxx/smolbot/pkg/channel/signal"
+	telegramchannel "github.com/Nomadcxx/smolbot/pkg/channel/telegram"
 	whatsappchannel "github.com/Nomadcxx/smolbot/pkg/channel/whatsapp"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/cron"
@@ -125,6 +127,14 @@ var newSignalChannel = func(cfg config.SignalChannelConfig) channel.Channel {
 
 var newWhatsAppChannel = func(cfg config.WhatsAppChannelConfig) (channel.Channel, error) {
 	return whatsappchannel.NewProductionAdapter(cfg)
+}
+
+var newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
+	return telegramchannel.NewProductionAdapter(cfg)
+}
+
+var newDiscordChannel = func(cfg config.DiscordChannelConfig) (channel.Channel, error) {
+	return discordchannel.NewProductionAdapter(cfg)
 }
 
 var runChatRuntimeDeps = func() runtimeDeps {
@@ -764,17 +774,22 @@ func runChannelLoginImpl(ctx context.Context, opts rootOptions, channelName stri
 
 	deps := launchRuntimeDeps()
 	manager := channel.NewManager()
+	var selected channel.Channel
 	if configured, err := configuredChannel(cfg, channelName, true); err != nil {
 		return err
 	} else if configured != nil {
+		selected = configured
 		manager.Register(configured)
 	}
 	for _, registered := range deps.Channels {
 		if registered != nil && channelEnabled(cfg, registered.Name()) {
+			if strings.EqualFold(strings.TrimSpace(registered.Name()), strings.TrimSpace(channelName)) {
+				selected = registered
+			}
 			manager.Register(registered)
 		}
 	}
-	return manager.LoginWithUpdates(ctx, channelName, func(status channel.Status) error {
+	err = manager.LoginWithUpdates(ctx, channelName, func(status channel.Status) error {
 		if out == nil || status.State == "" {
 			return nil
 		}
@@ -785,6 +800,21 @@ func runChannelLoginImpl(ctx context.Context, opts rootOptions, channelName stri
 		_, err := fmt.Fprintf(out, "%s\n", status.State)
 		return err
 	})
+	if err != nil && selected != nil {
+		if _, interactive := selected.(channel.InteractiveLoginHandler); interactive {
+			return err
+		}
+		if reporter, ok := selected.(channel.StatusReporter); ok && out != nil {
+			if status, statusErr := reporter.Status(ctx); statusErr == nil && status.State != "" {
+				if status.Detail != "" {
+					_, _ = fmt.Fprintf(out, "%s: %s\n", status.State, status.Detail)
+				} else {
+					_, _ = fmt.Fprintf(out, "%s\n", status.State)
+				}
+			}
+		}
+	}
+	return err
 }
 
 func loadRuntimeConfig(configPath, workspace string, port int) (*config.Config, *config.Paths, error) {
@@ -884,6 +914,10 @@ func channelEnabled(cfg *config.Config, name string) bool {
 		return cfg.Channels.Signal.Enabled
 	case "whatsapp":
 		return cfg.Channels.WhatsApp.Enabled
+	case "telegram":
+		return cfg.Channels.Telegram.Enabled
+	case "discord":
+		return cfg.Channels.Discord.Enabled
 	default:
 		return true
 	}
@@ -905,6 +939,20 @@ func configuredChannels(cfg *config.Config, includeDisabled bool) ([]channel.Cha
 		}
 		out = append(out, whatsApp)
 	}
+	if includeDisabled || cfg.Channels.Telegram.Enabled {
+		telegram, err := newTelegramChannel(cfg.Channels.Telegram)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, telegram)
+	}
+	if includeDisabled || cfg.Channels.Discord.Enabled {
+		discord, err := newDiscordChannel(cfg.Channels.Discord)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, discord)
+	}
 	return out, nil
 }
 
@@ -921,6 +969,14 @@ func configuredChannel(cfg *config.Config, name string, includeDisabled bool) (c
 	case "whatsapp":
 		if includeDisabled || cfg.Channels.WhatsApp.Enabled {
 			return newWhatsAppChannel(cfg.Channels.WhatsApp)
+		}
+	case "telegram":
+		if includeDisabled || cfg.Channels.Telegram.Enabled {
+			return newTelegramChannel(cfg.Channels.Telegram)
+		}
+	case "discord":
+		if includeDisabled || cfg.Channels.Discord.Enabled {
+			return newDiscordChannel(cfg.Channels.Discord)
 		}
 	}
 	return nil, nil
