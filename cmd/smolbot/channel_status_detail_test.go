@@ -66,6 +66,7 @@ func TestChannelsStatusCommandRendersDetail(t *testing.T) {
 			{Name: "signal", State: "connected", Detail: "signal-cli ready"},
 			{Name: "whatsapp", State: "auth_required", Detail: "device not linked"},
 			{Name: "telegram", State: "connected", Detail: "Bot: @smolbot"},
+			{Name: "discord", State: "connected", Detail: "Bot: @smolbot"},
 		}, nil
 	}
 
@@ -88,6 +89,7 @@ func TestChannelsStatusCommandRendersDetail(t *testing.T) {
 		{"device not linked"},
 		{"telegram"},
 		{"Bot: @smolbot"},
+		{"discord"},
 	} {
 		if !strings.Contains(out, tc.needle) {
 			t.Errorf("expected %q in channels status output %q", tc.needle, out)

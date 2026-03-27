@@ -707,6 +707,48 @@ func TestRunChannelLoginUsesInteractiveTelegramLogin(t *testing.T) {
 	}
 }
 
+func TestRunChannelLoginDoesNotReplayInteractiveTelegramFailureStatus(t *testing.T) {
+	orig := newTelegramChannel
+	defer func() { newTelegramChannel = orig }()
+
+	wantErr := errors.New("telegram login failed")
+	fakeTelegram := &runtimeInteractiveTelegramChannel{
+		name:          "telegram",
+		loginErr:      wantErr,
+		terminalState: channel.Status{State: "auth-required", Detail: "Invalid token: telegram login failed"},
+	}
+	newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
+		if cfg.BotToken != "telegram-bot-token" {
+			t.Fatalf("unexpected telegram config %#v", cfg)
+		}
+		return fakeTelegram, nil
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Telegram.Enabled = true
+	cfg.Channels.Telegram.BotToken = "telegram-bot-token"
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	var out strings.Builder
+	err := runChannelLoginImpl(context.Background(), rootOptions{configPath: cfgPath}, "telegram", &out)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("runChannelLoginImpl error = %v, want %v", err, wantErr)
+	}
+	rendered := out.String()
+	if got := strings.Count(rendered, "auth-required: Invalid token: telegram login failed"); got != 1 {
+		t.Fatalf("expected terminal telegram failure status once, got %d in output %q", got, rendered)
+	}
+}
+
 func TestRunChannelLoginReportsStatusOnlyTelegramLoginClearly(t *testing.T) {
 	orig := newTelegramChannel
 	defer func() { newTelegramChannel = orig }()
@@ -1036,6 +1078,8 @@ type runtimeInteractiveTelegramChannel struct {
 	status            channel.Status
 	interactiveLogins int
 	loginCalls        int
+	loginErr          error
+	terminalState     channel.Status
 }
 
 func (f *runtimeInteractiveTelegramChannel) Name() string { return f.name }
@@ -1065,6 +1109,19 @@ func (f *runtimeInteractiveTelegramChannel) LoginWithUpdates(ctx context.Context
 		if err := report(connecting); err != nil {
 			return err
 		}
+	}
+	if f.loginErr != nil {
+		terminal := f.terminalState
+		if terminal.State == "" {
+			terminal = channel.Status{State: "error", Detail: f.loginErr.Error()}
+		}
+		f.status = terminal
+		if report != nil {
+			if err := report(terminal); err != nil {
+				return err
+			}
+		}
+		return f.loginErr
 	}
 	connected := channel.Status{State: "connected", Detail: "Bot: @smolbot"}
 	f.status = connected

@@ -784,6 +784,9 @@ func runChannelLoginImpl(ctx context.Context, opts rootOptions, channelName stri
 		return err
 	})
 	if err != nil && selected != nil {
+		if _, interactive := selected.(channel.InteractiveLoginHandler); interactive {
+			return err
+		}
 		if reporter, ok := selected.(channel.StatusReporter); ok && out != nil {
 			if status, statusErr := reporter.Status(ctx); statusErr == nil && status.State != "" {
 				if status.Detail != "" {
