@@ -42,7 +42,7 @@ func TestAgentLoopIntegration(t *testing.T) {
 		},
 	}
 
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil, echoTool)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, echoTool)
 	defer store.Close()
 
 	var eventTypes []EventType

@@ -20,7 +20,7 @@ import (
 )
 
 func TestAgentLoopHelpAndNew(t *testing.T) {
-	loop, store, fakeMemory := newTestAgentLoop(t, &fakeStreamProvider{}, nil)
+	loop, store, fakeMemory := newTestAgentLoop(t, &fakeStreamProvider{})
 	defer store.Close()
 
 	if err := store.SaveMessages("s1", []provider.Message{
@@ -67,7 +67,7 @@ func TestAgentLoopStopCancelsActiveSession(t *testing.T) {
 	fakeProvider := &fakeStreamProvider{
 		streams: []fakeStreamScript{{blockUntilCancel: true}},
 	}
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider)
 	defer store.Close()
 	cancelled := false
 	loop.tools.SetCancelSession(func(sessionKey string) {
@@ -123,7 +123,7 @@ func TestAgentLoopSanitizesOutboundMessagesAndPersistsNormalizedTurn(t *testing.
 			},
 		}},
 	}
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider)
 	defer store.Close()
 
 	longID := "call_very_long_id_that_exceeds_nine_chars"
@@ -232,7 +232,7 @@ func TestAgentLoopMessageSuppressesFinalResponseForSameTarget(t *testing.T) {
 		},
 	}
 
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil, tool.NewMessageTool())
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, tool.NewMessageTool())
 	defer store.Close()
 
 	var events []Event
@@ -292,7 +292,7 @@ func TestAgentLoopSkipsPersistenceOnProviderErrorAndRejectsBusySession(t *testin
 	fakeProvider := &fakeStreamProvider{
 		streams: []fakeStreamScript{{blockUntilCancel: true}},
 	}
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider)
 	defer store.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -318,7 +318,7 @@ func TestAgentLoopSkipsPersistenceOnProviderErrorAndRejectsBusySession(t *testin
 			},
 		}},
 	}
-	loop, store, _ = newTestAgentLoop(t, errorProvider, nil)
+	loop, store, _ = newTestAgentLoop(t, errorProvider)
 	defer store.Close()
 
 	_, err = loop.ProcessDirect(context.Background(), Request{Content: "boom", SessionKey: "s2"}, nil)
@@ -365,7 +365,7 @@ func TestAgentLoopPassesRoutingDepsAndUsesToolOutput(t *testing.T) {
 		name:   "capture",
 		result: &tool.Result{Output: "tool output"},
 	}
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil, captureTool)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, captureTool)
 	defer store.Close()
 
 	var events []Event
@@ -454,7 +454,7 @@ func TestAgentLoopEmitsToolErrorsToTranscriptAndEvents(t *testing.T) {
 		name:   "capture",
 		result: &tool.Result{Error: "permission denied"},
 	}
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil, captureTool)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, captureTool)
 	defer store.Close()
 
 	var events []Event
@@ -510,7 +510,7 @@ func TestAgentLoopEmitsUsageEventsFromStreamDeltas(t *testing.T) {
 		}},
 	}
 
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider)
 	defer store.Close()
 
 	var events []Event
@@ -555,7 +555,7 @@ func TestAgentLoopPersistsReportedUsage(t *testing.T) {
 	}
 	defer usageStore.Close()
 
-	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{
+	loop, store, _ := newTestAgentLoopWithUsage(t, &fakeStreamProvider{
 		streams: []fakeStreamScript{{
 			deltas: []*provider.StreamDelta{
 				{Content: "done"},
@@ -599,7 +599,7 @@ func TestAgentLoopPersistsEstimatedUsageWhenProviderOmitsUsage(t *testing.T) {
 	}
 	defer usageStore.Close()
 
-	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{
+	loop, store, _ := newTestAgentLoopWithUsage(t, &fakeStreamProvider{
 		streams: []fakeStreamScript{{
 			deltas: []*provider.StreamDelta{
 				{Content: "hello world"},
@@ -636,7 +636,7 @@ func TestAgentLoopPersistsEstimatedUsageWhenProviderOmitsUsage(t *testing.T) {
 }
 
 func TestAgentLoopCompactNowRewritesSessionHistory(t *testing.T) {
-	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{}, nil)
+	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{})
 	defer store.Close()
 
 	long := strings.Repeat("This is a long message that should be compacted. ", 80)
@@ -779,19 +779,12 @@ func (f *fakeLoopMemory) MaybeConsolidate(context.Context, string) error {
 	return nil
 }
 
-func newTestAgentLoop(t *testing.T, p provider.Provider, args ...any) (*AgentLoop, *session.Store, *fakeLoopMemory) {
-	t.Helper()
+func newTestAgentLoop(t *testing.T, p provider.Provider, tools ...tool.Tool) (*AgentLoop, *session.Store, *fakeLoopMemory) {
+	return newTestAgentLoopWithUsage(t, p, nil, tools...)
+}
 
-	var recorder usage.Recorder
-	start := 0
-	if len(args) > 0 {
-		if args[0] == nil {
-			start = 1
-		} else if typedRecorder, ok := args[0].(usage.Recorder); ok {
-			recorder = typedRecorder
-			start = 1
-		}
-	}
+func newTestAgentLoopWithUsage(t *testing.T, p provider.Provider, recorder usage.Recorder, tools ...tool.Tool) (*AgentLoop, *session.Store, *fakeLoopMemory) {
+	t.Helper()
 
 	workspace := t.TempDir()
 	if err := SyncWorkspaceTemplates(workspace); err != nil {
@@ -808,14 +801,7 @@ func newTestAgentLoop(t *testing.T, p provider.Provider, args ...any) (*AgentLoo
 		t.Fatalf("NewStore: %v", err)
 	}
 	toolRegistry := tool.NewRegistry()
-	for _, arg := range args[start:] {
-		if arg == nil {
-			continue
-		}
-		registered, ok := arg.(tool.Tool)
-		if !ok {
-			t.Fatalf("unexpected tool argument type %T", arg)
-		}
+	for _, registered := range tools {
 		toolRegistry.Register(registered)
 	}
 
