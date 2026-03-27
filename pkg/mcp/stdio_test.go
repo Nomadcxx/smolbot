@@ -131,6 +131,29 @@ func TestStdioTransportContextCancel(t *testing.T) {
 	}
 }
 
+func TestStdioTransportWriteHonorsContextCancel(t *testing.T) {
+	transport, err := NewStdioTransport(context.Background(), "sh", []string{"-c", "sleep 5"}, nil)
+	if err != nil {
+		t.Fatalf("new stdio transport: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = transport.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	_, err = transport.Send(ctx, "tools/call", map[string]any{
+		"payload": strings.Repeat("x", 8*1024*1024),
+	})
+	if err == nil {
+		t.Fatal("expected blocked write to fail")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded context, got %v", err)
+	}
+}
+
 func TestStdioTransportLargePayload(t *testing.T) {
 	transport := newMockTransport(t, mockServerEnv("MOCK_MCP_LARGE", "1")...)
 	t.Cleanup(func() {
