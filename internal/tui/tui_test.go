@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -330,14 +329,12 @@ func TestStatusLoadedUpdatesFooterUsage(t *testing.T) {
 	}
 }
 
-func TestCopyShortcutWritesOSC52AndFlashesStatus(t *testing.T) {
+func TestCopyShortcutUsesClipboardAndFlashesStatus(t *testing.T) {
 	model := New(app.Config{})
 	model.status.SetWidth(80)
 	model.messages.SetSize(80, 20)
 	model.messages.AppendAssistant("copy me")
 	model.editor.Blur()
-	var out bytes.Buffer
-	model.clipboardOut = &out
 
 	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: 'y'}))
 	got := updated.(Model)
@@ -346,13 +343,17 @@ func TestCopyShortcutWritesOSC52AndFlashesStatus(t *testing.T) {
 	}
 
 	msg := cmd()
+	copied, ok := msg.(ClipboardCopiedMsg)
+	if !ok {
+		t.Fatalf("expected clipboard copied msg, got %#v", msg)
+	}
 	updated, nextCmd := got.Update(msg)
 	got = updated.(Model)
 	if nextCmd == nil {
 		t.Fatal("expected flash clear timer after copy")
 	}
-	if !strings.Contains(out.String(), "\033]52;c;") {
-		t.Fatalf("expected OSC 52 output, got %q", out.String())
+	if copied.Text != "copy me" {
+		t.Fatalf("expected clipboard copied text to be preserved, got %q", copied.Text)
 	}
 	if view := plain(got.status.View()); !strings.Contains(view, "Copied to clipboard") {
 		t.Fatalf("expected copied flash in status row, got %q", view)
@@ -362,6 +363,51 @@ func TestCopyShortcutWritesOSC52AndFlashesStatus(t *testing.T) {
 	got = updated.(Model)
 	if view := plain(got.status.View()); strings.Contains(view, "Copied to clipboard") {
 		t.Fatalf("expected copied flash to clear, got %q", view)
+	}
+}
+
+func TestMouseSelectionRoutesToTranscriptAndCopiesOnRelease(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme")
+	}
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	model.recalcLayout()
+	model.messages.AppendAssistant("alpha beta gamma")
+	model.editor.Blur()
+
+	updated, _ := model.Update(tea.MouseClickMsg(tea.Mouse{X: 2, Y: model.header.Height() + 1, Button: tea.MouseLeft}))
+	got := updated.(Model)
+
+	updated, _ = got.Update(tea.MouseMotionMsg(tea.Mouse{X: 7, Y: model.header.Height() + 1, Button: tea.MouseLeft}))
+	got = updated.(Model)
+
+	updated, cmd := got.Update(tea.MouseReleaseMsg(tea.Mouse{X: 7, Y: model.header.Height() + 1, Button: tea.MouseLeft}))
+	got = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected mouse release with selection to trigger copy command")
+	}
+
+	msg := cmd()
+	copied, ok := msg.(ClipboardCopiedMsg)
+	if !ok {
+		t.Fatalf("expected ClipboardCopiedMsg, got %#v", msg)
+	}
+	if copied.Text != "alpha" {
+		t.Fatalf("copied text = %q, want alpha", copied.Text)
+	}
+
+	updated, nextCmd := got.Update(msg)
+	got = updated.(Model)
+	if nextCmd == nil {
+		t.Fatal("expected follow-up clipboard/flash command after copy")
+	}
+	if got.messages.HasSelection() {
+		t.Fatal("expected transcript selection to clear after copy")
+	}
+	if view := plain(got.status.View()); !strings.Contains(view, "Copied to clipboard") {
+		t.Fatalf("expected copied flash in status row, got %q", view)
 	}
 }
 

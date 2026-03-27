@@ -1,18 +1,46 @@
 package common
 
 import (
-	"bytes"
+	"errors"
 	"testing"
 )
 
-func TestWriteOSC52EncodesClipboardPayload(t *testing.T) {
-	var out bytes.Buffer
-	if err := WriteOSC52(&out, "hello"); err != nil {
-		t.Fatalf("WriteOSC52: %v", err)
+func TestWriteClipboardUsesInjectedWriter(t *testing.T) {
+	var got string
+	if err := WriteClipboard("hello", func(text string) error {
+		got = text
+		return nil
+	}); err != nil {
+		t.Fatalf("WriteClipboard: %v", err)
+	}
+	if got != "hello" {
+		t.Fatalf("native clipboard text = %q, want hello", got)
+	}
+}
+
+func TestWriteClipboardFallsBackToConfiguredWriter(t *testing.T) {
+	old := nativeClipboardWrite
+	t.Cleanup(func() { nativeClipboardWrite = old })
+
+	var got string
+	nativeClipboardWrite = func(text string) error {
+		got = text
+		return nil
 	}
 
-	const want = "\033]52;c;aGVsbG8=\a"
-	if got := out.String(); got != want {
-		t.Fatalf("clipboard sequence = %q, want %q", got, want)
+	if err := WriteClipboard("world", nil); err != nil {
+		t.Fatalf("WriteClipboard: %v", err)
+	}
+	if got != "world" {
+		t.Fatalf("native clipboard text = %q, want world", got)
+	}
+}
+
+func TestWriteClipboardPropagatesErrors(t *testing.T) {
+	err := WriteClipboard("boom", func(string) error {
+		return errors.New("boom")
+	})
+	if err == nil {
+		t.Fatal("expected error from clipboard writer")
 	}
 }
