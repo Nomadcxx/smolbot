@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -295,6 +298,76 @@ func TestBuildRuntimeCallsMCPCleanupOnClose(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeMCPDiscoveryFailureDoesNotAbortStartup(t *testing.T) {
+	origNewMCPMgr := newMCPMgr
+	origDefault := slog.Default()
+	t.Cleanup(func() {
+		newMCPMgr = origNewMCPMgr
+		slog.SetDefault(origDefault)
+	})
+
+	cleanupCalled := 0
+	newMCPMgr = func() (mcpDiscoveryManager, func()) {
+		return failingMCPDiscoveryManager{}, func() {
+			cleanupCalled++
+		}
+	}
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+	slog.SetDefault(logger)
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Tools.MCPServers = map[string]config.MCPServerConfig{
+		"hybrid-memory": {
+			Command:     "broken-server",
+			ToolTimeout: 30,
+		},
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+
+	names := make([]string, 0)
+	for _, def := range app.tools.Definitions() {
+		names = append(names, def.Name)
+	}
+	for _, name := range names {
+		if strings.HasPrefix(name, "mcp_") {
+			t.Fatalf("expected no discovered MCP tools after startup warning, got %#v", names)
+		}
+	}
+
+	if cleanupCalled != 0 {
+		t.Fatalf("expected cleanup to defer until runtime close, got %d", cleanupCalled)
+	}
+	if err := app.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if cleanupCalled != 1 {
+		t.Fatalf("expected cleanup once on runtime close, got %d", cleanupCalled)
+	}
+
+	if !strings.Contains(logBuf.String(), "mcp discovery failed; continuing without discovered tools") {
+		t.Fatalf("expected warning log in output, got %q", logBuf.String())
+	}
+}
+
 type fakeMCPDisonveryClient struct {
 	tools           []mcp.RemoteTool
 	lastInvokedTool string
@@ -321,4 +394,10 @@ func (m *fakeMCPDisonveryClientManager) DiscoverAndRegister(ctx context.Context,
 		m.onDiscover(warnings)
 	}
 	return warnings, err
+}
+
+type failingMCPDiscoveryManager struct{}
+
+func (failingMCPDiscoveryManager) DiscoverAndRegister(_ context.Context, _ *tool.Registry, _ map[string]config.MCPServerConfig) ([]string, error) {
+	return nil, errors.New("boom")
 }

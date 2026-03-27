@@ -578,22 +578,19 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		mcpCleanup = cleanup
 		warnings, err := mgr.DiscoverAndRegister(context.Background(), tools, cfg.Tools.MCPServers)
 		if err != nil {
-			_ = sessions.Close()
-			if mcpCleanup != nil {
-				mcpCleanup()
+			slog.Warn("mcp discovery failed; continuing without discovered tools", "error", err)
+		} else {
+			for _, warning := range warnings {
+				slog.Warn("mcp discovery warning", "msg", warning)
 			}
-			return nil, fmt.Errorf("mcp discovery: %w", err)
-		}
-		for _, warning := range warnings {
-			slog.Warn("mcp discovery warning", "msg", warning)
-		}
-		registered := make([]string, 0)
-		for _, def := range tools.Definitions() {
-			if strings.HasPrefix(def.Name, "mcp_") {
-				registered = append(registered, def.Name)
+			registered := make([]string, 0)
+			for _, def := range tools.Definitions() {
+				if strings.HasPrefix(def.Name, "mcp_") {
+					registered = append(registered, def.Name)
+				}
 			}
+			slog.Info("mcp discovery completed", "servers", len(cfg.Tools.MCPServers), "count", len(registered), "tools", registered)
 		}
-		slog.Info("mcp discovery completed", "servers", len(cfg.Tools.MCPServers), "count", len(registered), "tools", registered)
 	}
 	spawner := &runtimeSpawner{}
 	loop := agent.NewAgentLoop(agent.LoopDeps{

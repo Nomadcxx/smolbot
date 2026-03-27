@@ -247,6 +247,25 @@ func TestStdioDiscoveryClientRejectsUnsupportedTransport(t *testing.T) {
 	}
 }
 
+func TestStdioDiscoveryClientInitializeSurfacedChildStderr(t *testing.T) {
+	client := NewStdioDiscoveryClient(nil)
+	t.Cleanup(client.Close)
+
+	spec := ConnectionSpec{
+		Name:        "broken",
+		Transport:   TransportStdio,
+		Command:     "sh",
+		Args:        []string{"-c", "echo better-sqlite3 ABI mismatch >&2; exit 1"},
+		ToolTimeout: 200 * time.Millisecond,
+	}
+
+	if _, err := client.Discover(context.Background(), spec); err == nil {
+		t.Fatal("expected initialize failure")
+	} else if !strings.Contains(err.Error(), "better-sqlite3 ABI mismatch") {
+		t.Fatalf("expected child stderr in initialize error, got %v", err)
+	}
+}
+
 func mockConnectionSpec(t *testing.T, env map[string]string) ConnectionSpec {
 	t.Helper()
 
