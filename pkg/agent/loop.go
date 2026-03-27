@@ -143,12 +143,13 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	if maxIterations <= 0 {
 		maxIterations = 40
 	}
+	activeModel := a.config.Agents.Defaults.Model
 
 	for i := 0; i < maxIterations; i++ {
 		iterationStart := time.Now()
 		sanitized := provider.SanitizeMessages(conversation, a.provider.Name())
 		stream, err := a.provider.ChatStream(runCtx, provider.ChatRequest{
-			Model:           a.config.Agents.Defaults.Model,
+			Model:           activeModel,
 			Messages:        sanitized,
 			Tools:           a.tools.Definitions(),
 			MaxTokens:       a.config.Agents.Defaults.MaxTokens,
@@ -163,7 +164,7 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 		if err != nil {
 			return "", err
 		}
-		a.recordUsage(req.SessionKey, sanitized, resp, time.Since(iterationStart))
+		a.recordUsage(req.SessionKey, activeModel, sanitized, resp, time.Since(iterationStart))
 		if resp.FinishReason == "error" {
 			emit(cb, Event{Type: EventError, Content: "provider returned error finish"})
 			return "", errors.New("provider returned error finish")
@@ -272,7 +273,7 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	return finalResponse, nil
 }
 
-func (a *AgentLoop) recordUsage(sessionKey string, sanitized []provider.Message, resp *provider.Response, duration time.Duration) {
+func (a *AgentLoop) recordUsage(sessionKey, modelName string, sanitized []provider.Message, resp *provider.Response, duration time.Duration) {
 	if a == nil || a.usageRecorder == nil || a.config == nil || a.provider == nil || resp == nil {
 		return
 	}
@@ -285,7 +286,7 @@ func (a *AgentLoop) recordUsage(sessionKey string, sanitized []provider.Message,
 	record := usage.CompletionRecord{
 		SessionKey:  sessionKey,
 		ProviderID:  a.provider.Name(),
-		ModelName:   a.config.Agents.Defaults.Model,
+		ModelName:   modelName,
 		RequestType: "chat",
 		Status:      "success",
 		UsageSource: "reported",

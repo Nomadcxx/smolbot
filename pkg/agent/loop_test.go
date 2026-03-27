@@ -635,6 +635,46 @@ func TestAgentLoopPersistsEstimatedUsageWhenProviderOmitsUsage(t *testing.T) {
 	}
 }
 
+func TestAgentLoopPersistsUsageAgainstRequestModelEvenIfConfigChangesMidRun(t *testing.T) {
+	usageStore, err := usage.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("usage.NewStore: %v", err)
+	}
+	defer usageStore.Close()
+
+	providerWithMutation := &mutatingModelProvider{}
+	loop, store, _ := newTestAgentLoopWithUsage(t, providerWithMutation, usageStore)
+	defer store.Close()
+	providerWithMutation.onRequest = func() {
+		loop.SetActiveModel("gpt-4.1")
+	}
+
+	resp, err := loop.ProcessDirect(context.Background(), Request{
+		Content:    "hello",
+		SessionKey: "s1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ProcessDirect: %v", err)
+	}
+	if resp != "done" {
+		t.Fatalf("response = %q, want done", resp)
+	}
+
+	records, err := usageStore.ListUsageRecords("s1")
+	if err != nil {
+		t.Fatalf("ListUsageRecords: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("usage records = %d, want 1", len(records))
+	}
+	if records[0].ModelName != "gpt-4o" {
+		t.Fatalf("model name = %q, want original request model gpt-4o", records[0].ModelName)
+	}
+	if providerWithMutation.lastModel != "gpt-4o" {
+		t.Fatalf("provider request model = %q, want gpt-4o", providerWithMutation.lastModel)
+	}
+}
+
 func TestAgentLoopCompactNowRewritesSessionHistory(t *testing.T) {
 	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{})
 	defer store.Close()
@@ -725,6 +765,38 @@ func (f *fakeStreamProvider) activeStreamCount() int {
 	defer f.mu.Unlock()
 	return f.active
 }
+
+type mutatingModelProvider struct {
+	onRequest func()
+	lastModel string
+}
+
+func (m *mutatingModelProvider) Chat(context.Context, provider.ChatRequest) (*provider.Response, error) {
+	return nil, errors.New("not used")
+}
+
+func (m *mutatingModelProvider) ChatStream(_ context.Context, req provider.ChatRequest) (*provider.Stream, error) {
+	m.lastModel = req.Model
+	if m.onRequest != nil {
+		m.onRequest()
+	}
+	idx := 0
+	deltas := []*provider.StreamDelta{
+		{Content: "done"},
+		{Usage: &provider.Usage{PromptTokens: 12, CompletionTokens: 8, TotalTokens: 20}},
+		{FinishReason: stringPtr("stop")},
+	}
+	return provider.NewStream(func() (*provider.StreamDelta, error) {
+		if idx >= len(deltas) {
+			return nil, io.EOF
+		}
+		delta := deltas[idx]
+		idx++
+		return delta, nil
+	}, func() error { return nil }), nil
+}
+
+func (m *mutatingModelProvider) Name() string { return "openai" }
 
 type fakeTool struct {
 	name   string

@@ -110,6 +110,12 @@ func NewStore(dsn string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	if dsn == ":memory:" {
+		// SQLite in-memory databases are scoped to a single connection.
+		// Constrain the pool so schema creation and later queries share it.
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+	}
 
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()

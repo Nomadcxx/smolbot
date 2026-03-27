@@ -13,6 +13,9 @@ func TestNewStoreCreatesPhaseOneTables(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	defer store.Close()
+	if got := store.db.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("MaxOpenConnections = %d, want 1 for in-memory sqlite", got)
+	}
 
 	for _, table := range []string{
 		"usage_records",
