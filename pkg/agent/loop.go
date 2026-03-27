@@ -19,6 +19,7 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/skill"
 	"github.com/Nomadcxx/smolbot/pkg/tokenizer"
 	"github.com/Nomadcxx/smolbot/pkg/tool"
+	"github.com/Nomadcxx/smolbot/pkg/usage"
 )
 
 var thinkBlockPattern = regexp.MustCompile(`(?s)<think>.*?</think>`)
@@ -34,6 +35,7 @@ type LoopDeps struct {
 	Config        *config.Config
 	Skills        *skill.Registry
 	Tokenizer     *tokenizer.Tokenizer
+	UsageRecorder usage.Recorder
 	Memory        memoryRunner
 	Workspace     string
 	MessageRouter tool.MessageRouter
@@ -41,14 +43,15 @@ type LoopDeps struct {
 }
 
 type AgentLoop struct {
-	provider  provider.Provider
-	tools     *tool.Registry
-	sessions  *session.Store
-	config    *config.Config
-	skills    *skill.Registry
-	memory    memoryRunner
-	tokenizer *tokenizer.Tokenizer
-	workspace string
+	provider      provider.Provider
+	tools         *tool.Registry
+	sessions      *session.Store
+	config        *config.Config
+	skills        *skill.Registry
+	memory        memoryRunner
+	tokenizer     *tokenizer.Tokenizer
+	usageRecorder usage.Recorder
+	workspace     string
 
 	messageRouter tool.MessageRouter
 	spawner       tool.Spawner
@@ -67,6 +70,7 @@ func NewAgentLoop(deps LoopDeps) *AgentLoop {
 		skills:        deps.Skills,
 		memory:        deps.Memory,
 		tokenizer:     deps.Tokenizer,
+		usageRecorder: deps.UsageRecorder,
 		workspace:     deps.Workspace,
 		messageRouter: deps.MessageRouter,
 		spawner:       deps.Spawner,
@@ -141,6 +145,7 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	}
 
 	for i := 0; i < maxIterations; i++ {
+		iterationStart := time.Now()
 		sanitized := provider.SanitizeMessages(conversation, a.provider.Name())
 		stream, err := a.provider.ChatStream(runCtx, provider.ChatRequest{
 			Model:           a.config.Agents.Defaults.Model,
@@ -158,6 +163,7 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 		if err != nil {
 			return "", err
 		}
+		a.recordUsage(req.SessionKey, sanitized, resp, time.Since(iterationStart))
 		if resp.FinishReason == "error" {
 			emit(cb, Event{Type: EventError, Content: "provider returned error finish"})
 			return "", errors.New("provider returned error finish")
@@ -264,6 +270,62 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 		return "", nil
 	}
 	return finalResponse, nil
+}
+
+func (a *AgentLoop) recordUsage(sessionKey string, sanitized []provider.Message, resp *provider.Response, duration time.Duration) {
+	if a == nil || a.usageRecorder == nil || a.config == nil || a.provider == nil || resp == nil {
+		return
+	}
+
+	tok := a.tokenizer
+	if tok == nil {
+		tok = tokenizer.New()
+	}
+
+	record := usage.CompletionRecord{
+		SessionKey:  sessionKey,
+		ProviderID:  a.provider.Name(),
+		ModelName:   a.config.Agents.Defaults.Model,
+		RequestType: "chat",
+		Status:      "success",
+		UsageSource: "reported",
+	}
+	if len(sanitized) > 0 {
+		record.PromptTokens = tok.EstimatePromptTokens(sanitized)
+	}
+
+	if resp.Usage.TotalTokens > 0 {
+		record.PromptTokens = resp.Usage.PromptTokens
+		record.CompletionTokens = resp.Usage.CompletionTokens
+		record.TotalTokens = resp.Usage.TotalTokens
+	} else {
+		record.UsageSource = "estimated"
+		completionEstimate := resp.Content + resp.ReasoningContent
+		for _, toolCall := range resp.ToolCalls {
+			completionEstimate += toolCall.ID
+			completionEstimate += toolCall.Function.Name
+			completionEstimate += toolCall.Function.Arguments
+		}
+		record.CompletionTokens = tok.EstimateTokens(completionEstimate)
+		record.TotalTokens = record.PromptTokens + record.CompletionTokens
+	}
+
+	if duration > 0 {
+		record.DurationMS = int(duration / time.Millisecond)
+	}
+	if resp.FinishReason == "error" {
+		record.Status = "error"
+	}
+	if record.TotalTokens <= 0 {
+		record.TotalTokens = record.PromptTokens + record.CompletionTokens
+	}
+	if record.TotalTokens <= 0 {
+		return
+	}
+
+	if err := a.usageRecorder.RecordCompletion(context.Background(), record); err != nil {
+		log.Printf("[agent] usage record failed: %v", err)
+	}
 }
 
 func (a *AgentLoop) handleSlashCommand(ctx context.Context, req Request) (string, error) {

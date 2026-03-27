@@ -126,6 +126,9 @@ func TestPaths(t *testing.T) {
 	if p.SessionsDB() != "/home/test/.smolbot/sessions.db" {
 		t.Errorf("SessionsDB = %q", p.SessionsDB())
 	}
+	if p.UsageDB() != "/home/test/.smolbot/usage.db" {
+		t.Errorf("UsageDB = %q", p.UsageDB())
+	}
 	if p.JobsFile() != "/home/test/.smolbot/jobs.json" {
 		t.Errorf("JobsFile = %q", p.JobsFile())
 	}

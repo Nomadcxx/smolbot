@@ -16,10 +16,11 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/skill"
 	"github.com/Nomadcxx/smolbot/pkg/tokenizer"
 	"github.com/Nomadcxx/smolbot/pkg/tool"
+	"github.com/Nomadcxx/smolbot/pkg/usage"
 )
 
 func TestAgentLoopHelpAndNew(t *testing.T) {
-	loop, store, fakeMemory := newTestAgentLoop(t, &fakeStreamProvider{})
+	loop, store, fakeMemory := newTestAgentLoop(t, &fakeStreamProvider{}, nil)
 	defer store.Close()
 
 	if err := store.SaveMessages("s1", []provider.Message{
@@ -66,7 +67,7 @@ func TestAgentLoopStopCancelsActiveSession(t *testing.T) {
 	fakeProvider := &fakeStreamProvider{
 		streams: []fakeStreamScript{{blockUntilCancel: true}},
 	}
-	loop, store, _ := newTestAgentLoop(t, fakeProvider)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil)
 	defer store.Close()
 	cancelled := false
 	loop.tools.SetCancelSession(func(sessionKey string) {
@@ -122,7 +123,7 @@ func TestAgentLoopSanitizesOutboundMessagesAndPersistsNormalizedTurn(t *testing.
 			},
 		}},
 	}
-	loop, store, _ := newTestAgentLoop(t, fakeProvider)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil)
 	defer store.Close()
 
 	longID := "call_very_long_id_that_exceeds_nine_chars"
@@ -231,7 +232,7 @@ func TestAgentLoopMessageSuppressesFinalResponseForSameTarget(t *testing.T) {
 		},
 	}
 
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, tool.NewMessageTool())
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil, tool.NewMessageTool())
 	defer store.Close()
 
 	var events []Event
@@ -291,7 +292,7 @@ func TestAgentLoopSkipsPersistenceOnProviderErrorAndRejectsBusySession(t *testin
 	fakeProvider := &fakeStreamProvider{
 		streams: []fakeStreamScript{{blockUntilCancel: true}},
 	}
-	loop, store, _ := newTestAgentLoop(t, fakeProvider)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil)
 	defer store.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -317,7 +318,7 @@ func TestAgentLoopSkipsPersistenceOnProviderErrorAndRejectsBusySession(t *testin
 			},
 		}},
 	}
-	loop, store, _ = newTestAgentLoop(t, errorProvider)
+	loop, store, _ = newTestAgentLoop(t, errorProvider, nil)
 	defer store.Close()
 
 	_, err = loop.ProcessDirect(context.Background(), Request{Content: "boom", SessionKey: "s2"}, nil)
@@ -364,7 +365,7 @@ func TestAgentLoopPassesRoutingDepsAndUsesToolOutput(t *testing.T) {
 		name:   "capture",
 		result: &tool.Result{Output: "tool output"},
 	}
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, captureTool)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil, captureTool)
 	defer store.Close()
 
 	var events []Event
@@ -453,7 +454,7 @@ func TestAgentLoopEmitsToolErrorsToTranscriptAndEvents(t *testing.T) {
 		name:   "capture",
 		result: &tool.Result{Error: "permission denied"},
 	}
-	loop, store, _ := newTestAgentLoop(t, fakeProvider, captureTool)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil, captureTool)
 	defer store.Close()
 
 	var events []Event
@@ -509,7 +510,7 @@ func TestAgentLoopEmitsUsageEventsFromStreamDeltas(t *testing.T) {
 		}},
 	}
 
-	loop, store, _ := newTestAgentLoop(t, fakeProvider)
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, nil)
 	defer store.Close()
 
 	var events []Event
@@ -547,8 +548,95 @@ func TestAgentLoopEmitsUsageEventsFromStreamDeltas(t *testing.T) {
 	}
 }
 
+func TestAgentLoopPersistsReportedUsage(t *testing.T) {
+	usageStore, err := usage.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("usage.NewStore: %v", err)
+	}
+	defer usageStore.Close()
+
+	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{
+		streams: []fakeStreamScript{{
+			deltas: []*provider.StreamDelta{
+				{Content: "done"},
+				{Usage: &provider.Usage{PromptTokens: 12, CompletionTokens: 8, TotalTokens: 20}},
+				{FinishReason: stringPtr("stop")},
+			},
+		}},
+	}, usageStore)
+	defer store.Close()
+
+	resp, err := loop.ProcessDirect(context.Background(), Request{
+		Content:    "hello",
+		SessionKey: "s1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ProcessDirect: %v", err)
+	}
+	if resp != "done" {
+		t.Fatalf("response = %q, want done", resp)
+	}
+
+	records, err := usageStore.ListUsageRecords("s1")
+	if err != nil {
+		t.Fatalf("ListUsageRecords: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("usage records = %d, want 1", len(records))
+	}
+	if records[0].UsageSource != "reported" {
+		t.Fatalf("usage source = %q, want reported", records[0].UsageSource)
+	}
+	if records[0].TotalTokens != 20 {
+		t.Fatalf("total tokens = %d, want 20", records[0].TotalTokens)
+	}
+}
+
+func TestAgentLoopPersistsEstimatedUsageWhenProviderOmitsUsage(t *testing.T) {
+	usageStore, err := usage.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("usage.NewStore: %v", err)
+	}
+	defer usageStore.Close()
+
+	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{
+		streams: []fakeStreamScript{{
+			deltas: []*provider.StreamDelta{
+				{Content: "hello world"},
+				{FinishReason: stringPtr("stop")},
+			},
+		}},
+	}, usageStore)
+	defer store.Close()
+
+	resp, err := loop.ProcessDirect(context.Background(), Request{
+		Content:    "hello",
+		SessionKey: "s1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ProcessDirect: %v", err)
+	}
+	if resp != "hello world" {
+		t.Fatalf("response = %q, want hello world", resp)
+	}
+
+	records, err := usageStore.ListUsageRecords("s1")
+	if err != nil {
+		t.Fatalf("ListUsageRecords: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("usage records = %d, want 1", len(records))
+	}
+	if records[0].UsageSource != "estimated" {
+		t.Fatalf("usage source = %q, want estimated", records[0].UsageSource)
+	}
+	if records[0].TotalTokens <= 0 {
+		t.Fatalf("total tokens = %d, want > 0", records[0].TotalTokens)
+	}
+}
+
 func TestAgentLoopCompactNowRewritesSessionHistory(t *testing.T) {
-	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{})
+	loop, store, _ := newTestAgentLoop(t, &fakeStreamProvider{}, nil)
 	defer store.Close()
 
 	long := strings.Repeat("This is a long message that should be compacted. ", 80)
@@ -691,8 +779,19 @@ func (f *fakeLoopMemory) MaybeConsolidate(context.Context, string) error {
 	return nil
 }
 
-func newTestAgentLoop(t *testing.T, p provider.Provider, tools ...tool.Tool) (*AgentLoop, *session.Store, *fakeLoopMemory) {
+func newTestAgentLoop(t *testing.T, p provider.Provider, args ...any) (*AgentLoop, *session.Store, *fakeLoopMemory) {
 	t.Helper()
+
+	var recorder usage.Recorder
+	start := 0
+	if len(args) > 0 {
+		if args[0] == nil {
+			start = 1
+		} else if typedRecorder, ok := args[0].(usage.Recorder); ok {
+			recorder = typedRecorder
+			start = 1
+		}
+	}
 
 	workspace := t.TempDir()
 	if err := SyncWorkspaceTemplates(workspace); err != nil {
@@ -709,7 +808,14 @@ func newTestAgentLoop(t *testing.T, p provider.Provider, tools ...tool.Tool) (*A
 		t.Fatalf("NewStore: %v", err)
 	}
 	toolRegistry := tool.NewRegistry()
-	for _, registered := range tools {
+	for _, arg := range args[start:] {
+		if arg == nil {
+			continue
+		}
+		registered, ok := arg.(tool.Tool)
+		if !ok {
+			t.Fatalf("unexpected tool argument type %T", arg)
+		}
 		toolRegistry.Register(registered)
 	}
 
@@ -722,6 +828,7 @@ func newTestAgentLoop(t *testing.T, p provider.Provider, tools ...tool.Tool) (*A
 		Provider:      p,
 		Tools:         toolRegistry,
 		Sessions:      store,
+		UsageRecorder: recorder,
 		Config:        &cfg,
 		Skills:        reg,
 		Tokenizer:     tokenizer.New(),
