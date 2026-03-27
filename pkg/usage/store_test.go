@@ -2,11 +2,32 @@ package usage
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 )
 
 func TestNewStoreCreatesPhaseOneTables(t *testing.T) {
 	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	for _, table := range []string{
+		"usage_records",
+		"daily_usage_rollups",
+		"budgets",
+		"budget_alerts",
+		"historical_usage_samples",
+	} {
+		if !tableExists(t, store, table) {
+			t.Fatalf("expected table %q to exist", table)
+		}
+	}
+}
+
+func TestNewStoreCreatesPhaseOneTablesFileBacked(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "usage.db"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
