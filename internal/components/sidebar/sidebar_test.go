@@ -62,6 +62,54 @@ func TestContextSectionRendersUsageAndCompression(t *testing.T) {
 	}
 }
 
+func TestUsageSectionRendersPersistedSummary(t *testing.T) {
+	section := UsageSection{
+		summary: &client.UsageSummary{
+			ProviderID:    "ollama",
+			ModelName:     "llama3.2",
+			SessionTokens: 50,
+			TodayTokens:   50,
+			WeeklyTokens:  90,
+			BudgetStatus:  "warning",
+			WarningLevel:  "medium",
+		},
+	}
+
+	got := plain(section.Render(28, 0, theme.Current()))
+	if !strings.Contains(got, "ollama / llama3.2") || !strings.Contains(got, "session 50") || !strings.Contains(got, "week 90") || !strings.Contains(got, "warning medium") {
+		t.Fatalf("unexpected usage render: %q", got)
+	}
+}
+
+func TestUsageSectionAvoidsDuplicatingQualifiedProviderModel(t *testing.T) {
+	section := UsageSection{
+		summary: &client.UsageSummary{
+			ProviderID:    "ollama",
+			ModelName:     "ollama/llama3.2",
+			SessionTokens: 50,
+			TodayTokens:   50,
+			WeeklyTokens:  90,
+		},
+	}
+
+	got := plain(section.Render(28, 0, theme.Current()))
+	if !strings.Contains(got, "ollama/llama3.2") {
+		t.Fatalf("expected qualified provider/model label, got %q", got)
+	}
+	if strings.Contains(got, "ollama / ollama/llama3.2") {
+		t.Fatalf("expected provider label to avoid duplication, got %q", got)
+	}
+}
+
+func TestUsageSectionRendersEmptyState(t *testing.T) {
+	section := UsageSection{}
+
+	got := plain(section.Render(28, 0, theme.Current()))
+	if got != "—" {
+		t.Fatalf("expected empty usage state, got %q", got)
+	}
+}
+
 func TestChannelsSectionTruncatesAndShowsOverflow(t *testing.T) {
 	section := ChannelsSection{
 		channels: []ChannelEntry{
@@ -145,17 +193,24 @@ func TestSidebarViewAndCompactView(t *testing.T) {
 	model.SetCWD(home + "/project")
 	model.SetModel("gpt-4o")
 	model.SetUsage(client.UsageInfo{TotalTokens: 78000, ContextWindow: 100000})
+	model.SetPersistedUsage(&client.UsageSummary{
+		ProviderID:    "ollama",
+		ModelName:     "llama3.2",
+		SessionTokens: 50,
+		TodayTokens:   50,
+		WeeklyTokens:  90,
+	})
 	model.SetCompression(&client.CompressionInfo{Enabled: true, ReductionPercent: 42})
 	model.SetChannels([]ChannelEntry{{Name: "WhatsApp", State: "connected"}})
 	model.SetMCPs([]MCPEntry{{Name: "memory", Status: "connected"}})
 
 	view := plain(model.View())
-	if !strings.Contains(view, "SESSION") || !strings.Contains(view, "CONTEXT") {
+	if !strings.Contains(view, "SESSION") || !strings.Contains(view, "CONTEXT") || !strings.Contains(view, "USAGE") {
 		t.Fatalf("expected sidebar view to include sections, got %q", view)
 	}
 
 	compact := plain(model.CompactView())
-	if !strings.Contains(compact, "SESSION") || !strings.Contains(compact, "CHANNELS") {
+	if !strings.Contains(compact, "SESSION") || !strings.Contains(compact, "USAGE") || !strings.Contains(compact, "CHANNELS") {
 		t.Fatalf("expected compact view to include multiple columns, got %q", compact)
 	}
 }
@@ -166,6 +221,13 @@ func TestSidebarViewRespectsHeightBudget(t *testing.T) {
 	model.SetSession("tui:main")
 	model.SetModel("gpt-4o")
 	model.SetUsage(client.UsageInfo{TotalTokens: 78000, ContextWindow: 100000})
+	model.SetPersistedUsage(&client.UsageSummary{
+		ProviderID:    "ollama",
+		ModelName:     "llama3.2",
+		SessionTokens: 50,
+		TodayTokens:   50,
+		WeeklyTokens:  90,
+	})
 	model.SetChannels([]ChannelEntry{
 		{Name: "WhatsApp", State: "connected"},
 		{Name: "Signal", State: "connected"},

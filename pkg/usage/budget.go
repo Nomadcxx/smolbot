@@ -22,7 +22,18 @@ func (s *Store) UpsertBudget(ctx context.Context, budget Budget) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	thresholds, err := json.Marshal(sortedThresholds(budget.AlertThresholds))
+	budget.AlertThresholds = sortedThresholds(budget.AlertThresholds)
+	existing, err := s.GetBudget(ctx, budget.ID)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("load existing budget: %w", err)
+	}
+	if err == nil && budgetAlertStateInvalidated(existing, budget) {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM budget_alerts WHERE budget_id = ?`, budget.ID); err != nil {
+			return fmt.Errorf("clear stale budget alerts: %w", err)
+		}
+	}
+
+	thresholds, err := json.Marshal(budget.AlertThresholds)
 	if err != nil {
 		return fmt.Errorf("marshal alert thresholds: %w", err)
 	}
@@ -400,6 +411,35 @@ func boolToInt(value bool) int {
 	return 0
 }
 
+func budgetAlertStateInvalidated(previous, next Budget) bool {
+	if previous.IsActive != next.IsActive {
+		return true
+	}
+	if previous.BudgetType != next.BudgetType || previous.LimitAmount != next.LimitAmount || previous.LimitUnit != next.LimitUnit {
+		return true
+	}
+	if previous.ScopeType != next.ScopeType || previous.ScopeTarget != next.ScopeTarget {
+		return true
+	}
+	if previous.ResetsAt != nil || next.ResetsAt != nil {
+		if !timePointerEqual(previous.ResetsAt, next.ResetsAt) {
+			return true
+		}
+	}
+	if !timePointerEqual(previous.WindowStart, next.WindowStart) || !timePointerEqual(previous.WindowEnd, next.WindowEnd) {
+		return true
+	}
+	if len(previous.AlertThresholds) != len(next.AlertThresholds) {
+		return true
+	}
+	for i := range previous.AlertThresholds {
+		if previous.AlertThresholds[i] != next.AlertThresholds[i] {
+			return true
+		}
+	}
+	return false
+}
+
 func scanBudget(scanner budgetScanner) (Budget, error) {
 	var budget Budget
 	var thresholdJSON string
@@ -478,4 +518,15 @@ func budgetActiveAt(budget Budget, now time.Time) bool {
 		return false
 	}
 	return true
+}
+
+func timePointerEqual(left, right *time.Time) bool {
+	switch {
+	case left == nil && right == nil:
+		return true
+	case left == nil || right == nil:
+		return false
+	default:
+		return left.UTC().Equal(right.UTC())
+	}
 }

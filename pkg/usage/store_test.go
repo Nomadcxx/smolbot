@@ -929,6 +929,92 @@ func TestCurrentProviderSummaryIgnoresInactiveBudgets(t *testing.T) {
 	}
 }
 
+func TestUpsertBudgetClearsStaleAlertsOnReactivation(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+	budget := Budget{
+		ID:              "daily-ollama",
+		Name:            "Daily Ollama",
+		BudgetType:      "daily",
+		LimitAmount:     100,
+		LimitUnit:       "tokens",
+		ScopeType:       "provider",
+		ScopeTarget:     "ollama",
+		AlertThresholds: []int{50},
+		IsActive:        true,
+	}
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget active: %v", err)
+	}
+	if err := store.RecordCompletion(context.Background(), CompletionRecord{
+		SessionKey:       "s1",
+		ProviderID:       "ollama",
+		ModelName:        "llama3.2",
+		RequestType:      "chat",
+		PromptTokens:     30,
+		CompletionTokens: 30,
+		TotalTokens:      60,
+		Status:           "success",
+		UsageSource:      "reported",
+		RecordedAt:       now,
+	}); err != nil {
+		t.Fatalf("RecordCompletion first: %v", err)
+	}
+
+	budget.IsActive = false
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget inactive: %v", err)
+	}
+	budget.IsActive = true
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget reactivated: %v", err)
+	}
+
+	summary, err := store.CurrentProviderSummary("s1", "ollama", "llama3.2", now)
+	if err != nil {
+		t.Fatalf("CurrentProviderSummary after reactivation: %v", err)
+	}
+	if summary.BudgetStatus != "" || summary.WarningLevel != "" {
+		t.Fatalf("summary budget state after reactivation = (%q, %q), want empty state", summary.BudgetStatus, summary.WarningLevel)
+	}
+
+	alerts, err := store.ListBudgetAlerts(budget.ID)
+	if err != nil {
+		t.Fatalf("ListBudgetAlerts after reactivation: %v", err)
+	}
+	if len(alerts) != 0 {
+		t.Fatalf("alerts after reactivation = %+v, want cleared history", alerts)
+	}
+
+	if err := store.RecordCompletion(context.Background(), CompletionRecord{
+		SessionKey:       "s1",
+		ProviderID:       "ollama",
+		ModelName:        "llama3.2",
+		RequestType:      "chat",
+		PromptTokens:     5,
+		CompletionTokens: 5,
+		TotalTokens:      10,
+		Status:           "success",
+		UsageSource:      "reported",
+		RecordedAt:       now.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("RecordCompletion second: %v", err)
+	}
+
+	alerts, err = store.ListBudgetAlerts(budget.ID)
+	if err != nil {
+		t.Fatalf("ListBudgetAlerts final: %v", err)
+	}
+	if len(alerts) != 1 || alerts[0].ThresholdPercent != 50 {
+		t.Fatalf("alerts after fresh threshold crossing = %+v, want single 50%% alert", alerts)
+	}
+}
+
 func TestHistoricalSamplesAndPruneOlderThan(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

@@ -1049,6 +1049,15 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 	if app == nil {
 		return
 	}
+	reportLoopError := func(err error) {
+		if err == nil {
+			return
+		}
+		select {
+		case errCh <- err:
+		default:
+		}
+	}
 	if app.runCron != nil && app.cronEvery > 0 {
 		go func() {
 			ticker := time.NewTicker(app.cronEvery)
@@ -1060,6 +1069,8 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 				case now := <-ticker.C:
 					if err := app.runCron(ctx, now); err != nil {
 						log.Printf("[runtime] cron run failed: %v", err)
+						reportLoopError(err)
+						return
 					}
 				}
 			}
@@ -1076,6 +1087,8 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 				case <-ticker.C:
 					if err := app.runBeat(ctx); err != nil {
 						log.Printf("[runtime] heartbeat run failed: %v", err)
+						reportLoopError(err)
+						return
 					}
 				}
 			}

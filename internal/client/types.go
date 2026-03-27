@@ -14,13 +14,35 @@ type ChannelStatus struct {
 	Status string `json:"status"`
 }
 
+type UsageSummary struct {
+	ProviderID    string `json:"providerId"`
+	ModelName     string `json:"modelName"`
+	SessionTokens int    `json:"sessionTokens"`
+	TodayTokens   int    `json:"todayTokens"`
+	WeeklyTokens  int    `json:"weeklyTokens"`
+	EstimatedCost string `json:"estimatedCost,omitempty"`
+	BudgetStatus  string `json:"budgetStatus,omitempty"`
+	WarningLevel  string `json:"warningLevel,omitempty"`
+}
+
+type UsageAlert struct {
+	ProviderID   string `json:"providerId"`
+	ModelName    string `json:"modelName"`
+	BudgetStatus string `json:"budgetStatus,omitempty"`
+	WarningLevel string `json:"warningLevel,omitempty"`
+	Message      string `json:"message,omitempty"`
+}
+
 // StatusPayload contains full system status
 type StatusPayload struct {
-	Model    string          `json:"model"`
-	Session  string          `json:"session,omitempty"`
-	Usage    UsageInfo       `json:"usage"`
-	Uptime   int             `json:"uptime"`
-	Channels []ChannelStatus `json:"channels,omitempty"`
+	Model          string          `json:"model"`
+	Provider       string          `json:"provider,omitempty"`
+	Session        string          `json:"session,omitempty"`
+	Usage          UsageInfo       `json:"usage"`
+	PersistedUsage *UsageSummary   `json:"persistedUsage,omitempty"`
+	UsageAlert     *UsageAlert     `json:"usageAlert,omitempty"`
+	Uptime         int             `json:"uptime"`
+	Channels       []ChannelStatus `json:"channels,omitempty"`
 }
 
 type CompactResult struct {

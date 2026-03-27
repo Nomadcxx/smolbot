@@ -40,3 +40,41 @@ func TestCronJobsResponseDecoding(t *testing.T) {
 		t.Fatalf("unexpected decoded cron jobs: %#v", payload.Jobs)
 	}
 }
+
+func TestStatusResponseDecodesPersistedUsageSummary(t *testing.T) {
+	raw := []byte(`{"type":"res","id":"1","ok":true,"payload":{"model":"ollama/llama3.2","provider":"ollama","session":"s1","usage":{"promptTokens":12,"completionTokens":8,"totalTokens":20,"contextWindow":8192},"persistedUsage":{"providerId":"ollama","modelName":"llama3.2","sessionTokens":50,"todayTokens":50,"weeklyTokens":90,"budgetStatus":"warning","warningLevel":"medium"},"usageAlert":{"providerId":"ollama","modelName":"llama3.2","budgetStatus":"warning","warningLevel":"medium","message":"Usage warning for ollama/llama3.2: medium budget threshold reached."},"uptime":120}}`)
+
+	var res Response
+	if err := json.Unmarshal(raw, &res); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !res.OK || res.Type != FrameRes {
+		t.Fatalf("unexpected response frame: %#v", res)
+	}
+
+	var payload StatusPayload
+	if err := json.Unmarshal(res.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal status payload: %v", err)
+	}
+	if payload.Usage.ContextWindow != 8192 || payload.Usage.TotalTokens != 20 {
+		t.Fatalf("unexpected live usage payload: %#v", payload.Usage)
+	}
+	if payload.Provider != "ollama" {
+		t.Fatalf("unexpected provider payload: %q", payload.Provider)
+	}
+	if payload.PersistedUsage == nil {
+		t.Fatal("expected persisted usage summary")
+	}
+	if payload.PersistedUsage.ProviderID != "ollama" || payload.PersistedUsage.SessionTokens != 50 || payload.PersistedUsage.WeeklyTokens != 90 {
+		t.Fatalf("unexpected persisted usage payload: %#v", payload.PersistedUsage)
+	}
+	if payload.PersistedUsage.BudgetStatus != "warning" || payload.PersistedUsage.WarningLevel != "medium" {
+		t.Fatalf("unexpected persisted budget state: %#v", payload.PersistedUsage)
+	}
+	if payload.UsageAlert == nil {
+		t.Fatal("expected usage alert payload")
+	}
+	if payload.UsageAlert.Message == "" || payload.UsageAlert.WarningLevel != "medium" {
+		t.Fatalf("unexpected usage alert payload: %#v", payload.UsageAlert)
+	}
+}

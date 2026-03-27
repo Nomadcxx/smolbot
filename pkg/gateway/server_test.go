@@ -19,6 +19,7 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/provider"
 	"github.com/Nomadcxx/smolbot/pkg/session"
 	"github.com/Nomadcxx/smolbot/pkg/skill"
+	"github.com/Nomadcxx/smolbot/pkg/usage"
 	"github.com/gorilla/websocket"
 )
 
@@ -97,6 +98,7 @@ func TestServerMethods(t *testing.T) {
 			t.Fatalf("expected uptime in status, got %s", frame.Response.Result)
 		}
 		var payload struct {
+			Provider string `json:"provider"`
 			Usage struct {
 				ContextWindow int `json:"contextWindow"`
 			} `json:"usage"`
@@ -104,8 +106,17 @@ func TestServerMethods(t *testing.T) {
 		if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
 			t.Fatalf("unmarshal status payload: %v", err)
 		}
+		if payload.Provider != "openai" {
+			t.Fatalf("expected provider openai in status, got %q", payload.Provider)
+		}
 		if payload.Usage.ContextWindow != cfg.Agents.Defaults.ContextWindowTokens {
 			t.Fatalf("expected fallback context window %d, got %d", cfg.Agents.Defaults.ContextWindowTokens, payload.Usage.ContextWindow)
+		}
+		if strings.Contains(string(frame.Response.Result), `"persistedUsage"`) {
+			t.Fatalf("expected no persisted usage summary without usage reader, got %s", frame.Response.Result)
+		}
+		if strings.Contains(string(frame.Response.Result), `"usageAlert"`) {
+			t.Fatalf("expected no usage alert without usage reader, got %s", frame.Response.Result)
 		}
 	})
 
@@ -306,6 +317,138 @@ func TestServerMethods(t *testing.T) {
 			t.Fatalf("unexpected mcps payload %s", frame.Response.Result)
 		}
 	})
+}
+
+func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "ollama/llama3.2"
+	cfg.Agents.Defaults.Provider = "ollama"
+
+	usageStore, err := usage.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("usage.NewStore: %v", err)
+	}
+	defer usageStore.Close()
+
+	now := time.Now().UTC().Truncate(24 * time.Hour).Add(10 * time.Hour)
+	if err := usageStore.UpsertBudget(context.Background(), usage.Budget{
+		ID:              "ollama-daily",
+		Name:            "Ollama daily",
+		BudgetType:      "daily",
+		LimitAmount:     100,
+		LimitUnit:       "tokens",
+		ScopeType:       "provider",
+		ScopeTarget:     "ollama",
+		AlertThresholds: []int{50, 80, 95},
+		IsActive:        true,
+	}); err != nil {
+		t.Fatalf("UpsertBudget: %v", err)
+	}
+
+	for _, record := range []usage.CompletionRecord{
+		{
+			SessionKey:       "s1",
+			ProviderID:       "ollama",
+			ModelName:        "llama3.2",
+			RequestType:      "chat",
+			PromptTokens:     12,
+			CompletionTokens: 8,
+			TotalTokens:      20,
+			Status:           "success",
+			UsageSource:      "reported",
+			RecordedAt:       now.Add(-2 * time.Hour),
+		},
+		{
+			SessionKey:       "s1",
+			ProviderID:       "ollama",
+			ModelName:        "llama3.2",
+			RequestType:      "chat",
+			PromptTokens:     18,
+			CompletionTokens: 12,
+			TotalTokens:      30,
+			Status:           "success",
+			UsageSource:      "reported",
+			RecordedAt:       now.Add(-30 * time.Minute),
+		},
+		{
+			SessionKey:       "s2",
+			ProviderID:       "ollama",
+			ModelName:        "llama3.2",
+			RequestType:      "chat",
+			PromptTokens:     24,
+			CompletionTokens: 16,
+			TotalTokens:      40,
+			Status:           "success",
+			UsageSource:      "reported",
+			RecordedAt:       now.AddDate(0, 0, -3),
+		},
+	} {
+		if err := usageStore.RecordCompletion(context.Background(), record); err != nil {
+			t.Fatalf("RecordCompletion: %v", err)
+		}
+	}
+
+	server := NewServer(ServerDeps{
+		Config:    cfg,
+		Usage:     usageStore,
+		StartedAt: now.Add(-2 * time.Minute),
+	})
+
+	resp, err := server.handleRequest(context.Background(), &clientState{sessionKey: "s1"}, RequestFrame{
+		ID:     "status-usage",
+		Method: "status",
+		Params: json.RawMessage(`{"session":"s1"}`),
+	})
+	if err != nil {
+		t.Fatalf("handleRequest status: %v", err)
+	}
+
+	payload, ok := resp.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected payload type %T", resp)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal status payload: %v", err)
+	}
+	var decoded struct {
+		Session        string `json:"session"`
+		PersistedUsage struct {
+			ProviderID    string `json:"providerId"`
+			ModelName     string `json:"modelName"`
+			SessionTokens int    `json:"sessionTokens"`
+			TodayTokens   int    `json:"todayTokens"`
+			WeeklyTokens  int    `json:"weeklyTokens"`
+		} `json:"persistedUsage"`
+		UsageAlert struct {
+			ProviderID   string `json:"providerId"`
+			ModelName    string `json:"modelName"`
+			BudgetStatus string `json:"budgetStatus"`
+			WarningLevel string `json:"warningLevel"`
+			Message      string `json:"message"`
+		} `json:"usageAlert"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal status payload: %v", err)
+	}
+	if decoded.Session != "s1" {
+		t.Fatalf("session = %q, want s1", decoded.Session)
+	}
+	if decoded.PersistedUsage.ProviderID != "ollama" {
+		t.Fatalf("providerId = %q, want ollama", decoded.PersistedUsage.ProviderID)
+	}
+	if decoded.PersistedUsage.ModelName != "llama3.2" {
+		t.Fatalf("modelName = %q, want llama3.2", decoded.PersistedUsage.ModelName)
+	}
+	if decoded.PersistedUsage.SessionTokens != 50 || decoded.PersistedUsage.TodayTokens != 50 || decoded.PersistedUsage.WeeklyTokens != 90 {
+		t.Fatalf("unexpected persisted usage summary: %#v", decoded.PersistedUsage)
+	}
+	if decoded.UsageAlert.ProviderID != "ollama" || decoded.UsageAlert.WarningLevel != "medium" {
+		t.Fatalf("unexpected usage alert: %#v", decoded.UsageAlert)
+	}
+	if !strings.Contains(decoded.UsageAlert.Message, "llama3.2") {
+		t.Fatalf("expected usage alert message to include model label, got %#v", decoded.UsageAlert)
+	}
 }
 
 func TestServerOllamaContextWindow(t *testing.T) {
