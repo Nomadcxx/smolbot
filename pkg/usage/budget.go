@@ -9,6 +9,15 @@ import (
 	"time"
 )
 
+const budgetSelectColumns = `SELECT
+	id, name, budget_type, limit_amount, limit_unit, scope_type, scope_target,
+	alert_thresholds, is_active, window_start, window_end, resets_at
+	FROM budgets`
+
+type budgetScanner interface {
+	Scan(dest ...any) error
+}
+
 func (s *Store) UpsertBudget(ctx context.Context, budget Budget) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -55,6 +64,74 @@ func (s *Store) UpsertBudget(ctx context.Context, budget Budget) error {
 	return nil
 }
 
+func (s *Store) GetBudget(ctx context.Context, id string) (Budget, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	budget, err := scanBudget(s.db.QueryRowContext(ctx, budgetSelectColumns+` WHERE id = ?`, id))
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return Budget{}, err
+		}
+		return Budget{}, fmt.Errorf("query budget: %w", err)
+	}
+	return budget, nil
+}
+
+func (s *Store) ListBudgets(ctx context.Context) ([]Budget, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := s.db.QueryContext(ctx, budgetSelectColumns+` ORDER BY created_at ASC, id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("query budgets: %w", err)
+	}
+	defer rows.Close()
+
+	var budgets []Budget
+	for rows.Next() {
+		budget, err := scanBudget(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan budget: %w", err)
+		}
+		budgets = append(budgets, budget)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate budgets: %w", err)
+	}
+	return budgets, nil
+}
+
+func (s *Store) DeleteBudget(ctx context.Context, id string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete budget transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM budget_alerts WHERE budget_id = ?`, id); err != nil {
+		return fmt.Errorf("delete budget alerts: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM budgets WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete budget: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("budget rows affected: %w", err)
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete budget: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ListBudgetAlerts(budgetID string) ([]BudgetAlert, error) {
 	rows, err := s.db.Query(
 		`SELECT id, budget_id, alert_type, threshold_percent, tokens_at_alert, sent_at, channel
@@ -85,35 +162,33 @@ func (s *Store) ListBudgetAlerts(budgetID string) ([]BudgetAlert, error) {
 func (s *Store) processBudgetAlertsTx(ctx context.Context, tx *sql.Tx, record CompletionRecord, recordedAt time.Time) error {
 	rows, err := tx.QueryContext(
 		ctx,
-		`SELECT id, name, budget_type, limit_amount, limit_unit, scope_type, scope_target, alert_thresholds, is_active
-		FROM budgets
-		WHERE is_active = 1`,
+		budgetSelectColumns+`
+		WHERE is_active = 1
+		ORDER BY id ASC`,
 	)
 	if err != nil {
 		return fmt.Errorf("query active budgets: %w", err)
 	}
 	defer rows.Close()
 
+	var budgets []Budget
 	for rows.Next() {
-		var budget Budget
-		var thresholdJSON string
-		var active int
-		if err := rows.Scan(&budget.ID, &budget.Name, &budget.BudgetType, &budget.LimitAmount, &budget.LimitUnit, &budget.ScopeType, &budget.ScopeTarget, &thresholdJSON, &active); err != nil {
+		budget, err := scanBudget(rows)
+		if err != nil {
 			return fmt.Errorf("scan budget: %w", err)
 		}
-		budget.IsActive = active == 1
-		if err := json.Unmarshal([]byte(thresholdJSON), &budget.AlertThresholds); err != nil {
-			return fmt.Errorf("unmarshal budget thresholds: %w", err)
-		}
+		budgets = append(budgets, budget)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate budgets: %w", err)
+	}
+	for _, budget := range budgets {
 		if !budgetMatchesRecord(budget, record) {
 			continue
 		}
 		if err := processBudgetThresholdsTx(ctx, tx, budget, recordedAt); err != nil {
 			return err
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate budgets: %w", err)
 	}
 	return nil
 }
@@ -165,32 +240,49 @@ func processBudgetThresholdsTx(ctx context.Context, tx *sql.Tx, budget Budget, r
 }
 
 func (s *Store) currentBudgetState(providerID string, now time.Time) (string, string, error) {
-	row := s.db.QueryRow(
-		`SELECT threshold_percent
-		FROM budget_alerts ba
-		JOIN budgets b ON b.id = ba.budget_id
-		WHERE b.scope_type = 'provider' AND b.scope_target = ? AND ba.sent_at >= ? AND ba.sent_at < ?
-		ORDER BY threshold_percent DESC, sent_at DESC
-		LIMIT 1`,
+	rows, err := s.db.Query(
+		budgetSelectColumns+`
+		WHERE scope_type = 'provider' AND scope_target = ? AND is_active = 1
+		ORDER BY created_at ASC, id ASC`,
 		providerID,
-		startOfDay(now.UTC()),
-		startOfDay(now.UTC()).Add(24*time.Hour),
 	)
+	if err != nil {
+		return "", "", fmt.Errorf("query provider budgets: %w", err)
+	}
+	defer rows.Close()
 
-	var threshold int
-	if err := row.Scan(&threshold); err != nil {
-		if err == sql.ErrNoRows {
-			return "", "", nil
+	var budgets []Budget
+	for rows.Next() {
+		budget, err := scanBudget(rows)
+		if err != nil {
+			return "", "", fmt.Errorf("scan provider budget: %w", err)
 		}
-		return "", "", fmt.Errorf("query current budget state: %w", err)
+		budgets = append(budgets, budget)
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", fmt.Errorf("iterate provider budgets: %w", err)
 	}
 
+	highestThreshold := 0
+	for _, budget := range budgets {
+		if !budgetActiveAt(budget, now.UTC()) {
+			continue
+		}
+		windowStart, windowEnd := budgetWindow(budget, now.UTC())
+		threshold, err := budgetHighestAlertThreshold(s.db, budget.ID, windowStart, windowEnd)
+		if err != nil {
+			return "", "", err
+		}
+		if threshold > highestThreshold {
+			highestThreshold = threshold
+		}
+	}
 	switch {
-	case threshold >= 95:
+	case highestThreshold >= 95:
 		return "warning", "critical", nil
-	case threshold >= 80:
+	case highestThreshold >= 80:
 		return "warning", "high", nil
-	case threshold >= 50:
+	case highestThreshold >= 50:
 		return "warning", "medium", nil
 	default:
 		return "", "", nil
@@ -198,7 +290,7 @@ func (s *Store) currentBudgetState(providerID string, now time.Time) (string, st
 }
 
 func budgetTotalTokensTx(ctx context.Context, tx *sql.Tx, budget Budget, recordedAt time.Time) (int, time.Time, time.Time, error) {
-	windowStart, windowEnd := budgetWindow(budget.BudgetType, recordedAt.UTC())
+	windowStart, windowEnd := budgetWindow(budget, recordedAt.UTC())
 	if budget.ScopeType != "provider" || budget.LimitUnit != "tokens" {
 		return 0, windowStart, windowEnd, nil
 	}
@@ -228,19 +320,48 @@ func budgetMatchesRecord(budget Budget, record CompletionRecord) bool {
 	return false
 }
 
-func budgetWindow(kind string, recordedAt time.Time) (time.Time, time.Time) {
-	switch kind {
+func budgetWindow(budget Budget, recordedAt time.Time) (time.Time, time.Time) {
+	if budget.WindowStart != nil && budget.WindowEnd != nil && budget.WindowStart.Before(*budget.WindowEnd) {
+		return budget.WindowStart.UTC(), budget.WindowEnd.UTC()
+	}
+
+	switch budget.BudgetType {
+	case "hourly":
+		start := recordedAt.UTC().Truncate(time.Hour)
+		return start, start.Add(time.Hour)
 	case "daily":
-		start := startOfDay(recordedAt)
+		start := startOfDay(recordedAt.UTC())
 		return start, start.Add(24 * time.Hour)
+	case "weekly":
+		start := startOfWeek(recordedAt.UTC())
+		return start, start.AddDate(0, 0, 7)
+	case "monthly":
+		start := startOfMonth(recordedAt.UTC())
+		return start, start.AddDate(0, 1, 0)
+	case "total":
+		return time.Time{}, maxBudgetWindowEnd()
 	default:
-		start := startOfDay(recordedAt)
+		start := startOfDay(recordedAt.UTC())
 		return start, start.Add(24 * time.Hour)
 	}
 }
 
 func startOfDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func startOfWeek(t time.Time) time.Time {
+	start := startOfDay(t.UTC())
+	offset := (int(start.Weekday()) + 6) % 7
+	return start.AddDate(0, 0, -offset)
+}
+
+func startOfMonth(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+func maxBudgetWindowEnd() time.Time {
+	return time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC)
 }
 
 func sortedThresholds(values []int) []int {
@@ -254,4 +375,84 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func scanBudget(scanner budgetScanner) (Budget, error) {
+	var budget Budget
+	var thresholdJSON string
+	var active int
+	var windowStart sql.NullTime
+	var windowEnd sql.NullTime
+	var resetsAt sql.NullTime
+
+	if err := scanner.Scan(
+		&budget.ID,
+		&budget.Name,
+		&budget.BudgetType,
+		&budget.LimitAmount,
+		&budget.LimitUnit,
+		&budget.ScopeType,
+		&budget.ScopeTarget,
+		&thresholdJSON,
+		&active,
+		&windowStart,
+		&windowEnd,
+		&resetsAt,
+	); err != nil {
+		return Budget{}, err
+	}
+	budget.IsActive = active == 1
+	if thresholdJSON == "" {
+		thresholdJSON = "[]"
+	}
+	if err := json.Unmarshal([]byte(thresholdJSON), &budget.AlertThresholds); err != nil {
+		return Budget{}, fmt.Errorf("unmarshal budget thresholds: %w", err)
+	}
+	budget.AlertThresholds = sortedThresholds(budget.AlertThresholds)
+	if windowStart.Valid {
+		value := windowStart.Time.UTC()
+		budget.WindowStart = &value
+	}
+	if windowEnd.Valid {
+		value := windowEnd.Time.UTC()
+		budget.WindowEnd = &value
+	}
+	if resetsAt.Valid {
+		value := resetsAt.Time.UTC()
+		budget.ResetsAt = &value
+	}
+	return budget, nil
+}
+
+func budgetHighestAlertThreshold(db queryRower, budgetID string, windowStart, windowEnd time.Time) (int, error) {
+	row := db.QueryRow(
+		`SELECT COALESCE(MAX(threshold_percent), 0)
+		FROM budget_alerts
+		WHERE budget_id = ? AND sent_at >= ? AND sent_at < ?`,
+		budgetID,
+		windowStart,
+		windowEnd,
+	)
+	var threshold int
+	if err := row.Scan(&threshold); err != nil {
+		return 0, fmt.Errorf("query highest budget alert threshold: %w", err)
+	}
+	return threshold, nil
+}
+
+type queryRower interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func budgetActiveAt(budget Budget, now time.Time) bool {
+	if !budget.IsActive {
+		return false
+	}
+	if budget.WindowStart != nil && now.Before(budget.WindowStart.UTC()) {
+		return false
+	}
+	if budget.WindowEnd != nil && !now.Before(budget.WindowEnd.UTC()) {
+		return false
+	}
+	return true
 }

@@ -340,6 +340,235 @@ func TestBudgetThresholdAlertsDedupingAndReset(t *testing.T) {
 	}
 }
 
+func TestBudgetCRUDOperations(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	windowStart := time.Date(2026, 3, 24, 0, 0, 0, 0, time.UTC)
+	windowEnd := time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)
+	resetsAt := time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)
+	budget := Budget{
+		ID:              "weekly-ollama",
+		Name:            "Weekly Ollama",
+		BudgetType:      "weekly",
+		LimitAmount:     500,
+		LimitUnit:       "tokens",
+		ScopeType:       "provider",
+		ScopeTarget:     "ollama",
+		AlertThresholds: []int{80, 50},
+		IsActive:        true,
+		WindowStart:     &windowStart,
+		WindowEnd:       &windowEnd,
+		ResetsAt:        &resetsAt,
+	}
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget: %v", err)
+	}
+
+	got, err := store.GetBudget(context.Background(), "weekly-ollama")
+	if err != nil {
+		t.Fatalf("GetBudget: %v", err)
+	}
+	if got.ID != budget.ID || got.Name != budget.Name || got.ScopeTarget != budget.ScopeTarget {
+		t.Fatalf("GetBudget = %+v, want %+v", got, budget)
+	}
+	if len(got.AlertThresholds) != 2 || got.AlertThresholds[0] != 50 || got.AlertThresholds[1] != 80 {
+		t.Fatalf("GetBudget thresholds = %+v, want sorted [50 80]", got.AlertThresholds)
+	}
+	if got.WindowStart == nil || !got.WindowStart.Equal(windowStart) {
+		t.Fatalf("GetBudget WindowStart = %v, want %v", got.WindowStart, windowStart)
+	}
+
+	budgets, err := store.ListBudgets(context.Background())
+	if err != nil {
+		t.Fatalf("ListBudgets: %v", err)
+	}
+	if len(budgets) != 1 || budgets[0].ID != budget.ID {
+		t.Fatalf("ListBudgets = %+v, want single budget %q", budgets, budget.ID)
+	}
+
+	if err := store.DeleteBudget(context.Background(), budget.ID); err != nil {
+		t.Fatalf("DeleteBudget: %v", err)
+	}
+	if _, err := store.GetBudget(context.Background(), budget.ID); err == nil {
+		t.Fatalf("GetBudget after delete = nil error, want not found")
+	}
+}
+
+func TestBudgetThresholdAlertsPersistAcrossWeeklyWindow(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	recordedAt := time.Date(2026, 3, 23, 10, 0, 0, 0, time.UTC)
+	now := recordedAt.Add(48 * time.Hour)
+	budget := Budget{
+		ID:              "weekly-ollama",
+		Name:            "Weekly Ollama",
+		BudgetType:      "weekly",
+		LimitAmount:     100,
+		LimitUnit:       "tokens",
+		ScopeType:       "provider",
+		ScopeTarget:     "ollama",
+		AlertThresholds: []int{50},
+		IsActive:        true,
+	}
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget: %v", err)
+	}
+
+	if err := store.RecordCompletion(context.Background(), CompletionRecord{
+		SessionKey:       "s1",
+		ProviderID:       "ollama",
+		ModelName:        "llama3.2",
+		RequestType:      "chat",
+		PromptTokens:     30,
+		CompletionTokens: 30,
+		TotalTokens:      60,
+		Status:           "success",
+		UsageSource:      "reported",
+		RecordedAt:       recordedAt,
+	}); err != nil {
+		t.Fatalf("RecordCompletion: %v", err)
+	}
+
+	summary, err := store.CurrentProviderSummary("s1", "ollama", "llama3.2", now)
+	if err != nil {
+		t.Fatalf("CurrentProviderSummary: %v", err)
+	}
+	if summary.BudgetStatus != "warning" || summary.WarningLevel != "medium" {
+		t.Fatalf("summary budget state = (%q, %q), want (warning, medium)", summary.BudgetStatus, summary.WarningLevel)
+	}
+}
+
+func TestBudgetThresholdAlertsRespectExplicitWindowBounds(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	windowStart := time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC)
+	windowEnd := time.Date(2026, 3, 27, 0, 0, 0, 0, time.UTC)
+	budget := Budget{
+		ID:              "custom-ollama",
+		Name:            "Custom Ollama",
+		BudgetType:      "custom",
+		LimitAmount:     100,
+		LimitUnit:       "tokens",
+		ScopeType:       "provider",
+		ScopeTarget:     "ollama",
+		AlertThresholds: []int{50},
+		IsActive:        true,
+		WindowStart:     &windowStart,
+		WindowEnd:       &windowEnd,
+	}
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget: %v", err)
+	}
+
+	if err := store.RecordCompletion(context.Background(), CompletionRecord{
+		SessionKey:       "s1",
+		ProviderID:       "ollama",
+		ModelName:        "llama3.2",
+		RequestType:      "chat",
+		PromptTokens:     30,
+		CompletionTokens: 30,
+		TotalTokens:      60,
+		Status:           "success",
+		UsageSource:      "reported",
+		RecordedAt:       windowStart.Add(24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("RecordCompletion in window: %v", err)
+	}
+	if err := store.RecordCompletion(context.Background(), CompletionRecord{
+		SessionKey:       "s1",
+		ProviderID:       "ollama",
+		ModelName:        "llama3.2",
+		RequestType:      "chat",
+		PromptTokens:     20,
+		CompletionTokens: 20,
+		TotalTokens:      40,
+		Status:           "success",
+		UsageSource:      "reported",
+		RecordedAt:       windowEnd.Add(24 * time.Hour),
+	}); err != nil {
+		t.Fatalf("RecordCompletion out of window: %v", err)
+	}
+
+	alerts, err := store.ListBudgetAlerts(budget.ID)
+	if err != nil {
+		t.Fatalf("ListBudgetAlerts: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("alerts = %d, want 1 within explicit window", len(alerts))
+	}
+
+	summary, err := store.CurrentProviderSummary("s1", "ollama", "llama3.2", windowEnd.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("CurrentProviderSummary: %v", err)
+	}
+	if summary.BudgetStatus != "warning" || summary.WarningLevel != "medium" {
+		t.Fatalf("summary budget state = (%q, %q), want (warning, medium)", summary.BudgetStatus, summary.WarningLevel)
+	}
+}
+
+func TestCurrentProviderSummaryIgnoresInactiveBudgets(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+	budget := Budget{
+		ID:              "daily-ollama",
+		Name:            "Daily Ollama",
+		BudgetType:      "daily",
+		LimitAmount:     100,
+		LimitUnit:       "tokens",
+		ScopeType:       "provider",
+		ScopeTarget:     "ollama",
+		AlertThresholds: []int{50},
+		IsActive:        true,
+	}
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget active: %v", err)
+	}
+	if err := store.RecordCompletion(context.Background(), CompletionRecord{
+		SessionKey:       "s1",
+		ProviderID:       "ollama",
+		ModelName:        "llama3.2",
+		RequestType:      "chat",
+		PromptTokens:     30,
+		CompletionTokens: 30,
+		TotalTokens:      60,
+		Status:           "success",
+		UsageSource:      "reported",
+		RecordedAt:       now,
+	}); err != nil {
+		t.Fatalf("RecordCompletion: %v", err)
+	}
+
+	budget.IsActive = false
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget inactive: %v", err)
+	}
+
+	summary, err := store.CurrentProviderSummary("s1", "ollama", "llama3.2", now)
+	if err != nil {
+		t.Fatalf("CurrentProviderSummary: %v", err)
+	}
+	if summary.BudgetStatus != "" || summary.WarningLevel != "" {
+		t.Fatalf("summary budget state = (%q, %q), want empty state for inactive budget", summary.BudgetStatus, summary.WarningLevel)
+	}
+}
+
 func TestHistoricalSamplesAndPruneOlderThan(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {
@@ -424,6 +653,73 @@ func TestHistoricalSamplesAndPruneOlderThan(t *testing.T) {
 	}
 	if len(samples) != 1 || !samples[0].SampledAt.Equal(newSample.SampledAt) {
 		t.Fatalf("samples after prune = %+v, want only recent sample", samples)
+	}
+}
+
+func TestPruneOlderThanRemovesOldBudgetAlerts(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+	budget := Budget{
+		ID:              "daily-ollama",
+		Name:            "Daily Ollama",
+		BudgetType:      "daily",
+		LimitAmount:     100,
+		LimitUnit:       "tokens",
+		ScopeType:       "provider",
+		ScopeTarget:     "ollama",
+		AlertThresholds: []int{50},
+		IsActive:        true,
+	}
+	if err := store.UpsertBudget(context.Background(), budget); err != nil {
+		t.Fatalf("UpsertBudget: %v", err)
+	}
+
+	for _, record := range []CompletionRecord{
+		{
+			SessionKey:       "old",
+			ProviderID:       "ollama",
+			ModelName:        "llama3.2",
+			RequestType:      "chat",
+			PromptTokens:     30,
+			CompletionTokens: 30,
+			TotalTokens:      60,
+			Status:           "success",
+			UsageSource:      "reported",
+			RecordedAt:       now.AddDate(0, 0, -90),
+		},
+		{
+			SessionKey:       "new",
+			ProviderID:       "ollama",
+			ModelName:        "llama3.2",
+			RequestType:      "chat",
+			PromptTokens:     30,
+			CompletionTokens: 30,
+			TotalTokens:      60,
+			Status:           "success",
+			UsageSource:      "reported",
+			RecordedAt:       now.AddDate(0, 0, -2),
+		},
+	} {
+		if err := store.RecordCompletion(context.Background(), record); err != nil {
+			t.Fatalf("RecordCompletion: %v", err)
+		}
+	}
+
+	if err := store.PruneOlderThan(context.Background(), now.AddDate(0, 0, -56)); err != nil {
+		t.Fatalf("PruneOlderThan: %v", err)
+	}
+
+	alerts, err := store.ListBudgetAlerts(budget.ID)
+	if err != nil {
+		t.Fatalf("ListBudgetAlerts: %v", err)
+	}
+	if len(alerts) != 1 {
+		t.Fatalf("alerts after prune = %+v, want only recent alert", alerts)
 	}
 }
 

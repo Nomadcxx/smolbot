@@ -82,5 +82,8 @@ func (s *Store) PruneOlderThan(ctx context.Context, cutoff time.Time) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM daily_usage_rollups WHERE date < ?`, cutoff.UTC().Format("2006-01-02")); err != nil {
 		return fmt.Errorf("prune daily rollups: %w", err)
 	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM budget_alerts WHERE sent_at < ?`, cutoff.UTC()); err != nil {
+		return fmt.Errorf("prune budget alerts: %w", err)
+	}
 	return nil
 }
