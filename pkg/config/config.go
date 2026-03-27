@@ -60,9 +60,10 @@ type SignalChannelConfig struct {
 }
 
 type WhatsAppChannelConfig struct {
-	Enabled    bool   `json:"enabled"`
-	DeviceName string `json:"deviceName,omitempty"`
-	StorePath  string `json:"storePath,omitempty"`
+	Enabled        bool     `json:"enabled"`
+	DeviceName     string   `json:"deviceName,omitempty"`
+	StorePath      string   `json:"storePath,omitempty"`
+	AllowedChatIDs []string `json:"allowedChatIDs,omitempty"`
 }
 
 type GatewayConfig struct {

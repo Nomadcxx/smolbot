@@ -8,6 +8,7 @@ import (
 
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	"github.com/Nomadcxx/smolbot/pkg/config"
+	waTypes "go.mau.fi/whatsmeow/types"
 )
 
 func TestAdapterImplementsChannelStatusReporterAndLoginHandler(t *testing.T) {
@@ -182,6 +183,66 @@ func TestAdapterStartReturnsHandlerError(t *testing.T) {
 	})
 	if err == nil || err.Error() != wantErr.Error() {
 		t.Fatalf("expected handler error %v, got %v", wantErr, err)
+	}
+}
+
+func TestAdapterStartDropsInboundMessagesFromDisallowedChatsWhenAllowlistEnforced(t *testing.T) {
+	seam := &fakeSeam{
+		startFn: func(_ context.Context, handle func(rawInboundMessage) error) error {
+			if err := handle(rawInboundMessage{ChatID: "allowed@s.whatsapp.net", Content: "first"}); err != nil {
+				return err
+			}
+			return handle(rawInboundMessage{ChatID: "blocked@s.whatsapp.net", Content: "second"})
+		},
+	}
+	adapter := NewAdapter(seam)
+	adapter.enforceAllowlist = true
+	adapter.allowedChatIDs = map[string]struct{}{
+		"allowed@s.whatsapp.net": {},
+	}
+
+	var got []channel.InboundMessage
+	if err := adapter.Start(context.Background(), func(_ context.Context, msg channel.InboundMessage) {
+		got = append(got, msg)
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	want := []channel.InboundMessage{{
+		Channel: "whatsapp",
+		ChatID:  "allowed@s.whatsapp.net",
+		Content: "first",
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected inbound messages %#v, want %#v", got, want)
+	}
+}
+
+func TestShouldIgnoreInboundMessageReturnsTrueForBotSender(t *testing.T) {
+	info := waTypes.MessageInfo{
+		MessageSource: waTypes.MessageSource{
+			Sender: waTypes.NewJID("867051314767696", waTypes.BotServer),
+			Chat:   waTypes.NewJID("15551234567", waTypes.DefaultUserServer),
+		},
+	}
+
+	if !shouldIgnoreInboundMessage(info, nil) {
+		t.Fatal("expected bot sender to be ignored")
+	}
+}
+
+func TestShouldIgnoreInboundMessageAllowsLinkedDeviceMessagesFromUser(t *testing.T) {
+	ownID := waTypes.NewADJID("15551234567", 0, 1)
+	info := waTypes.MessageInfo{
+		MessageSource: waTypes.MessageSource{
+			Sender:   waTypes.NewADJID("15551234567", 0, 2),
+			Chat:     waTypes.NewJID("15551234567", waTypes.DefaultUserServer),
+			IsFromMe: true,
+		},
+	}
+
+	if shouldIgnoreInboundMessage(info, &ownID) {
+		t.Fatal("expected linked-device user message to remain allowed")
 	}
 }
 

@@ -33,14 +33,17 @@ type clientSeam interface {
 }
 
 type Adapter struct {
-	seam   clientSeam
+	seam clientSeam
 
 	mu     sync.RWMutex
 	status channel.Status
 
+	allowedChatIDs   map[string]struct{}
+	enforceAllowlist bool
+
 	lastConnectedAt time.Time
-	lastMessageAt  time.Time
-	reconnectCount int
+	lastMessageAt   time.Time
+	reconnectCount  int
 }
 
 type rawInboundMessage struct {
@@ -72,7 +75,10 @@ func NewProductionAdapter(cfg config.WhatsAppChannelConfig) (*Adapter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewAdapter(seam), nil
+	adapter := NewAdapter(seam)
+	adapter.enforceAllowlist = true
+	adapter.allowedChatIDs = normalizeAllowedChatIDs(cfg.AllowedChatIDs)
+	return adapter, nil
 }
 
 func (a *Adapter) Name() string {
@@ -86,11 +92,19 @@ func (a *Adapter) Start(ctx context.Context, handler channel.Handler) error {
 	if a.seam == nil {
 		return errors.New("whatsapp client seam is required")
 	}
+	if a.enforceAllowlist && len(a.allowedChatIDs) == 0 {
+		log.Printf("[whatsapp] inbound allowlist empty; all inbound WhatsApp messages will be ignored")
+	}
 	a.updateStatus("connecting", "")
 	log.Printf("[whatsapp] adapter starting...")
 	err := a.seam.Start(ctx, func(raw rawInboundMessage) error {
-		log.Printf("[whatsapp] raw inbound: chatID=%q content=%q", raw.ChatID, raw.Content)
-		handler(ctx, raw.normalize())
+		msg := raw.normalize()
+		if !a.isAllowedChat(msg.ChatID) {
+			log.Printf("[whatsapp] dropping inbound from disallowed chat %q", msg.ChatID)
+			return nil
+		}
+		log.Printf("[whatsapp] raw inbound: chatID=%q content=%q", msg.ChatID, msg.Content)
+		handler(ctx, msg)
 		return nil
 	})
 	if err != nil {
@@ -215,6 +229,35 @@ func (a *Adapter) setStatus(status channel.Status) {
 	a.status = status
 }
 
+func (a *Adapter) isAllowedChat(chatID string) bool {
+	if !a.enforceAllowlist {
+		return true
+	}
+	if len(a.allowedChatIDs) == 0 {
+		return false
+	}
+	_, ok := a.allowedChatIDs[strings.TrimSpace(chatID)]
+	return ok
+}
+
+func normalizeAllowedChatIDs(chatIDs []string) map[string]struct{} {
+	if len(chatIDs) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(chatIDs))
+	for _, chatID := range chatIDs {
+		chatID = strings.TrimSpace(chatID)
+		if chatID == "" {
+			continue
+		}
+		allowed[chatID] = struct{}{}
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	return allowed
+}
+
 type whatsmeowSeam struct {
 	client *whatsmeow.Client
 
@@ -223,7 +266,7 @@ type whatsmeowSeam struct {
 	handlerID uint32
 
 	recentMessages map[string]time.Time
-	recentMu      sync.Mutex
+	recentMu       sync.Mutex
 }
 
 const dedupWindow = 5 * time.Minute
@@ -372,11 +415,18 @@ func (s *whatsmeowSeam) Login(ctx context.Context, report func(loginUpdate) erro
 }
 
 func (s *whatsmeowSeam) isOwnDevice(sender waTypes.JID) bool {
-	ownID := s.client.Store.ID
+	ownID := s.ownID()
 	if ownID == nil {
 		return false
 	}
 	return sender.User == ownID.User && sender.Device == ownID.Device
+}
+
+func (s *whatsmeowSeam) ownID() *waTypes.JID {
+	if s == nil || s.client == nil || s.client.Store == nil {
+		return nil
+	}
+	return s.client.Store.ID
 }
 
 func (s *whatsmeowSeam) ensureConnected(ctx context.Context) error {
@@ -421,10 +471,7 @@ func (s *whatsmeowSeam) handleEvent(evt any, handle func(rawInboundMessage) erro
 		}
 		log.Printf("[whatsapp] message event: from=%s device=%d isFromMe=%v chat=%s",
 			typed.Info.Sender.String(), typed.Info.Sender.Device, typed.Info.IsFromMe, typed.Info.Chat.String())
-		// Only filter messages from the bot's own device to prevent echo loops.
-		// IsFromMe=true from OTHER devices (user's phone) should be processed
-		// so the user can chat with the bot via WhatsApp.
-		if typed.Info.IsFromMe && s.isOwnDevice(typed.Info.Sender) {
+		if shouldIgnoreInboundMessage(typed.Info, s.ownID()) {
 			return
 		}
 
@@ -460,6 +507,16 @@ func (s *whatsmeowSeam) handleEvent(evt any, handle func(rawInboundMessage) erro
 			log.Printf("[whatsapp] handle event: %v", err)
 		}
 	}
+}
+
+func shouldIgnoreInboundMessage(info waTypes.MessageInfo, ownID *waTypes.JID) bool {
+	if info.Sender.IsBot() {
+		return true
+	}
+	if info.IsFromMe && ownID != nil {
+		return info.Sender.User == ownID.User && info.Sender.Device == ownID.Device
+	}
+	return false
 }
 
 func extractMessageText(msg *waProto.Message) string {

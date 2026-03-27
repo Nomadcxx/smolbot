@@ -34,7 +34,8 @@ func TestConfigRoundTrip(t *testing.T) {
 			"whatsapp": {
 				"enabled": true,
 				"deviceName": "smolbot",
-				"storePath": "/tmp/nanobot-whatsapp.db"
+				"storePath": "/tmp/nanobot-whatsapp.db",
+				"allowedChatIDs": ["example@s.whatsapp.net"]
 			}
 		},
 		"gateway": {
@@ -76,6 +77,9 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 	if !cfg.Channels.WhatsApp.Enabled || cfg.Channels.WhatsApp.DeviceName != "smolbot" {
 		t.Errorf("whatsapp config = %+v", cfg.Channels.WhatsApp)
+	}
+	if got := cfg.Channels.WhatsApp.AllowedChatIDs; len(got) != 1 || got[0] != "example@s.whatsapp.net" {
+		t.Errorf("whatsapp allowedChatIDs = %#v", got)
 	}
 	if !cfg.Tools.RestrictToWorkspace {
 		t.Error("restrictToWorkspace should be true")
