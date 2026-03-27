@@ -38,15 +38,31 @@ type Tool interface {
 }
 
 type Spawner interface {
+	Spawn(ctx context.Context, req SpawnRequest) (*SpawnResult, error)
 	ProcessDirect(ctx context.Context, req SpawnRequest) (string, error)
 }
 
 type SpawnRequest struct {
 	ParentSessionKey string
 	ChildSessionKey  string
-	Message          string
+	Description      string
+	Prompt           string
+	AgentType        string
+	Model            string
+	ReasoningEffort  string
 	MaxIterations    int
 	DisabledTools    []string
+}
+
+type SpawnResult struct {
+	ID              string
+	SessionKey      string
+	Name            string
+	AgentType       string
+	Model           string
+	ReasoningEffort string
+	Description     string
+	PromptPreview   string
 }
 
 type MessageRouter interface {
@@ -90,11 +106,27 @@ func (r *Registry) SetCancelSession(fn func(sessionKey string)) {
 }
 
 func (r *Registry) Definitions() []provider.ToolDef {
+	return r.DefinitionsExcluding(nil)
+}
+
+func (r *Registry) DefinitionsExcluding(disabled []string) []provider.ToolDef {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	blocked := make(map[string]struct{}, len(disabled))
+	for _, name := range disabled {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		blocked[name] = struct{}{}
+	}
+
 	defs := make([]provider.ToolDef, 0, len(r.tools))
 	for _, tool := range r.tools {
+		if _, skip := blocked[tool.Name()]; skip {
+			continue
+		}
 		defs = append(defs, provider.ToolDef{
 			Name:        tool.Name(),
 			Description: tool.Description(),

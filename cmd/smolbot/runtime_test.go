@@ -14,9 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/gateway"
+	"github.com/Nomadcxx/smolbot/pkg/tool"
 	"github.com/gorilla/websocket"
 )
 
@@ -213,6 +215,204 @@ func TestBuildRuntimeRegistersOnlyEnabledConfiguredChannels(t *testing.T) {
 	got := strings.Join(app.channels.ChannelNames(), ",")
 	if got != "signal,slack" {
 		t.Fatalf("registered channels = %q, want signal,slack", got)
+	}
+}
+
+func TestRuntimeSpawnerStartsChildInBackgroundAndReturnsMetadata(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var gotReq agent.Request
+	spawner := &runtimeSpawner{
+		process: func(ctx context.Context, req agent.Request) (string, error) {
+			gotReq = req
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+			return "done", nil
+		},
+	}
+
+	result, err := spawner.Spawn(context.Background(), tool.SpawnRequest{
+		ParentSessionKey: "parent",
+		ChildSessionKey:  "spawn:parent:child1",
+		Description:      "Spec review Gate 6",
+		Prompt:           "Review ONLY the Gate 6 changes.",
+		AgentType:        "explorer",
+		Model:            "gpt-5.4",
+		ReasoningEffort:  "high",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	if result.Name == "" || result.AgentType != "explorer" {
+		t.Fatalf("unexpected spawn result %#v", result)
+	}
+	if result.Description != "Spec review Gate 6" {
+		t.Fatalf("unexpected spawn description %#v", result)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("background child did not start")
+	}
+
+	spawner.mu.Lock()
+	run := spawner.runs[result.ID]
+	spawner.mu.Unlock()
+	if run == nil {
+		t.Fatalf("expected child run to be tracked, got %#v", spawner.runs)
+	}
+	if run.done {
+		t.Fatal("child run should not be marked done before release")
+	}
+
+	close(release)
+	select {
+	case <-run.completed:
+	case <-time.After(time.Second):
+		t.Fatal("background child did not complete after release")
+	}
+
+	if gotReq.Content != "Review ONLY the Gate 6 changes." {
+		t.Fatalf("unexpected child prompt %#v", gotReq)
+	}
+	if gotReq.Model != "gpt-5.4" || gotReq.ReasoningEffort != "high" {
+		t.Fatalf("expected child overrides to be forwarded, got %#v", gotReq)
+	}
+	if gotReq.MaxIterations != 0 {
+		t.Fatalf("expected zero max-iteration override to be preserved, got %#v", gotReq)
+	}
+
+	spawner.mu.Lock()
+	defer spawner.mu.Unlock()
+	if !run.done || run.summary != "done" || run.err != nil {
+		t.Fatalf("unexpected completed child state %#v", run)
+	}
+}
+
+func TestRuntimeSpawnerForwardsChildExecutionPolicy(t *testing.T) {
+	var gotReq agent.Request
+	spawner := &runtimeSpawner{
+		process: func(ctx context.Context, req agent.Request) (string, error) {
+			gotReq = req
+			return "ok", nil
+		},
+	}
+
+	_, err := spawner.Spawn(context.Background(), tool.SpawnRequest{
+		ParentSessionKey: "parent",
+		ChildSessionKey:  "task:parent:child2",
+		Description:      "Code-quality review Gate 6",
+		Prompt:           "Review only the changed files.",
+		AgentType:        "explorer",
+		Model:            "gpt-5.4-mini",
+		ReasoningEffort:  "medium",
+		MaxIterations:    7,
+		DisabledTools:    []string{"message", "spawn", "task"},
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if gotReq.SessionKey != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if gotReq.SessionKey == "" {
+		t.Fatal("child request was not forwarded")
+	}
+	if gotReq.Model != "gpt-5.4-mini" || gotReq.ReasoningEffort != "medium" || gotReq.MaxIterations != 7 {
+		t.Fatalf("unexpected child override forwarding %#v", gotReq)
+	}
+	if len(gotReq.DisabledTools) != 3 {
+		t.Fatalf("expected disabled tool policy to be forwarded, got %#v", gotReq)
+	}
+}
+
+func TestRuntimeSpawnerCleanupParentCancelsOutstandingChildrenAndClearsState(t *testing.T) {
+	started := make(chan struct{}, 1)
+	spawner := &runtimeSpawner{
+		process: func(ctx context.Context, req agent.Request) (string, error) {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	}
+
+	result, err := spawner.Spawn(context.Background(), tool.SpawnRequest{
+		ParentSessionKey: "parent",
+		ChildSessionKey:  "task:parent:child3",
+		Description:      "Review",
+		Prompt:           "Review the diff.",
+		AgentType:        "explorer",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("background child did not start")
+	}
+
+	if got := spawner.Outstanding("parent"); len(got) != 1 || got[0].ID != result.ID {
+		t.Fatalf("unexpected outstanding children %#v", got)
+	}
+
+	spawner.SetWaiting("parent", []string{result.ID})
+	spawner.CleanupParent("parent")
+
+	spawner.mu.Lock()
+	defer spawner.mu.Unlock()
+	if len(spawner.runs) != 0 {
+		t.Fatalf("expected runs to be cleaned up, got %#v", spawner.runs)
+	}
+	if _, ok := spawner.childrenByParent["parent"]; ok {
+		t.Fatalf("expected parent child map to be removed, got %#v", spawner.childrenByParent)
+	}
+	if _, ok := spawner.waiting["parent"]; ok {
+		t.Fatalf("expected wait state to be removed, got %#v", spawner.waiting)
+	}
+}
+
+func TestRuntimeSpawnerDoesNotLaunchChildWhenCallerContextCanceled(t *testing.T) {
+	started := false
+	spawner := &runtimeSpawner{
+		process: func(ctx context.Context, req agent.Request) (string, error) {
+			started = true
+			return "ok", nil
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := spawner.Spawn(ctx, tool.SpawnRequest{
+		ParentSessionKey: "parent",
+		ChildSessionKey:  "task:parent:child4",
+		Description:      "Canceled",
+		Prompt:           "This should not run.",
+		AgentType:        "explorer",
+	})
+	if err == nil {
+		t.Fatal("expected canceled context error")
+	}
+	if started {
+		t.Fatal("expected canceled spawn not to launch child process")
+	}
+	if got := spawner.Outstanding("parent"); len(got) != 0 {
+		t.Fatalf("expected no outstanding children, got %#v", got)
 	}
 }
 

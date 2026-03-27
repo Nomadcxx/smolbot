@@ -61,18 +61,28 @@ func (t *SpawnTool) Execute(ctx context.Context, raw json.RawMessage, tctx ToolC
 	req := SpawnRequest{
 		ParentSessionKey: tctx.SessionKey,
 		ChildSessionKey:  childSessionKey,
-		Message:          args.Message,
+		Prompt:           args.Message,
+		Description:      args.Message,
 		MaxIterations:    spawnMaxIterations,
-		DisabledTools:    []string{"message", "spawn"},
+		DisabledTools:    []string{"message", "spawn", "task"},
 	}
 	output, err := tctx.Spawner.ProcessDirect(ctx, req)
 	if err != nil {
 		return &Result{Error: fmt.Sprintf("spawn child: %v", err)}, nil
 	}
 	return &Result{
-		Output: fmt.Sprintf("spawned %s\n%s", childSessionKey, output),
+		Output: strings.TrimSpace(output),
 		Metadata: map[string]any{
-			"sessionKey": childSessionKey,
+			"description":   strings.TrimSpace(args.Message),
+			"promptPreview": summarizeInlinePrompt(args.Message),
 		},
 	}, nil
+}
+
+func summarizeInlinePrompt(prompt string) string {
+	prompt = strings.Join(strings.Fields(strings.TrimSpace(prompt)), " ")
+	if len(prompt) <= 160 {
+		return prompt
+	}
+	return strings.TrimSpace(prompt[:157]) + "..."
 }

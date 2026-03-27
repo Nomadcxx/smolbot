@@ -334,6 +334,45 @@ func TestAgentLoopSkipsPersistenceOnProviderErrorAndRejectsBusySession(t *testin
 	}
 }
 
+func TestAgentLoopRespectsRequestOverridesForDelegatedChildRuns(t *testing.T) {
+	fakeProvider := &fakeStreamProvider{
+		streams: []fakeStreamScript{{
+			deltas: []*provider.StreamDelta{
+				{Content: "delegated response"},
+				{FinishReason: stringPtr("stop")},
+			},
+		}},
+	}
+
+	spawnTool := &fakeTool{name: "spawn", result: &tool.Result{Output: "nope"}}
+	taskTool := &fakeTool{name: "task", result: &tool.Result{Output: "nope"}}
+	readTool := &fakeTool{name: "read_file", result: &tool.Result{Output: "ok"}}
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, spawnTool, taskTool, readTool)
+	defer store.Close()
+
+	_, err := loop.ProcessDirect(context.Background(), Request{
+		Content:         "run delegated child",
+		SessionKey:      "child-session",
+		Model:           "gpt-5.4-mini",
+		ReasoningEffort: "high",
+		MaxIterations:   2,
+		DisabledTools:   []string{"spawn", "task"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("ProcessDirect: %v", err)
+	}
+	if len(fakeProvider.requests) != 1 {
+		t.Fatalf("expected one provider request, got %d", len(fakeProvider.requests))
+	}
+	req := fakeProvider.requests[0]
+	if req.Model != "gpt-5.4-mini" || req.ReasoningEffort != "high" {
+		t.Fatalf("expected per-request overrides, got %#v", req)
+	}
+	if len(req.Tools) != 1 || req.Tools[0].Name != "read_file" {
+		t.Fatalf("expected disabled tools to be excluded, got %#v", req.Tools)
+	}
+}
+
 func TestAgentLoopPassesRoutingDepsAndUsesToolOutput(t *testing.T) {
 	fakeProvider := &fakeStreamProvider{
 		streams: []fakeStreamScript{
@@ -837,6 +876,10 @@ type fakeMessageRouter struct{}
 func (fakeMessageRouter) Route(context.Context, string, string, string) error { return nil }
 
 type fakeSpawner struct{}
+
+func (fakeSpawner) Spawn(context.Context, tool.SpawnRequest) (*tool.SpawnResult, error) {
+	return &tool.SpawnResult{ID: "spawned", SessionKey: "spawned", Name: "Bernoulli"}, nil
+}
 
 func (fakeSpawner) ProcessDirect(context.Context, tool.SpawnRequest) (string, error) {
 	return "spawned", nil

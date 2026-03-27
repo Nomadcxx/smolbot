@@ -7,6 +7,10 @@ type Request struct {
 	ChatID        string
 	Media         []MediaAttachment
 	IsCronContext bool
+	Model         string
+	ReasoningEffort string
+	MaxIterations int
+	DisabledTools []string
 }
 
 type MediaAttachment struct {

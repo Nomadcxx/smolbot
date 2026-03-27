@@ -19,10 +19,11 @@ func TestToolRegistryIntegration(t *testing.T) {
 	registry.Register(NewWriteFileTool(true))
 	registry.Register(NewMessageTool())
 	registry.Register(NewSpawnTool(func() string { return "child1" }))
+	registry.Register(NewTaskTool(func() string { return "child2" }))
 
 	defs := registry.Definitions()
-	if len(defs) != 5 {
-		t.Fatalf("expected five tool definitions, got %#v", defs)
+	if len(defs) != 6 {
+		t.Fatalf("expected six tool definitions, got %#v", defs)
 	}
 	if defs[0].Name != "exec" || defs[len(defs)-1].Name != "write_file" {
 		t.Fatalf("expected stable sorted definitions, got %#v", defs)
@@ -78,8 +79,24 @@ func TestToolRegistryIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
-	if !strings.Contains(firstNonEmpty(spawnResult.Output, spawnResult.Content), "spawn:parent:child1") {
+	if firstNonEmpty(spawnResult.Output, spawnResult.Content) != "child finished" {
 		t.Fatalf("unexpected spawn result %#v", spawnResult)
+	}
+	if spawnResult.Metadata["description"] == nil {
+		t.Fatalf("expected structured spawn metadata, got %#v", spawnResult)
+	}
+
+	taskRaw, _ := json.Marshal(map[string]any{
+		"description": "Spec review",
+		"prompt":      "Review the working tree changes.",
+		"agent_type":  "explorer",
+	})
+	taskResult, err := registry.Execute(context.Background(), "task", taskRaw, ToolContext{SessionKey: "parent", Spawner: spawner})
+	if err != nil {
+		t.Fatalf("task: %v", err)
+	}
+	if taskResult.Metadata["agentType"] != "explorer" {
+		t.Fatalf("unexpected task result %#v", taskResult)
 	}
 
 	if _, err := os.Stat(filepath.Join(workspace, "notes.txt")); err != nil {

@@ -50,14 +50,52 @@ func TestRoutingTools(t *testing.T) {
 		if spawner.req.ChildSessionKey != "spawn:parent-session:abc123" {
 			t.Fatalf("unexpected child session key %#v", spawner.req)
 		}
+		if spawner.req.Prompt != "do the side quest" {
+			t.Fatalf("unexpected prompt %#v", spawner.req)
+		}
 		if spawner.req.MaxIterations != 15 {
 			t.Fatalf("expected reduced max iterations, got %d", spawner.req.MaxIterations)
 		}
 		if !containsString(spawner.req.DisabledTools, "message") || !containsString(spawner.req.DisabledTools, "spawn") {
 			t.Fatalf("expected recursive tools to be disabled, got %#v", spawner.req.DisabledTools)
 		}
-		if !strings.Contains(firstNonEmpty(result.Output, result.Content), "spawn:parent-session:abc123") {
-			t.Fatalf("expected child session key in output, got %#v", result)
+		if result.Metadata["description"] != "do the side quest" {
+			t.Fatalf("expected compatibility metadata, got %#v", result.Metadata)
+		}
+		if firstNonEmpty(result.Output, result.Content) != "child finished" {
+			t.Fatalf("expected synchronous child output, got %#v", result)
+		}
+	})
+
+	t.Run("task delegates with structured description and agent type", func(t *testing.T) {
+		spawner := &fakeSpawner{}
+		tool := NewTaskTool(func() string { return "child1" })
+		raw, _ := json.Marshal(map[string]any{
+			"description":      "Spec review Gate 6",
+			"prompt":           "Review ONLY the Gate 6 changes in the current working tree.",
+			"agent_type":       "explorer",
+			"model":            "gpt-5.4",
+			"reasoning_effort": "high",
+		})
+
+		result, err := tool.Execute(context.Background(), raw, ToolContext{SessionKey: "parent-session", Spawner: spawner})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if spawner.calls != 1 {
+			t.Fatalf("expected spawner call, got %d", spawner.calls)
+		}
+		if spawner.req.Description != "Spec review Gate 6" {
+			t.Fatalf("unexpected description %#v", spawner.req)
+		}
+		if spawner.req.AgentType != "explorer" {
+			t.Fatalf("unexpected agent type %#v", spawner.req)
+		}
+		if spawner.req.Model != "gpt-5.4" || spawner.req.ReasoningEffort != "high" {
+			t.Fatalf("unexpected task model metadata %#v", spawner.req)
+		}
+		if got := result.Metadata["agentType"]; got != "explorer" {
+			t.Fatalf("expected agentType metadata, got %#v", result.Metadata)
 		}
 	})
 
@@ -147,6 +185,21 @@ func (f *fakeMessageRouter) Route(_ context.Context, channel, chatID, content st
 type fakeSpawner struct {
 	calls int
 	req   SpawnRequest
+}
+
+func (f *fakeSpawner) Spawn(_ context.Context, req SpawnRequest) (*SpawnResult, error) {
+	f.calls++
+	f.req = req
+	return &SpawnResult{
+		ID:              req.ChildSessionKey,
+		SessionKey:      req.ChildSessionKey,
+		Name:            "Bernoulli",
+		AgentType:       firstNonEmpty(req.AgentType, "explorer"),
+		Model:           req.Model,
+		ReasoningEffort: req.ReasoningEffort,
+		Description:     req.Description,
+		PromptPreview:   req.Prompt,
+	}, nil
 }
 
 func (f *fakeSpawner) ProcessDirect(_ context.Context, req SpawnRequest) (string, error) {
