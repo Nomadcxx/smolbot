@@ -237,20 +237,29 @@ func TestHandleSlashCommandProvidersShowsCurrentProviderConfig(t *testing.T) {
 	}
 
 	view := plain(got.dialog.View())
-	if !strings.Contains(view, "Current model: gpt-5") {
-		t.Fatalf("expected current model line, got %q", view)
+	if !strings.Contains(view, "Active") {
+		t.Fatalf("expected Active section header, got %q", view)
 	}
-	if !strings.Contains(view, "Current provider: openai") {
-		t.Fatalf("expected current provider line, got %q", view)
+	if !strings.Contains(view, "Provider (active)") {
+		t.Fatalf("expected active provider marker, got %q", view)
 	}
-	if !strings.Contains(view, "API base URL: https://api.openai.example/v1") {
-		t.Fatalf("expected provider API base URL, got %q", view)
+	if !strings.Contains(view, "openai") {
+		t.Fatalf("expected active provider name, got %q", view)
 	}
-	if !strings.Contains(view, "Available providers: anthropic, openai") {
-		t.Fatalf("expected available providers list, got %q", view)
+	if !strings.Contains(view, "Model:") || !strings.Contains(view, "gpt-5") {
+		t.Fatalf("expected current model field, got %q", view)
 	}
-	if !strings.Contains(view, "Context window: 200K") {
-		t.Fatalf("expected context window line, got %q", view)
+	if !strings.Contains(view, "API Base:") || !strings.Contains(view, "https://api.openai.example/v1") {
+		t.Fatalf("expected API base field for active provider, got %q", view)
+	}
+	if !strings.Contains(view, "Configured") {
+		t.Fatalf("expected Configured section header, got %q", view)
+	}
+	if !strings.Contains(view, "anthropic") {
+		t.Fatalf("expected configured provider name, got %q", view)
+	}
+	if !strings.Contains(view, "Anthropic") {
+		t.Fatalf("expected anthropic provider type, got %q", view)
 	}
 }
 

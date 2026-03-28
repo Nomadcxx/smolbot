@@ -558,7 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dialog = mcpServersDialog{dialogcmp.NewMCPServers(msg.Servers)}
 		return m, nil
 	case ProvidersLoadedMsg:
-		m.dialog = providersDialog{dialogcmp.NewProviders(buildProviderLines(msg.Models, msg.Current, msg.Status, m.providerConfig))}
+		m.dialog = providersDialog{dialogcmp.NewProvidersFromData(msg.Models, msg.Current, msg.Status, m.providerConfig)}
 		return m, nil
 	case ModelSetMsg:
 		m.app.Model = msg.ID
@@ -1277,64 +1277,6 @@ func quotaAlertMessage(providerID, modelName, state string) string {
 	}
 }
 
-func buildProviderLines(models []client.ModelInfo, current string, status client.StatusPayload, cfg *cfgpkg.Config) []string {
-	currentModel := firstNonEmptyString(current, status.Model, "unknown")
-	currentProvider := providerNameForModel(models, currentModel)
-	if currentProvider == "" {
-		currentProvider = "unknown"
-	}
-
-	lines := []string{
-		"Current model: " + currentModel,
-		"Current provider: " + currentProvider,
-	}
-	if cfg != nil {
-		if providerCfg, ok := cfg.Providers[currentProvider]; ok && strings.TrimSpace(providerCfg.APIBase) != "" {
-			lines = append(lines, "API base URL: "+providerCfg.APIBase)
-		}
-		if len(cfg.Providers) > 0 {
-			names := make([]string, 0, len(cfg.Providers))
-			for name := range cfg.Providers {
-				names = append(names, name)
-			}
-			lines = append(lines, "Available providers: "+strings.Join(sortStrings(names), ", "))
-		}
-	}
-	if status.Usage.ContextWindow > 0 {
-		lines = append(lines, "Context window: "+formatTokens(status.Usage.ContextWindow))
-	}
-	return lines
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func providerNameForModel(models []client.ModelInfo, current string) string {
-	for _, model := range models {
-		if model.ID == current {
-			return model.Provider
-		}
-	}
-	return ""
-}
-
-func sortStrings(values []string) []string {
-	if len(values) < 2 {
-		return values
-	}
-	for i := 1; i < len(values); i++ {
-		for j := i; j > 0 && values[j] < values[j-1]; j-- {
-			values[j], values[j-1] = values[j-1], values[j]
-		}
-	}
-	return values
-}
 
 func loadProviderConfig() *cfgpkg.Config {
 	paths := cfgpkg.DefaultPaths()
