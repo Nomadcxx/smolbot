@@ -97,6 +97,25 @@ func TestCookieJarStoreRoundTripAndPermissions(t *testing.T) {
 	}
 }
 
+func TestWriteOllamaCookieHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ollama_cookies.json")
+
+	if err := WriteOllamaCookieHeader(path, "session=abc123; cf_clearance=xyz"); err != nil {
+		t.Fatalf("WriteOllamaCookieHeader: %v", err)
+	}
+
+	cookies, err := newCookieJarStore(path).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cookies) != 2 {
+		t.Fatalf("len(cookies) = %d, want 2", len(cookies))
+	}
+	if cookies[0].Domain != "ollama.com" || cookies[0].Path != "/" {
+		t.Fatalf("unexpected first cookie: %+v", cookies[0])
+	}
+}
+
 func TestImportOllamaCookiesFromLinuxBrowsers(t *testing.T) {
 	home := t.TempDir()
 	dbPath := filepath.Join(home, ".config", "chromium", "Default", "Cookies")

@@ -1211,7 +1211,14 @@ func shouldEnableOllamaQuota(cfg *config.Config, store *usage.Store) bool {
 	if cfg.Quota.RefreshIntervalMinutes <= 0 {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(cfg.Agents.Defaults.Provider), "ollama")
+	if strings.EqualFold(strings.TrimSpace(cfg.Agents.Defaults.Provider), "ollama") {
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(cfg.Agents.Defaults.Model), "ollama/") {
+		return true
+	}
+	_, ok := cfg.Providers["ollama"]
+	return ok
 }
 
 func newOllamaQuotaRunner(cfg *config.Config, paths *config.Paths, store *usage.Store) func(context.Context) error {
@@ -1224,11 +1231,17 @@ func newOllamaQuotaRunner(cfg *config.Config, paths *config.Paths, store *usage.
 	}
 
 	return func(ctx context.Context) error {
-		if cfg != nil && cfg.Quota.BrowserCookieDiscoveryEnabled {
-			cookies, err := cookieLoader.Load()
-			if err != nil || len(cookies) == 0 {
-				if _, importErr := usage.ImportOllamaCookiesFromLinuxBrowsers("", cookiePath); importErr != nil {
-					log.Printf("[runtime] ollama cookie import skipped: %v", importErr)
+		if cfg != nil {
+			if strings.TrimSpace(cfg.Quota.OllamaCookieHeader) != "" {
+				if err := usage.WriteOllamaCookieHeader(cookiePath, cfg.Quota.OllamaCookieHeader); err != nil {
+					log.Printf("[runtime] ollama cookie header override failed: %v", err)
+				}
+			} else if cfg.Quota.BrowserCookieDiscoveryEnabled {
+				cookies, err := cookieLoader.Load()
+				if err != nil || len(cookies) == 0 {
+					if _, importErr := usage.ImportOllamaCookiesFromLinuxBrowsers("", cookiePath); importErr != nil {
+						log.Printf("[runtime] ollama cookie import skipped: %v", importErr)
+					}
 				}
 			}
 		}

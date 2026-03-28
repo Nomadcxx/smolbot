@@ -56,7 +56,8 @@ func TestConfigRoundTrip(t *testing.T) {
 		},
 		"quota": {
 			"refreshIntervalMinutes": 15,
-			"browserCookieDiscoveryEnabled": false
+			"browserCookieDiscoveryEnabled": false,
+			"ollamaCookieHeader": "session=abc123; cf_clearance=xyz"
 		},
 		"tools": {
 			"restrictToWorkspace": true,
@@ -118,6 +119,9 @@ func TestConfigRoundTrip(t *testing.T) {
 	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("BrowserCookieDiscoveryEnabled"); !got.IsValid() || got.Bool() {
 		t.Fatalf("quota browserCookieDiscoveryEnabled = %v, want false", got)
 	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("OllamaCookieHeader"); !got.IsValid() || got.String() != "session=abc123; cf_clearance=xyz" {
+		t.Fatalf("quota ollamaCookieHeader = %v, want configured header", got)
+	}
 	if !cfg.Tools.RestrictToWorkspace {
 		t.Error("restrictToWorkspace should be true")
 	}
@@ -155,6 +159,9 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("BrowserCookieDiscoveryEnabled"); !got.IsValid() || !got.Bool() {
 		t.Fatalf("quota browserCookieDiscoveryEnabled = %v, want true", got)
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("OllamaCookieHeader"); !got.IsValid() || got.String() != "" {
+		t.Fatalf("quota ollamaCookieHeader = %v, want empty by default", got)
 	}
 	if cfg.Channels.WhatsApp.DeviceName == "" || cfg.Channels.WhatsApp.StorePath == "" {
 		t.Fatalf("whatsapp defaults = %+v, want non-empty settings", cfg.Channels.WhatsApp)

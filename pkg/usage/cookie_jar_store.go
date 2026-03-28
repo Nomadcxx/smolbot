@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -35,6 +36,18 @@ func newCookieJarStore(path string) *cookieJarStore {
 
 func NewCookieJarStore(path string) CookieLoader {
 	return newCookieJarStore(path)
+}
+
+func WriteOllamaCookieHeader(path, header string) error {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return fmt.Errorf("ollama cookie header is empty")
+	}
+	cookies := parseCookieHeader(header)
+	if len(cookies) == 0 {
+		return fmt.Errorf("ollama cookie header did not contain any cookies")
+	}
+	return newCookieJarStore(path).Save(cookies)
 }
 
 func (s *cookieJarStore) Save(cookies []*http.Cookie) error {
@@ -134,4 +147,32 @@ func (s *cookieJarStore) Load() ([]*http.Cookie, error) {
 		cookies = append(cookies, cookie)
 	}
 	return cookies, nil
+}
+
+func parseCookieHeader(header string) []*http.Cookie {
+	parts := strings.Split(header, ";")
+	cookies := make([]*http.Cookie, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		name, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if name == "" || value == "" {
+			continue
+		}
+		cookies = append(cookies, &http.Cookie{
+			Name:   name,
+			Value:  value,
+			Domain: "ollama.com",
+			Path:   "/",
+			Secure: true,
+		})
+	}
+	return cookies
 }

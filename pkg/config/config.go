@@ -90,8 +90,9 @@ type GatewayConfig struct {
 }
 
 type QuotaConfig struct {
-	RefreshIntervalMinutes        int  `json:"refreshIntervalMinutes"`
-	BrowserCookieDiscoveryEnabled bool `json:"browserCookieDiscoveryEnabled"`
+	RefreshIntervalMinutes        int    `json:"refreshIntervalMinutes"`
+	BrowserCookieDiscoveryEnabled bool   `json:"browserCookieDiscoveryEnabled"`
+	OllamaCookieHeader            string `json:"ollamaCookieHeader,omitempty"`
 }
 
 type HeartbeatConfig struct {
