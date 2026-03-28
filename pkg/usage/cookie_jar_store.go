@@ -70,8 +70,8 @@ func (s *cookieJarStore) Save(cookies []*http.Cookie) error {
 			Secure:   cookie.Secure,
 			HttpOnly: cookie.HttpOnly,
 		}
-		if !cookie.Expires.IsZero() {
-			entry.Expires = cookie.Expires.UTC()
+		if expiresAt, ok := sanitizeCookieExpiry(cookie.Expires); ok {
+			entry.Expires = expiresAt
 		}
 		payload.Cookies = append(payload.Cookies, entry)
 	}
@@ -114,6 +114,18 @@ func (s *cookieJarStore) Save(cookies []*http.Cookie) error {
 		return fmt.Errorf("chmod cookie jar: %w", err)
 	}
 	return nil
+}
+
+func sanitizeCookieExpiry(expiresAt time.Time) (time.Time, bool) {
+	if expiresAt.IsZero() {
+		return time.Time{}, false
+	}
+	expiresAt = expiresAt.UTC()
+	year := expiresAt.Year()
+	if year < 1 || year > 9999 {
+		return time.Time{}, false
+	}
+	return expiresAt, true
 }
 
 func (s *cookieJarStore) Load() ([]*http.Cookie, error) {

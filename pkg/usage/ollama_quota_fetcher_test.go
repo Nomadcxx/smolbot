@@ -149,6 +149,51 @@ func TestOllamaQuotaFetcherClassifiesExpiredSettingsAuth(t *testing.T) {
 	}
 }
 
+func TestOllamaQuotaFetcherUsesPlanFromSettingsWhenAPIMePlanIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 28, 12, 34, 56, 0, time.UTC)
+	signer := &fakeOllamaMeSigner{
+		t:             t,
+		wantChallenge: "POST,/api/me?ts=1774701296",
+		token:         "pubkey:signature",
+	}
+	cookieLoader := &fakeOllamaCookieLoader{
+		cookies: []*http.Cookie{
+			{Name: "__Secure-session", Value: "abc123", Domain: "127.0.0.1", Path: "/", Secure: true, HttpOnly: true},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/me":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Name":"nomadxxx","Email":"lukegiles32@protonmail.com","Plan":"","NotifyUsageLimits":true}`))
+		case "/settings":
+			_, _ = w.Write([]byte(`<!doctype html><html><body><div class="flex flex-col space-y-6"><h2 class="text-xl font-medium flex items-center space-x-2"><span>Cloud Usage</span><span class="text-xs font-normal px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 capitalize">pro</span></h2><div><div class="flex justify-between mb-2"><span class="text-sm">Session usage</span><span class="text-sm">2% used</span></div><div class="text-xs text-neutral-500 mt-1 local-time" data-time="2026-03-28T00:00:00Z">Resets in 3 hours</div></div><div><div class="flex justify-between mb-2"><span class="text-sm">Weekly usage</span><span class="text-sm">26.5% used</span></div><div class="text-xs text-neutral-500 mt-1 local-time" data-time="2026-03-30T00:00:00Z">Resets in 2 days</div></div></div></body></html>`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	fetcher := &OllamaQuotaFetcher{
+		BaseURL:      server.URL,
+		Client:       server.Client(),
+		Clock:        func() time.Time { return now },
+		Signer:       signer,
+		CookieLoader: cookieLoader,
+	}
+
+	got, err := fetcher.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if got.PlanName != "pro" {
+		t.Fatalf("PlanName = %q, want %q", got.PlanName, "pro")
+	}
+}
+
 func TestOllamaQuotaFetcherClassifiesUnavailableOnCookieLoadError(t *testing.T) {
 	t.Parallel()
 

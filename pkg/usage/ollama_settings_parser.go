@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	ollamaCloudUsagePlanRE = regexp.MustCompile(`(?is)<h2[^>]*>.*?<span>\s*Cloud Usage\s*</span>.*?<span[^>]*>\s*([^<]+?)\s*</span>`)
-	ollamaSessionUsageRE   = regexp.MustCompile(`(?is)<span[^>]*>\s*Session usage\s*</span>.*?<span[^>]*>\s*([0-9]+(?:\.[0-9]+)?)%\s*used\s*</span>.*?data-time="([^"]+)"`)
-	ollamaWeeklyUsageRE    = regexp.MustCompile(`(?is)<span[^>]*>\s*Weekly usage\s*</span>.*?<span[^>]*>\s*([0-9]+(?:\.[0-9]+)?)%\s*used\s*</span>.*?data-time="([^"]+)"`)
+	ollamaCloudUsagePlanRE = regexp.MustCompile(`(?is)<h2[^>]*>.*?<span[^>]*>\s*Cloud Usage\s*</span\s*>.*?<span[^>]*>\s*([^<]+?)\s*</span\s*>`)
+	ollamaSessionUsageRE   = regexp.MustCompile(`(?is)<span[^>]*>\s*Session usage\s*</span\s*>.*?<span[^>]*>\s*([0-9]+(?:\.[0-9]+)?)%\s*used\s*</span\s*>.*?data-time="([^"]+)"`)
+	ollamaWeeklyUsageRE    = regexp.MustCompile(`(?is)<span[^>]*>\s*Weekly usage\s*</span\s*>.*?<span[^>]*>\s*([0-9]+(?:\.[0-9]+)?)%\s*used\s*</span\s*>.*?data-time="([^"]+)"`)
 	ollamaNotifyUsageRE    = regexp.MustCompile(`(?is)name="notify-usage-limits"[^>]*\bchecked\b`)
 )
 

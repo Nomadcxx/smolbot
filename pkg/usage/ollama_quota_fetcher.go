@@ -119,6 +119,9 @@ func (f *OllamaQuotaFetcher) Fetch(ctx context.Context) (QuotaSummary, error) {
 		summary.SessionResetsAt = parsed.SessionResetsAt
 		summary.WeeklyUsedPercent = parsed.WeeklyUsedPercent
 		summary.WeeklyResetsAt = parsed.WeeklyResetsAt
+		if strings.TrimSpace(summary.PlanName) == "" {
+			summary.PlanName = parsed.PlanName
+		}
 		summary.NotifyUsageLimits = parsed.NotifyUsageLimits
 		summary.State = parsed.State
 		summary.Source = parsed.Source

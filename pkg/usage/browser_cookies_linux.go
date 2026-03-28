@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,12 +40,50 @@ func discoverLinuxChromiumCookieDBs(home string) []string {
 	}
 
 	found := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
-		info, err := os.Stat(candidate)
-		if err != nil || info.IsDir() {
-			continue
+	seen := make(map[string]struct{}, len(candidates))
+	addPath := func(path string) {
+		path = filepath.Clean(path)
+		if path == "" {
+			return
 		}
-		found = append(found, candidate)
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		found = append(found, path)
+	}
+
+	for _, candidate := range candidates {
+		addPath(candidate)
+	}
+
+	var discovered []string
+	searchRoots := []string{
+		filepath.Join(home, ".config"),
+		filepath.Join(home, ".var", "app"),
+		filepath.Join(home, ".mozilla"),
+		filepath.Join(home, ".zen"),
+	}
+	for _, root := range searchRoots {
+		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info == nil || info.IsDir() {
+				return nil
+			}
+			name := info.Name()
+			if name != "Cookies" && name != "cookies.sqlite" {
+				return nil
+			}
+			discovered = append(discovered, path)
+			return nil
+		})
+	}
+	slices.Sort(discovered)
+	for _, path := range discovered {
+		addPath(path)
 	}
 	return found
 }
@@ -86,7 +125,7 @@ func cloneCookie(cookie *http.Cookie) *http.Cookie {
 func importOllamaCookiesFromLinuxBrowsers(home, outputPath string) (int, error) {
 	paths := discoverLinuxChromiumCookieDBs(home)
 	if len(paths) == 0 {
-		return 0, fmt.Errorf("no chromium cookie databases found")
+		return 0, fmt.Errorf("no browser cookie databases found")
 	}
 
 	var imported []*http.Cookie
@@ -114,6 +153,10 @@ func ImportOllamaCookiesFromLinuxBrowsers(home, outputPath string) (int, error) 
 }
 
 func readOllamaCookiesFromChromiumDB(path string) ([]*http.Cookie, error) {
+	if strings.EqualFold(filepath.Base(path), "cookies.sqlite") {
+		return readOllamaCookiesFromFirefoxDB(path)
+	}
+
 	db, err := sql.Open("sqlite3", sqliteDSN(path)+"&mode=ro&_query_only=on")
 	if err != nil {
 		return nil, fmt.Errorf("open cookie db: %w", err)
@@ -163,6 +206,116 @@ func readOllamaCookiesFromChromiumDB(path string) ([]*http.Cookie, error) {
 		return nil, fmt.Errorf("iterate cookies: %w", err)
 	}
 	return cookies, nil
+}
+
+func readOllamaCookiesFromFirefoxDB(path string) ([]*http.Cookie, error) {
+	snapshotPath, cleanup, err := snapshotSQLiteDB(path)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	db, err := sql.Open("sqlite3", sqliteDSN(snapshotPath)+"&mode=ro&_query_only=on")
+	if err != nil {
+		return nil, fmt.Errorf("open firefox cookie db: %w", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`
+		SELECT host, name, value, path, expiry, isSecure, isHttpOnly
+		FROM moz_cookies
+		WHERE host LIKE '%ollama%'
+		ORDER BY host, name
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query firefox cookies: %w", err)
+	}
+	defer rows.Close()
+
+	var cookies []*http.Cookie
+	for rows.Next() {
+		var host string
+		var name string
+		var value string
+		var cookiePath string
+		var expiry int64
+		var isSecure int
+		var isHTTPOnly int
+		if err := rows.Scan(&host, &name, &value, &cookiePath, &expiry, &isSecure, &isHTTPOnly); err != nil {
+			return nil, fmt.Errorf("scan firefox cookie: %w", err)
+		}
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		cookie := &http.Cookie{
+			Name:     name,
+			Value:    value,
+			Domain:   host,
+			Path:     cookiePath,
+			Secure:   isSecure != 0,
+			HttpOnly: isHTTPOnly != 0,
+		}
+		if expiry > 0 {
+			cookie.Expires = time.Unix(expiry, 0).UTC()
+		}
+		cookies = append(cookies, cookie)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate firefox cookies: %w", err)
+	}
+	return cookies, nil
+}
+
+func snapshotSQLiteDB(path string) (string, func(), error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("stat sqlite db: %w", err)
+	}
+	if info.IsDir() {
+		return "", func() {}, fmt.Errorf("sqlite db path is a directory")
+	}
+
+	dir, err := os.MkdirTemp("", "smolbot-cookie-snapshot-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create sqlite snapshot dir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+
+	target := filepath.Join(dir, filepath.Base(path))
+	if err := copyFile(path, target); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+
+	for _, suffix := range []string{"-wal", "-shm"} {
+		sourceSidecar := path + suffix
+		if sidecarInfo, err := os.Stat(sourceSidecar); err == nil && !sidecarInfo.IsDir() {
+			if err := copyFile(sourceSidecar, target+suffix); err != nil {
+				cleanup()
+				return "", func() {}, err
+			}
+		}
+	}
+	return target, cleanup, nil
+}
+
+func copyFile(source, target string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return fmt.Errorf("open sqlite source: %w", err)
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("create sqlite snapshot: %w", err)
+	}
+	defer out.Close()
+
+	if _, err := out.ReadFrom(in); err != nil {
+		return fmt.Errorf("copy sqlite snapshot: %w", err)
+	}
+	return nil
 }
 
 func chromiumTime(v int64) time.Time {

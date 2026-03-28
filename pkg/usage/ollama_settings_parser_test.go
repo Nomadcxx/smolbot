@@ -59,3 +59,42 @@ func TestParseOllamaSettingsUsageHTMLRejectsMissingUsageBlocks(t *testing.T) {
 		t.Fatal("expected error for missing usage blocks")
 	}
 }
+
+func TestParseOllamaSettingsUsageHTMLHandlesSplitClosingSpanTags(t *testing.T) {
+	data := []byte(`<!doctype html><html><body>
+<h2 class="text-xl font-medium flex items-center space-x-2">
+  <span>Cloud Usage</span>
+  <span
+    class="text-xs font-normal px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 capitalize"
+    >pro</span
+  >
+</h2>
+<div>
+  <div class="flex justify-between mb-2">
+    <span class="text-sm">Session usage</span>
+    <span class="text-sm">0.8% used</span>
+  </div>
+  <div class="text-xs text-neutral-500 mt-1 local-time" data-time="2026-03-28T10:00:00Z">Resets in 2 hours</div>
+</div>
+<div>
+  <div class="flex justify-between mb-2">
+    <span class="text-sm">Weekly usage</span>
+    <span class="text-sm">26.8% used</span>
+  </div>
+  <div class="text-xs text-neutral-500 mt-1 local-time" data-time="2026-03-30T00:00:00Z">Resets in 1 day</div>
+</div>
+<form method="POST" action="/settings" class="pt-2">
+  <label class="flex items-center gap-2 text-xs text-neutral-700">
+    <input type="checkbox" name="notify-usage-limits" class="rounded border-neutral-300" checked />
+  </label>
+</form>
+</body></html>`)
+
+	got, err := ParseOllamaSettingsUsageHTML(data, time.Date(2026, 3, 28, 8, 0, 0, 0, time.UTC), time.Date(2026, 3, 28, 9, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("ParseOllamaSettingsUsageHTML: %v", err)
+	}
+	if got.PlanName != "pro" {
+		t.Fatalf("PlanName = %q, want pro", got.PlanName)
+	}
+}

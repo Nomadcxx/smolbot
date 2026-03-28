@@ -45,6 +45,32 @@ func TestDiscoverLinuxChromiumCookieDBs(t *testing.T) {
 	}
 }
 
+func TestDiscoverLinuxChromiumCookieDBsFindsAdditionalCookieStores(t *testing.T) {
+	home := t.TempDir()
+
+	candidates := []string{
+		filepath.Join(home, ".config", "browser-os", "Default", "Cookies"),
+		filepath.Join(home, ".config", "microsoft-edge-dev", "Default", "Cookies"),
+		filepath.Join(home, ".mozilla", "firefox", "abcd.default-release", "cookies.sqlite"),
+		filepath.Join(home, ".zen", "abcd.Default (release)", "cookies.sqlite"),
+	}
+	for _, path := range candidates {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("cookie-db"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	got := discoverLinuxChromiumCookieDBs(home)
+	for _, want := range candidates {
+		if !containsPath(got, want) {
+			t.Fatalf("discoverLinuxChromiumCookieDBs() missing %s in %#v", want, got)
+		}
+	}
+}
+
 func TestFilterOllamaCookies(t *testing.T) {
 	in := []*http.Cookie{
 		{Name: "a", Value: "1", Domain: "ollama.com"},
@@ -94,6 +120,38 @@ func TestCookieJarStoreRoundTripAndPermissions(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Load() = %#v, want %#v", got, want)
+	}
+}
+
+func TestCookieJarStoreSaveIgnoresOutOfRangeExpiry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ollama_cookies.json")
+
+	store := newCookieJarStore(path)
+	cookies := []*http.Cookie{
+		{
+			Name:    "__Secure-session",
+			Value:   "abc123",
+			Domain:  "ollama.com",
+			Path:    "/",
+			Secure:  true,
+			Expires: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+
+	if err := store.Save(cookies); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if !got[0].Expires.IsZero() {
+		t.Fatalf("Expires = %v, want zero time", got[0].Expires)
 	}
 }
 
@@ -216,7 +274,87 @@ func TestImportOllamaCookiesFromLinuxBrowsers(t *testing.T) {
 	}
 }
 
+func TestImportOllamaCookiesFromLinuxBrowsersFirefox(t *testing.T) {
+	home := t.TempDir()
+	dbPath := filepath.Join(home, ".mozilla", "firefox", "abcd.default-release", "cookies.sqlite")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+
+	if _, err := db.Exec(`CREATE TABLE moz_cookies(
+		id INTEGER PRIMARY KEY,
+		originAttributes TEXT NOT NULL DEFAULT '',
+		name TEXT,
+		value TEXT,
+		host TEXT,
+		path TEXT,
+		expiry INTEGER,
+		lastAccessed INTEGER DEFAULT 0,
+		creationTime INTEGER DEFAULT 0,
+		isSecure INTEGER,
+		isHttpOnly INTEGER,
+		inBrowserElement INTEGER DEFAULT 0,
+		sameSite INTEGER DEFAULT 0,
+		rawSameSite INTEGER DEFAULT 0,
+		schemeMap INTEGER DEFAULT 0
+	)`); err != nil {
+		t.Fatalf("create moz_cookies table: %v", err)
+	}
+
+	expiresAt := time.Date(2026, 3, 30, 0, 0, 0, 0, time.UTC)
+	if _, err := db.Exec(`INSERT INTO moz_cookies (
+		name, value, host, path, expiry, isSecure, isHttpOnly
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"__Secure-session",
+		"abc123",
+		".ollama.com",
+		"/",
+		expiresAt.Unix(),
+		1,
+		1,
+	); err != nil {
+		t.Fatalf("insert firefox ollama cookie: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "ollama_cookies.json")
+	count, err := importOllamaCookiesFromLinuxBrowsers(home, outputPath)
+	if err != nil {
+		t.Fatalf("importOllamaCookiesFromLinuxBrowsers: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("count = %d, want 1", count)
+	}
+
+	cookies, err := newCookieJarStore(outputPath).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cookies) != 1 {
+		t.Fatalf("len(cookies) = %d, want 1", len(cookies))
+	}
+	if cookies[0].Name != "__Secure-session" || cookies[0].Domain != ".ollama.com" || cookies[0].Value != "abc123" {
+		t.Fatalf("unexpected imported cookie: %+v", cookies[0])
+	}
+}
+
 func chromiumMicros(t time.Time) int64 {
 	base := time.Date(1601, 1, 1, 0, 0, 0, 0, time.UTC)
 	return (t.UTC().Unix()-base.Unix())*1_000_000 + int64(t.UTC().Nanosecond()/1_000)
+}
+
+func containsPath(paths []string, want string) bool {
+	for _, path := range paths {
+		if path == want {
+			return true
+		}
+	}
+	return false
 }
