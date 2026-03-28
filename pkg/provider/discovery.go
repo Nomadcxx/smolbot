@@ -95,11 +95,8 @@ func isConfiguredCompatibleProvider(providerID string) bool {
 }
 
 func configuredProviderModel(cfg *config.Config, providerID string) ModelInfo {
-	modelID := providerBackedModelID(cfg, providerID)
-	description := "Configured endpoint"
-	if activeModel := displayModelName(providerBackedModelID(cfg, providerID)); activeModel != "" {
-		description = fmt.Sprintf("Configured endpoint using %s", activeModel)
-	}
+	modelID := strings.TrimSpace(providerID)
+	description := configuredProviderDescription(providerID, cfg.Providers[providerID])
 
 	capability := "openai-compatible"
 	if providerID == "azure_openai" {
@@ -117,7 +114,7 @@ func configuredProviderModel(cfg *config.Config, providerID string) ModelInfo {
 }
 
 func fallbackModel(cfg *config.Config, providerID, reason string) ModelInfo {
-	modelID := providerBackedModelID(cfg, providerID)
+	modelID := fallbackModelID(cfg, providerID)
 	name := displayModelName(modelID)
 	if name == "" {
 		name = providerDisplayName(providerID)
@@ -162,61 +159,17 @@ func appendUniqueModel(models []ModelInfo, seen map[string]struct{}, model Model
 	return append(models, model)
 }
 
-func providerBackedModelID(cfg *config.Config, providerID string) string {
-	currentModel := ""
-	currentProvider := ""
-	if cfg != nil {
-		currentModel = strings.TrimSpace(cfg.Agents.Defaults.Model)
-		currentProvider = strings.TrimSpace(cfg.Agents.Defaults.Provider)
-	}
-
-	baseModel := baseModelName(currentModel, currentProvider, cfg)
-	if baseModel == "" {
-		baseModel = strings.TrimSpace(currentModel)
-	}
-	if baseModel == "" {
+func fallbackModelID(cfg *config.Config, providerID string) string {
+	if cfg == nil {
 		return providerID
 	}
 
-	switch providerID {
-	case "openai":
-		return baseModel
-	case "azure_openai":
-		return "azure/" + baseModel
-	}
-
-	if providerID == currentProvider && currentProvider != "" {
+	currentProvider := strings.TrimSpace(cfg.Agents.Defaults.Provider)
+	currentModel := strings.TrimSpace(cfg.Agents.Defaults.Model)
+	if providerID == currentProvider && currentModel != "" {
 		return currentModel
 	}
-
-	return providerID + "/" + baseModel
-}
-
-func baseModelName(model, fallback string, cfg *config.Config) string {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return ""
-	}
-
-	providers := map[string]config.ProviderConfig(nil)
-	if cfg != nil {
-		providers = cfg.Providers
-	}
-	resolved := detectProviderName(model, fallback, providers, nil)
-	prefix := providerModelPrefix(resolved)
-	if prefix != "" && strings.HasPrefix(strings.ToLower(model), strings.ToLower(prefix+"/")) {
-		return model[len(prefix)+1:]
-	}
-	return model
-}
-
-func providerModelPrefix(providerID string) string {
-	switch providerID {
-	case "azure_openai":
-		return "azure"
-	default:
-		return providerID
-	}
+	return providerID
 }
 
 func displayModelName(modelID string) string {
@@ -254,4 +207,12 @@ func providerDisplayName(providerID string) string {
 		parts[i] = strings.ToUpper(part[:1]) + part[1:]
 	}
 	return strings.Join(parts, " ")
+}
+
+func configuredProviderDescription(providerID string, providerCfg config.ProviderConfig) string {
+	baseURL := strings.TrimSpace(providerCfg.APIBase)
+	if baseURL == "" {
+		return fmt.Sprintf("Configured %s endpoint", providerDisplayName(providerID))
+	}
+	return fmt.Sprintf("Configured %s endpoint at %s", providerDisplayName(providerID), baseURL)
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Nomadcxx/smolbot/pkg/config"
@@ -93,9 +94,9 @@ func TestGetAvailableModelsIncludesConfiguredCompatibleProviders(t *testing.T) {
 		t.Fatalf("len(byProvider) = %d, want 3 (%#v)", len(byProvider), models)
 	}
 
-	openAI := byProvider["openai"]
-	if openAI.ID != "gpt-5" {
-		t.Fatalf("openai id = %q, want gpt-5", openAI.ID)
+	openAI, ok := findModel(models, "openai", "openai")
+	if !ok {
+		t.Fatalf("expected provider-backed openai row, got %#v", models)
 	}
 	if openAI.Name != "OpenAI" {
 		t.Fatalf("openai name = %q, want OpenAI", openAI.Name)
@@ -110,20 +111,34 @@ func TestGetAvailableModelsIncludesConfiguredCompatibleProviders(t *testing.T) {
 		t.Fatal("expected openai description to be populated")
 	}
 
-	openRouter := byProvider["openrouter"]
-	if openRouter.ID != "openrouter/gpt-5" {
-		t.Fatalf("openrouter id = %q, want openrouter/gpt-5", openRouter.ID)
+	openRouter, ok := findModel(models, "openrouter", "openrouter")
+	if !ok {
+		t.Fatalf("expected provider-backed openrouter row, got %#v", models)
+	}
+	if openRouter.ID != "openrouter" {
+		t.Fatalf("openrouter id = %q, want openrouter", openRouter.ID)
 	}
 	if openRouter.Name != "OpenRouter" {
 		t.Fatalf("openrouter name = %q, want OpenRouter", openRouter.Name)
 	}
 
-	custom := byProvider["kilo"]
-	if custom.ID != "kilo/gpt-5" {
-		t.Fatalf("kilo id = %q, want kilo/gpt-5", custom.ID)
+	custom, ok := findModel(models, "kilo", "kilo")
+	if !ok {
+		t.Fatalf("expected provider-backed kilo row, got %#v", models)
+	}
+	if custom.ID != "kilo" {
+		t.Fatalf("kilo id = %q, want kilo", custom.ID)
 	}
 	if custom.Name != "Kilo" {
 		t.Fatalf("kilo name = %q, want Kilo", custom.Name)
+	}
+
+	current, ok := findModel(models, "openai", "gpt-5")
+	if !ok {
+		t.Fatalf("expected current openai model row, got %#v", models)
+	}
+	if current.Source != "fallback" {
+		t.Fatalf("current source = %q, want fallback", current.Source)
 	}
 }
 
@@ -160,6 +175,73 @@ func TestGetAvailableModelsFallsBackWhenOllamaDiscoveryUnavailable(t *testing.T)
 
 	if _, ok := byProvider["openrouter"]; !ok {
 		t.Fatalf("expected configured openrouter entry in fallback catalog, got %#v", models)
+	}
+}
+
+func TestGetAvailableModelsDoesNotFabricateOllamaIDFromUnrelatedCurrentModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-5"
+	cfg.Agents.Defaults.Provider = "openai"
+	cfg.Providers = map[string]config.ProviderConfig{
+		"openai": {APIKey: "sk-openai"},
+		"ollama": {APIBase: server.URL},
+	}
+
+	models, err := GetAvailableModels(cfg)
+	if err != nil {
+		t.Fatalf("GetAvailableModels: %v", err)
+	}
+
+	ollama, ok := findModel(models, "ollama", "ollama")
+	if !ok {
+		t.Fatalf("expected provider-backed ollama fallback row, got %#v", models)
+	}
+	if strings.Contains(ollama.ID, "gpt-5") {
+		t.Fatalf("ollama id = %q, should not include unrelated current model", ollama.ID)
+	}
+	if ollama.Source != "fallback" {
+		t.Fatalf("ollama source = %q, want fallback", ollama.Source)
+	}
+}
+
+func TestGetAvailableModelsLegacyAzureConfigUsesConsistentDiscoveryID(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-5"
+	cfg.Agents.Defaults.Provider = "openai"
+	cfg.Providers = map[string]config.ProviderConfig{
+		"openai": {APIKey: "sk-openai"},
+		"azure":  {APIKey: "azure-key", APIBase: "https://legacy-azure.example/v1"},
+	}
+
+	models, err := GetAvailableModels(cfg)
+	if err != nil {
+		t.Fatalf("GetAvailableModels: %v", err)
+	}
+
+	azureRow, ok := findModel(models, "azure", "azure")
+	if !ok {
+		t.Fatalf("expected legacy azure discovery row, got %#v", models)
+	}
+	if azureRow.Source != "config" {
+		t.Fatalf("azure source = %q, want config", azureRow.Source)
+	}
+
+	registry := NewRegistryWithDefaults(cfg)
+	resolved, err := registry.ForModel(azureRow.ID)
+	if err != nil {
+		t.Fatalf("ForModel(%q): %v", azureRow.ID, err)
+	}
+	openAIProvider, ok := resolved.(*OpenAIProvider)
+	if !ok {
+		t.Fatalf("provider type = %T, want *OpenAIProvider", resolved)
+	}
+	if openAIProvider.baseURL != "https://legacy-azure.example/v1" {
+		t.Fatalf("provider baseURL = %q, want legacy azure config base", openAIProvider.baseURL)
 	}
 }
 
