@@ -24,21 +24,21 @@ import (
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 type fakeClient struct {
-	sessions   []client.SessionInfo
-	models     []client.ModelInfo
-	skills     []client.SkillInfo
-	mcps       []client.MCPServerInfo
-	jobs       []client.CronJob
-	current    string
-	status     client.StatusPayload
-	statuses   map[string]client.StatusPayload
-	compact    client.CompactResult
-	chatRun    string
-	aborts     []abortCall
-	modelErr   error
-	resetErr   error
-	compactErr error
-	modelSets  []string
+	sessions       []client.SessionInfo
+	models         []client.ModelInfo
+	skills         []client.SkillInfo
+	mcps           []client.MCPServerInfo
+	jobs           []client.CronJob
+	current        string
+	status         client.StatusPayload
+	statuses       map[string]client.StatusPayload
+	compact        client.CompactResult
+	chatRun        string
+	aborts         []abortCall
+	modelErr       error
+	resetErr       error
+	compactErr     error
+	modelSets      []string
 	modelSetResult string
 }
 
@@ -1821,6 +1821,106 @@ func TestModelDialogShowsCurrentModel(t *testing.T) {
 	}
 	if !strings.Contains(view, "openai") || !strings.Contains(view, "current") {
 		t.Fatalf("expected model dialog to show provider and current marker, got %q", view)
+	}
+}
+
+func TestModelDialogSpaceMarksPendingAndEnterSavesIt(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	fake := &fakeClient{
+		models: []client.ModelInfo{
+			{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
+			{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet", Provider: "anthropic", Selectable: true},
+		},
+		current: "gpt-5",
+	}
+	model.client = fake
+
+	_, cmd := model.handleSlashCommand("/model")
+	updated, _ := model.Update(cmd())
+	got := updated.(Model)
+
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	got = updated.(Model)
+	updated, pendingCmd := got.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	got = updated.(Model)
+	if pendingCmd != nil {
+		t.Fatal("expected space to mark a pending selection without saving")
+	}
+
+	view := plain(got.View().Content)
+	if !strings.Contains(view, "pending") {
+		t.Fatalf("expected pending marker in model dialog, got %q", view)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+	got = updated.(Model)
+	updated, chooseCmd := got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	got = updated.(Model)
+	if chooseCmd == nil {
+		t.Fatal("expected enter to confirm the pending selection")
+	}
+
+	updated, saveCmd := got.Update(chooseCmd())
+	got = updated.(Model)
+	if saveCmd == nil {
+		t.Fatal("expected model choice to trigger gateway save")
+	}
+	updated, _ = got.Update(saveCmd())
+	got = updated.(Model)
+
+	if got.app.Model != "claude-3-7-sonnet" {
+		t.Fatalf("expected app model to update from pending selection, got %q", got.app.Model)
+	}
+	if len(fake.modelSets) != 1 || fake.modelSets[0] != "claude-3-7-sonnet" {
+		t.Fatalf("expected pending model to be saved, got %#v", fake.modelSets)
+	}
+	if got.dialog != nil {
+		t.Fatal("expected model dialog to close after saving")
+	}
+}
+
+func TestModelDialogEnterUsesFocusedSelectionWithoutPending(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	fake := &fakeClient{
+		models: []client.ModelInfo{
+			{ID: "openrouter", Name: "OpenRouter", Provider: "openrouter", Description: "Configured provider", Source: "config", Selectable: false},
+			{ID: "openrouter/auto", Name: "Auto", Provider: "openrouter", Selectable: true},
+		},
+		current: "openrouter/auto",
+	}
+	model.client = fake
+
+	_, cmd := model.handleSlashCommand("/model")
+	updated, _ := model.Update(cmd())
+	got := updated.(Model)
+
+	view := plain(got.View().Content)
+	if !strings.Contains(strings.ToLower(view), "configured provider") {
+		t.Fatalf("expected provider info row to stay visible, got %q", view)
+	}
+
+	updated, chooseCmd := got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	got = updated.(Model)
+	if chooseCmd == nil {
+		t.Fatal("expected enter to save the focused selectable model")
+	}
+	updated, saveCmd := got.Update(chooseCmd())
+	got = updated.(Model)
+	if saveCmd == nil {
+		t.Fatal("expected chosen model to trigger gateway save")
+	}
+	updated, _ = got.Update(saveCmd())
+	got = updated.(Model)
+
+	if got.app.Model != "openrouter/auto" {
+		t.Fatalf("expected enter to save the selectable model, got %q", got.app.Model)
+	}
+	if len(fake.modelSets) != 1 || fake.modelSets[0] != "openrouter/auto" {
+		t.Fatalf("expected selectable model to be sent to gateway, got %#v", fake.modelSets)
 	}
 }
 

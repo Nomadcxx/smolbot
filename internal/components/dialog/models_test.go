@@ -27,7 +27,7 @@ func TestModelsModelShowsCurrentModel(t *testing.T) {
 	if !strings.Contains(view, "openai") {
 		t.Fatalf("expected provider description in dialog, got %q", view)
 	}
-	if !strings.Contains(view, "Enter switch") {
+	if !strings.Contains(view, "Enter save") {
 		t.Fatalf("expected selector footer help row, got %q", view)
 	}
 }
@@ -50,7 +50,7 @@ func TestModelsModelGroupsByProvider(t *testing.T) {
 	if !strings.Contains(view, "Provider: openai (current)") {
 		t.Fatalf("expected current provider section, got %q", view)
 	}
-	if !strings.Contains(view, "[openai] GPT-5") || !strings.Contains(view, "current") {
+	if !strings.Contains(view, "GPT-5") || !strings.Contains(view, "current") {
 		t.Fatalf("expected current model row inside provider group, got %q", view)
 	}
 
@@ -61,24 +61,20 @@ func TestModelsModelGroupsByProvider(t *testing.T) {
 	}
 }
 
-func TestModelsModelDoesNotChooseInfoOnlyRow(t *testing.T) {
+func TestModelsModelSkipsInfoOnlyRowsWhenChoosing(t *testing.T) {
 	model := NewModels([]client.ModelInfo{
-		{ID: "openrouter", Name: "OpenRouter", Provider: "openrouter", Source: "config", Selectable: false},
+		{ID: "openrouter", Name: "OpenRouter", Provider: "openrouter", Description: "Configured provider", Source: "config", Selectable: false},
 		{ID: "openrouter/auto", Name: "Auto", Provider: "openrouter", Selectable: true},
 	}, "openrouter/auto")
 
-	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	model = updated
-	if cmd != nil {
-		if _, ok := cmd().(ModelChosenMsg); ok {
-			t.Fatal("expected info-only row to ignore enter")
-		}
+	view := model.View()
+	if !strings.Contains(strings.ToLower(view), "configured provider") {
+		t.Fatalf("expected provider info row to remain visible, got %q", view)
 	}
 
-	model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
-	model, cmd = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	_, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	if cmd == nil {
-		t.Fatal("expected selectable row to emit a choice")
+		t.Fatal("expected enter to choose the first selectable model, not the provider info row")
 	}
 	msg := cmd()
 	chosen, ok := msg.(ModelChosenMsg)
@@ -87,6 +83,42 @@ func TestModelsModelDoesNotChooseInfoOnlyRow(t *testing.T) {
 	}
 	if chosen.ID != "openrouter/auto" {
 		t.Fatalf("chosen id = %q, want openrouter/auto", chosen.ID)
+	}
+}
+
+func TestModelsModelSpaceMarksPendingSelectionAndEnterConfirmsIt(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be available")
+	}
+
+	model := NewModels([]client.ModelInfo{
+		{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
+		{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet", Provider: "anthropic", Selectable: true},
+	}, "gpt-5")
+
+	model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	model, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	if cmd != nil {
+		t.Fatal("expected space to mark a pending selection without saving immediately")
+	}
+
+	view := model.View()
+	if !strings.Contains(view, "pending") {
+		t.Fatalf("expected pending marker after space selection, got %q", view)
+	}
+
+	model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+	_, cmd = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd == nil {
+		t.Fatal("expected enter to confirm the pending selection")
+	}
+	msg := cmd()
+	chosen, ok := msg.(ModelChosenMsg)
+	if !ok {
+		t.Fatalf("expected ModelChosenMsg, got %T", msg)
+	}
+	if chosen.ID != "claude-3-7-sonnet" {
+		t.Fatalf("chosen id = %q, want claude-3-7-sonnet", chosen.ID)
 	}
 }
 
@@ -106,6 +138,45 @@ func TestModelsModelAllowsLegacyRowsWithoutSelectableMetadata(t *testing.T) {
 	}
 	if chosen.ID != "gpt-5" {
 		t.Fatalf("chosen id = %q, want gpt-5", chosen.ID)
+	}
+}
+
+func TestModelsModelFilterNarrowsByProviderAndModel(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be available")
+	}
+
+	model := NewModels([]client.ModelInfo{
+		{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
+		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Selectable: true},
+		{ID: "claude-opus", Name: "Claude Opus", Provider: "anthropic", Selectable: true},
+	}, "gpt-5")
+
+	for _, ch := range "openai" {
+		model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: ch, Text: string(ch)}))
+	}
+
+	view := model.View()
+	if !strings.Contains(view, "Provider: openai (current)") {
+		t.Fatalf("expected provider filter to keep the openai group, got %q", view)
+	}
+	if strings.Contains(view, "Provider: anthropic") {
+		t.Fatalf("expected provider filter to hide non-matching providers, got %q", view)
+	}
+
+	for range "openai" {
+		model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
+	}
+	for _, ch := range "claude" {
+		model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: ch, Text: string(ch)}))
+	}
+
+	view = model.View()
+	if !strings.Contains(view, "Claude Opus") {
+		t.Fatalf("expected model filter to keep matching model rows, got %q", view)
+	}
+	if strings.Contains(view, "GPT-5") || strings.Contains(view, "GPT-4o") {
+		t.Fatalf("expected model filter to hide non-matching models, got %q", view)
 	}
 }
 

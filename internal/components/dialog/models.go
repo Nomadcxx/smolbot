@@ -16,11 +16,13 @@ type ModelChosenMsg struct {
 
 type ModelsModel struct {
 	models          []client.ModelInfo
-	filtered        []client.ModelInfo
+	rows            []modelRenderRow
+	selectable      []int
 	filter          string
 	cursor          int
 	current         string
 	currentProvider string
+	pending         string
 }
 
 func NewModels(models []client.ModelInfo, current string) ModelsModel {
@@ -32,6 +34,9 @@ func NewModels(models []client.ModelInfo, current string) ModelsModel {
 		}
 	}
 	m.applyFilter()
+	if idx := m.indexOfSelectableID(current); idx >= 0 {
+		m.cursor = idx
+	}
 	return m
 }
 
@@ -41,23 +46,30 @@ func (m ModelsModel) Update(msg tea.Msg) (ModelsModel, tea.Cmd) {
 		case "esc":
 			return m, func() tea.Msg { return CloseDialogMsg{} }
 		case "up", "k", "ctrl+p":
-			if m.cursor > 0 {
+			if len(m.selectable) > 0 && m.cursor > 0 {
 				m.cursor--
 			}
 			return m, nil
 		case "down", "j", "ctrl+n":
-			if m.cursor < len(m.filtered)-1 {
+			if len(m.selectable) > 0 && m.cursor < len(m.selectable)-1 {
 				m.cursor++
 			}
 			return m, nil
+		case " ", "space":
+			if focused, ok := m.focusedModel(); ok {
+				m.pending = focused.ID
+			}
+			return m, nil
 		case "enter":
-			if len(m.filtered) == 0 {
+			if m.pending != "" {
+				id := m.pending
+				return m, func() tea.Msg { return ModelChosenMsg{ID: id} }
+			}
+			focused, ok := m.focusedModel()
+			if !ok {
 				return m, nil
 			}
-			if !isSelectableModel(m.filtered[m.cursor]) {
-				return m, nil
-			}
-			id := m.filtered[m.cursor].ID
+			id := focused.ID
 			return m, func() tea.Msg { return ModelChosenMsg{ID: id} }
 		case "backspace":
 			if len(m.filter) > 0 {
@@ -89,11 +101,14 @@ func (m ModelsModel) View() string {
 		"",
 	}
 
-	rows := m.renderRows(t)
+	rows := m.renderRows()
 	if len(rows) == 0 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("No models"))
 	} else {
-		cursorRow := m.cursorRow(rows)
+		cursorRow := m.focusedRowIndex()
+		if cursorRow < 0 {
+			cursorRow = 0
+		}
 		start, end := visibleBounds(len(rows), cursorRow)
 		if start > 0 {
 			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▲ more above"))
@@ -105,7 +120,7 @@ func (m ModelsModel) View() string {
 			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▼ more below"))
 		}
 	}
-	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("Enter switch • Esc close"))
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type filter • Space mark • Enter save • Esc close"))
 	return lipgloss.NewStyle().
 		Background(t.Panel).
 		Border(lipgloss.RoundedBorder()).
@@ -116,14 +131,37 @@ func (m ModelsModel) View() string {
 }
 
 func (m *ModelsModel) applyFilter() {
-	m.filtered = m.filtered[:0]
+	focusedID := m.focusedModelID()
+	filtered := make([]client.ModelInfo, 0, len(m.models))
 	for _, model := range m.models {
 		if matchesQuery(m.filter, model.ID, model.Name, model.Provider, optionalModelDescription(model)) {
-			m.filtered = append(m.filtered, model)
+			filtered = append(filtered, model)
 		}
 	}
-	if m.cursor >= len(m.filtered) {
-		m.cursor = max(0, len(m.filtered)-1)
+	m.rows = buildModelRows(filtered, m.currentProvider)
+	m.selectable = m.selectable[:0]
+	for i, row := range m.rows {
+		if row.kind == "model" {
+			m.selectable = append(m.selectable, i)
+		}
+	}
+	if m.pending != "" && m.indexOfSelectableID(m.pending) == -1 {
+		m.pending = ""
+	}
+	if len(m.selectable) == 0 {
+		m.cursor = 0
+		return
+	}
+	if idx := m.indexOfSelectableID(focusedID); idx >= 0 {
+		m.cursor = idx
+		return
+	}
+	if idx := m.indexOfSelectableID(m.current); idx >= 0 {
+		m.cursor = idx
+		return
+	}
+	if m.cursor >= len(m.selectable) {
+		m.cursor = len(m.selectable) - 1
 	}
 }
 
@@ -132,16 +170,14 @@ type modelRenderRow struct {
 	model   client.ModelInfo
 	group   string
 	current bool
-	active  bool
+	focused bool
+	pending bool
 }
 
-func (m ModelsModel) renderRows(t *theme.Theme) []modelRenderRow {
-	if len(m.filtered) == 0 {
-		return nil
-	}
+func buildModelRows(models []client.ModelInfo, currentProvider string) []modelRenderRow {
 	grouped := make(map[string][]client.ModelInfo)
 	order := make([]string, 0)
-	for _, model := range m.filtered {
+	for _, model := range models {
 		group := model.Provider
 		if group == "" {
 			group = "unknown"
@@ -152,37 +188,82 @@ func (m ModelsModel) renderRows(t *theme.Theme) []modelRenderRow {
 		grouped[group] = append(grouped[group], model)
 	}
 
-	rows := make([]modelRenderRow, 0, len(m.filtered)+len(order))
+	rows := make([]modelRenderRow, 0, len(models)+len(order))
 	for _, group := range order {
 		rows = append(rows, modelRenderRow{
 			kind:    "header",
 			group:   group,
-			current: group == m.currentProvider,
+			current: group == currentProvider,
 		})
 		for _, model := range grouped[group] {
+			kind := "info"
+			if isSelectableModel(model) {
+				kind = "model"
+			}
 			rows = append(rows, modelRenderRow{
-				kind:   "model",
-				model:  model,
-				group:  group,
-				active: model.ID == m.current,
+				kind:  kind,
+				model: model,
+				group: group,
 			})
 		}
 	}
 	return rows
 }
 
-func (m ModelsModel) cursorRow(rows []modelRenderRow) int {
-	modelIdx := 0
-	for i, row := range rows {
-		if row.kind != "model" {
+func (m ModelsModel) renderRows() []modelRenderRow {
+	if len(m.rows) == 0 {
+		return nil
+	}
+	rows := make([]modelRenderRow, len(m.rows))
+	copy(rows, m.rows)
+	focusedRow := m.focusedRowIndex()
+	for i := range rows {
+		if rows[i].kind == "header" {
 			continue
 		}
-		if modelIdx == m.cursor {
-			return i
-		}
-		modelIdx++
+		rows[i].current = rows[i].model.ID == m.current
+		rows[i].pending = rows[i].model.ID != "" && rows[i].model.ID == m.pending
+		rows[i].focused = i == focusedRow
 	}
-	return 0
+	return rows
+}
+
+func (m ModelsModel) focusedRowIndex() int {
+	if len(m.selectable) == 0 || m.cursor < 0 || m.cursor >= len(m.selectable) {
+		return -1
+	}
+	return m.selectable[m.cursor]
+}
+
+func (m ModelsModel) focusedModelID() string {
+	if focused, ok := m.focusedModel(); ok {
+		return focused.ID
+	}
+	return ""
+}
+
+func (m ModelsModel) focusedModel() (client.ModelInfo, bool) {
+	rowIndex := m.focusedRowIndex()
+	if rowIndex < 0 || rowIndex >= len(m.rows) {
+		return client.ModelInfo{}, false
+	}
+	row := m.rows[rowIndex]
+	if row.kind != "model" {
+		return client.ModelInfo{}, false
+	}
+	return row.model, true
+}
+
+func (m ModelsModel) indexOfSelectableID(id string) int {
+	if id == "" {
+		return -1
+	}
+	for idx, rowIndex := range m.selectable {
+		if rowIndex >= 0 && rowIndex < len(m.rows) && m.rows[rowIndex].model.ID == id {
+			return idx
+		}
+	}
+	return -1
 }
 
 func (r modelRenderRow) render(t *theme.Theme) string {
@@ -199,29 +280,39 @@ func (r modelRenderRow) render(t *theme.Theme) string {
 		return style.Render(label)
 	default:
 		model := r.model
-		label := model.Name
+		label := strings.TrimSpace(model.Name)
 		if label == "" {
-			label = model.ID
-		}
-		if model.Provider != "" {
-			label = "[" + model.Provider + "] " + label
+			label = strings.TrimSpace(model.ID)
 		}
 		descParts := []string{}
-		if model.ID != label {
+		if r.kind == "info" {
+			label = strings.TrimSpace(label + " configured provider")
+		}
+		if model.ID != "" && model.ID != label {
 			descParts = append(descParts, model.ID)
 		}
 		if extra := optionalModelDescription(model); extra != "" {
 			descParts = append(descParts, extra)
 		}
-		if r.active {
+		if r.current {
 			label += lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render(" current")
 		}
-		if !isSelectableModel(model) {
+		if r.pending {
+			label += lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render(" pending")
+		}
+		if r.kind == "info" {
 			label += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" info")
 		}
-		row := "  " + label
+		prefix := "  "
+		if r.focused {
+			prefix = lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("> ")
+		}
+		row := prefix + label
 		if len(descParts) > 0 {
 			row += lipgloss.NewStyle().Foreground(t.TextMuted).Render("  " + strings.Join(descParts, " • "))
+		}
+		if r.kind == "info" {
+			row = lipgloss.NewStyle().Foreground(t.TextMuted).Render(row)
 		}
 		return row
 	}

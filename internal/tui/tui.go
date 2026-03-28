@@ -545,7 +545,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalcLayout()
 		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
 	case ModelsLoadedMsg:
-		m.dialog = modelsDialog{dialogcmp.NewModels(msg.Models, msg.Current)}
+		current := msg.Current
+		if current == "" {
+			current = m.app.Model
+		}
+		m.dialog = modelsDialog{dialogcmp.NewModels(msg.Models, current)}
 		return m, nil
 	case SkillsLoadedMsg:
 		m.dialog = skillsDialog{dialogcmp.NewSkills(msg.Skills)}
