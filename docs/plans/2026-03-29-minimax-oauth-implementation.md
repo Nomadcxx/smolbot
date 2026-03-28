@@ -2,846 +2,552 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add OAuth 2.0 device code flow authentication for MiniMax, with token refresh, to enable Token Plan subscription access.
+**Goal:** Add MiniMax Token Plan OAuth login to smolbot without regressing the existing API-key MiniMax provider or the new provider/model UI.
 
-**Architecture:** Implement a new OAuthProvider type alongside existing APIKeyProvider. Extend the provider registry with device code flow, PKCE support, and token refresh. Integrate OAuth into the installer wizard and TUI model picker.
+**Architecture:** Treat OAuth MiniMax as a separate provider identity, `minimax-portal`, instead of overloading the existing `minimax` API-key provider. Implement the backend first: correct MiniMax auth protocol, persistent token storage, provider resolution, and refresh behavior. Only after the backend is stable should installer and TUI surfaces expose OAuth status and login flows.
 
-**Tech Stack:** Go standard library for OAuth (crypto/rand, encoding/json, net/http, net/url); existing Bubbletea UI framework for installer integration.
-
----
-
-## Overview
-
-Based on OpenClaw's implementation, MiniMax OAuth uses:
-- **Device Code Flow** (RFC 8628) - ideal for CLI tools
-- **PKCE** with S256 challenge method  
-- **Token storage** with expiry metadata
-- **Profile ID format** - `provider:profile-name` (e.g., `minimax-portal:default`)
-
-OpenClaw reference constants:
-```
-const MINIMAX_OAUTH_CONFIG = {
-  global: {
-    baseUrl: "https://api.minimax.io",
-    clientId: "78257093-7e40-4613-99e0-527b14b39113",
-  },
-};
-```
+**Tech Stack:** Go standard library (`net/http`, `encoding/json`, `crypto/rand`, `crypto/sha256`, `sync`), existing smolbot provider registry/config system, Bubble Tea installer/TUI.
 
 ---
 
-## Task 1: Define OAuth Types and Interfaces
+## Execution Workflow
+
+For every task in this plan:
+
+1. Write the failing test first.
+2. Run the focused test and confirm it fails for the expected reason.
+3. Implement the minimum code to make it pass.
+4. Run the focused verification for the task.
+5. Run a spec/completeness review for the task.
+6. Run a code-quality review for the task.
+7. Fix findings and re-run the focused verification.
+8. Create a checkpoint commit.
+9. Only then move to the next task.
+
+Final push/merge gate:
+
+- focused task tests green
+- relevant package tests green
+- build green
+- final spec review green
+- final code-quality review green
+
+## Reference Notes
+
+This plan intentionally does **not** follow the stale handover literally.
+
+- The current branch already contains committed OAuth primitives in:
+  - `pkg/provider/oauth.go`
+  - `pkg/provider/pkce.go`
+- There is an untracked `pkg/provider/minimax_oauth.go` spike in the worktree. It is not authoritative and should be replaced if it conflicts with this plan.
+- OpenClaw is the backend reference:
+  - MiniMax OAuth is a PKCE-backed **user-code/device-style** login flow
+  - it uses a distinct provider identity, `minimax-portal`
+  - it keeps API-key MiniMax and OAuth MiniMax separate
+- smolbot should **not** add child-session style auth/profile management or an over-general auth framework in this branch. Keep the design narrow and practical.
+
+## Non-Negotiable Invariants
+
+1. Preserve existing API-key MiniMax support under `minimax`.
+2. Add OAuth as a separate provider identity: `minimax-portal`.
+3. Do not silently downgrade OAuth configuration to API-key mode.
+4. Do not assume `/oauth/revoke` is supported unless the implementation verifies it. Revoke is optional in Phase 1.
+5. Do not expose Token Plan-only OAuth as if it were interchangeable with PAYG API-key access.
+6. Do not default OAuth users onto `MiniMax-M2.7-highspeed`.
+7. Do not implement installer/TUI login before backend auth and storage are stable.
+
+## Current Branch State To Reconcile
+
+Before Task 1, confirm the branch state:
+
+- committed:
+  - `pkg/provider/oauth.go`
+  - `pkg/provider/oauth_test.go`
+  - `pkg/provider/pkce.go`
+  - `pkg/provider/pkce_test.go`
+- untracked spike:
+  - `pkg/provider/minimax_oauth.go`
+
+The first task must treat those files as existing context, not as a blank slate.
+
+---
+
+### Task 0: Reconcile The Existing OAuth Branch State
 
 **Files:**
-- Create: `pkg/provider/oauth.go`
+- Review: `pkg/provider/oauth.go`
+- Review: `pkg/provider/oauth_test.go`
+- Review: `pkg/provider/pkce.go`
+- Review: `pkg/provider/pkce_test.go`
+- Review: `pkg/provider/minimax_oauth.go`
+- Modify: `docs/plans/2026-03-29-handover-oauth-implementation.md`
+
+**Step 1: Verify the currently committed OAuth primitives still build**
+
+Run: `go test ./pkg/provider ./pkg/config ./cmd/installer`
+Expected: PASS
+
+**Step 2: Replace the stale handover with an accurate branch-state handover**
+
+The updated handover must state:
+
+- OAuth types and PKCE are already committed
+- `minimax_oauth.go` exists only as a local spike unless committed later
+- this plan supersedes the stale “0 tasks complete” story
+
+**Step 3: Checkpoint the doc correction**
+
+```bash
+git add docs/plans/2026-03-29-handover-oauth-implementation.md docs/plans/2026-03-29-minimax-oauth-implementation.md
+git commit -m "docs(provider): correct minimax oauth implementation plan"
+```
+
+---
+
+### Task 1: Tighten OAuth Types Around Real Auth Modes
+
+**Files:**
+- Modify: `pkg/provider/oauth.go`
 - Test: `pkg/provider/oauth_test.go`
+- Modify: `pkg/config/config.go`
+- Test: `pkg/config/config_test.go`
 
-**Step 1: Create pkg/provider/oauth.go with type definitions**
+**Intent:**
+Keep the existing OAuth primitives, but extend them to support real provider config and stored-token references.
 
-```go
-package provider
+**Required behavior:**
 
-import "time"
+- `ProviderConfig` gains explicit auth/profile linkage fields, such as:
+  - `AuthType string`
+  - `ProfileID string`
+- OAuth token metadata can represent:
+  - provider id
+  - profile id
+  - optional account email/name
+  - updated-at time
+- `AuthType` string mapping remains stable for `api_key`, `oauth`, and `token`
 
-// OAuthConfig holds OAuth provider configuration
-type OAuthConfig struct {
-	BaseURL   string // e.g., "https://api.minimax.io"
-	ClientID  string
-	AuthURL   string // e.g., "/oauth/code"
-	TokenURL  string // e.g., "/oauth/token"
-	RevokeURL string // e.g., "/oauth/revoke"
-	Scopes    []string
-}
+**Step 1: Write failing tests**
 
-// TokenInfo represents an OAuth token with metadata
-type TokenInfo struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token,omitempty"`
-	ExpiresAt   time.Time `json:"expires_at"` // Unix timestamp ms
-	TokenType   string    `json:"token_type"`
-	Scope       string    `json:"scope"`
-}
+Add tests that prove:
 
-// IsExpired returns true if the token is expired or will expire within buffer
-func (t *TokenInfo) IsExpired() bool {
-	return time.Until(t.ExpiresAt) < 2*time.Minute
-}
+- `ProviderConfig` round-trips `authType` and `profileId` through JSON
+- OAuth token metadata round-trips through JSON
+- existing API-key-only configs still load without requiring OAuth fields
 
-// OAuthProvider defines the interface for OAuth-based providers
-type OAuthProvider interface {
-	Provider
-	AuthType() AuthType
-	RefreshToken(ctx context.Context) (*TokenInfo, error)
-	RevokeToken(ctx context.Context) error
-	GetAuthConfig() OAuthConfig
-}
+**Step 2: Run focused tests and confirm failure**
 
-// AuthType distinguishes key-based vs OAuth vs token-based auth
-type AuthType int
+Run: `go test ./pkg/provider ./pkg/config -run 'Test(AuthType|TokenInfo|ProviderConfig.*OAuth)'`
+Expected: FAIL because config/token metadata fields are missing
 
-const (
-	AuthTypeAPIKey AuthType = iota
-	AuthTypeOAuth
-	AuthTypeToken
-)
+**Step 3: Implement minimal changes**
 
-func (a AuthType) String() string {
-	switch a {
-	case AuthTypeAPIKey:
-		return "api_key"
-	case AuthTypeOAuth:
-		return "oauth"
-	case AuthTypeToken:
-		return "token"
-	default:
-		return "unknown"
-	}
-}
-```
+- extend `ProviderConfig`
+- add any missing OAuth token/profile metadata types
+- keep backwards compatibility with existing config files
 
-**Step 2: Verify build**
+**Step 4: Run focused verification**
 
-Run: `go build ./pkg/provider`
-Expected: OK
-
-**Step 3: Write oauth_test.go**
-
-```go
-package provider
-
-import (
-	"testing"
-	"time"
-)
-
-func TestTokenInfoIsExpired(t *testing.T) {
-	token := &TokenInfo{
-		AccessToken:  "test",
-		RefreshToken: "refresh",
-		ExpiresAt:    time.Now().Add(5 * time.Minute),
-	}
-	if token.IsExpired() {
-		t.Fatal("token should not be expired")
-	}
-
-	token.ExpiresAt = time.Now().Add(1 * time.Minute)
-	if !token.IsExpired() {
-		t.Fatal("token should be expired within buffer")
-	}
-}
-
-func TestAuthTypeString(t *testing.T) {
-	tests := []struct {
-		at     AuthType
-		expect string
-	}{
-		{AuthTypeAPIKey, "api_key"},
-		{AuthTypeOAuth, "oauth"},
-		{AuthTypeToken, "token"},
-	}
-	for _, tt := range tests {
-		if tt.at.String() != tt.expect {
-			t.Errorf("AuthType(%d).String() = %q, want %q", tt.at, tt.at.String(), tt.expect)
-		}
-	}
-}
-```
-
-**Step 4: Run tests**
-
-Run: `go test ./pkg/provider -run TestTokenInfo -v`
+Run: `go test ./pkg/provider ./pkg/config -run 'Test(AuthType|TokenInfo|ProviderConfig.*OAuth)'`
 Expected: PASS
 
-**Step 5: Commit**
+**Step 5: Review gate**
+
+- spec review: confirm config model supports separate API-key and OAuth MiniMax
+- code-quality review: confirm fields are minimal and backwards compatible
+
+**Step 6: Checkpoint**
 
 ```bash
-git add pkg/provider/oauth.go pkg/provider/oauth_test.go
-git commit -m "feat(provider): add OAuth type definitions"
+git add pkg/provider/oauth.go pkg/provider/oauth_test.go pkg/config/config.go pkg/config/config_test.go
+git commit -m "feat(provider): extend oauth config metadata"
 ```
 
 ---
 
-## Task 2: Implement PKCE Utilities
-
-**Files:**
-- Create: `pkg/provider/pkce.go`
-- Test: `pkg/provider/pkce_test.go`
-
-**Step 1: Create pkce.go**
-
-```go
-package provider
-
-import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-)
-
-// PKCEParams holds code verifier and challenge
-type PKCEParams struct {
-	Verifier  string
-	Challenge string
-	Method    string // always "S256"
-}
-
-// GeneratePKCE creates a new PKCE code verifier and S256 challenge
-func GeneratePKCE() (*PKCEParams, error) {
-	verifier, err := generateRandomString(64)
-	if err != nil {
-		return nil, err
-	}
-	challenge := S256Challenge(verifier)
-	return &PKCEParams{
-		Verifier:  verifier,
-		Challenge: challenge,
-		Method:    "S256",
-	}, nil
-}
-
-// generateRandomString generates a URL-safe random string
-func generateRandomString(length int) (string, error) {
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(bytes), nil
-}
-
-// S256Challenge creates the S256 code challenge from a verifier
-func S256Challenge(verifier string) string {
-	h := sha256.New()
-	h.Write([]byte(verifier))
-	digest := h.Sum(nil)
-	return base64.RawURLEncoding.EncodeToString(digest)
-}
-```
-
-**Step 2: Write pkce_test.go**
-
-```go
-package provider
-
-import (
-	"testing"
-)
-
-func TestGeneratePKCE(t *testing.T) {
-	pkce, err := GeneratePKCE()
-	if err != nil {
-		t.Fatalf("GeneratePKCE() error = %v", err)
-	}
-	if len(pkce.Verifier) == 0 {
-		t.Error("Verifier should not be empty")
-	}
-	if pkce.Challenge == "" {
-		t.Error("Challenge should not be empty")
-	}
-	if pkce.Method != "S256" {
-		t.Errorf("Method = %q, want S256", pkce.Method)
-	}
-	// Verify it's non-deterministic
-	pkce2, _ := GeneratePKCE()
-	if pkce.Verifier == pkce2.Verifier {
-		t.Error("Two PKCE generations should produce different verifiers")
-	}
-}
-
-func TestS256Challenge(t *testing.T) {
-	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	challenge := S256Challenge(verifier)
-	challenge2 := S256Challenge(verifier)
-	if challenge != challenge2 {
-		t.Error("S256Challenge should be deterministic")
-	}
-	if len(challenge) == 0 {
-		t.Error("Challenge should not be empty")
-	}
-}
-```
-
-**Step 3: Run tests**
-
-Run: `go test ./pkg/provider -run TestPKCE -v`
-Expected: PASS
-
-**Step 4: Commit**
-
-```bash
-git add pkg/provider/pkce.go pkg/provider/pkce_test.go
-git commit -m "feat(provider): add PKCE utilities"
-```
-
----
-
-## Task 3: Implement MiniMax OAuth Provider
-
-**Files:**
-- Create: `pkg/provider/minimax_oauth.go`
-- Test: `pkg/provider/minimax_oauth_test.go`
-
-**Step 1: Create pkg/provider/minimax_oauth.go**
-
-```go
-package provider
-
-import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
-	"time"
-)
-
-const minimaxOAuthGlobalBase = "https://api.minimax.io"
-
-var minimaxOAuthConfig = OAuthConfig{
-	BaseURL:   minimaxOAuthGlobalBase,
-	ClientID:  "78257093-7e40-4613-99e0-527b14b39113",
-	AuthURL:   "/oauth/code",
-	TokenURL:  "/oauth/token",
-	RevokeURL: "/oauth/revoke",
-	Scopes:    []string{},
-}
-
-// MiniMaxOAuthProvider implements OAuth 2.0 device code flow for MiniMax
-type MiniMaxOAuthProvider struct {
-	config   OAuthConfig
-	token    *TokenInfo
-	provider string
-}
-
-func NewMiniMaxOAuthProvider(providerName string, config OAuthConfig) *MiniMaxOAuthProvider {
-	if config.BaseURL == "" {
-		config.BaseURL = minimaxOAuthGlobalBase
-	}
-	if config.AuthURL == "" {
-		config.AuthURL = "/oauth/code"
-	}
-	if config.TokenURL == "" {
-		config.TokenURL = "/oauth/token"
-	}
-	return &MiniMaxOAuthProvider{
-		config:   config,
-		provider: providerName,
-	}
-}
-
-func (p *MiniMaxOAuthProvider) Name() string                { return p.provider }
-func (p *MiniMaxOAuthProvider) AuthType() AuthType          { return AuthTypeOAuth }
-func (p *MiniMaxOAuthProvider) GetAuthConfig() OAuthConfig  { return p.config }
-func (p *MiniMaxOAuthProvider) SetToken(t *TokenInfo)       { p.token = t }
-
-// DeviceCodeResponse from /oauth/code endpoint
-type DeviceCodeResponse struct {
-	UserCode        string `json:"user_code"`
-	DeviceCode      string `json:"device_code"`
-	VerificationURI string `json:"verification_uri"`
-	ExpiresIn       int    `json:"expires_in"`
-	Interval        int    `json:"interval"`
-}
-
-// TokenResponse from /oauth/token endpoint
-type TokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	ExpiresIn    int    `json:"expires_in"`
-	TokenType   string `json:"token_type"`
-	Scope       string `json:"scope"`
-}
-
-// InitiateDeviceCode starts the OAuth device flow
-func (p *MiniMaxOAuthProvider) InitiateDeviceCode(ctx context.Context) (*DeviceCodeResponse, error) {
-	data := url.Values{}
-	data.Set("client_id", p.config.ClientID)
-	data.Set("scope", strings.Join(p.config.Scopes, " "))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.BaseURL+p.config.AuthURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("create device code request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("do device code request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("device code request failed: %d %s", resp.StatusCode, body)
-	}
-
-	var dc DeviceCodeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&dc); err != nil {
-		return nil, fmt.Errorf("decode device code response: %w", err)
-	}
-	return &dc, nil
-}
-
-// PollForToken polls /oauth/token until the user authorizes or expires
-func (p *MiniMaxOAuthProvider) PollForToken(ctx context.Context, dc *DeviceCodeResponse) (*TokenInfo, error) {
-	expiresAt := time.Now().Add(time.Duration(dc.ExpiresIn) * time.Second)
-	interval := time.Duration(dc.Interval) * time.Second
-	if interval < 5*time.Second {
-		interval = 5 * time.Second
-	}
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-ticker.C:
-			token, err := p.exchangeDeviceCode(dc.DeviceCode)
-			if err != nil {
-				continue
-			}
-			token.ExpiresAt = expiresAt
-			p.token = token
-			return token, nil
-		case <-time.After(time.Until(expiresAt)):
-			return nil, fmt.Errorf("device code expired")
-		}
-	}
-}
-
-func (p *MiniMaxOAuthProvider) exchangeDeviceCode(deviceCode string) (*TokenInfo, error) {
-	data := url.Values{}
-	data.Set("client_id", p.config.ClientID)
-	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-	data.Set("device_code", deviceCode)
-
-	req, err := http.NewRequest(http.MethodPost, p.config.BaseURL+p.config.TokenURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("token request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var tokenResp TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, fmt.Errorf("decode token response: %w", err)
-	}
-
-	if resp.StatusCode == http.StatusBadRequest {
-		return nil, fmt.Errorf("authorization_pending")
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("token request failed: %d %s", resp.StatusCode, body)
-	}
-
-	return &TokenInfo{
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: tokenResp.RefreshToken,
-		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
-		TokenType:   tokenResp.TokenType,
-		Scope:       tokenResp.Scope,
-	}, nil
-}
-
-// RefreshToken refreshes the access token
-func (p *MiniMaxOAuthProvider) RefreshToken(ctx context.Context) (*TokenInfo, error) {
-	if p.token == nil || p.token.RefreshToken == "" {
-		return nil, fmt.Errorf("no refresh token available")
-	}
-
-	data := url.Values{}
-	data.Set("client_id", p.config.ClientID)
-	data.Set("grant_type", "refresh_token")
-	data.Set("refresh_token", p.token.RefreshToken)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.BaseURL+p.config.TokenURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("refresh request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var tokenResp TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, fmt.Errorf("decode refresh response: %w", err)
-	}
-
-	newToken := &TokenInfo{
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: tokenResp.RefreshToken,
-		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
-		TokenType:   tokenResp.TokenType,
-		Scope:       tokenResp.Scope,
-	}
-	p.token = newToken
-	return newToken, nil
-}
-
-// RevokeToken revokes the current token
-func (p *MiniMaxOAuthProvider) RevokeToken(ctx context.Context) error {
-	if p.token == nil {
-		return nil
-	}
-
-	data := url.Values{}
-	data.Set("client_id", p.config.ClientID)
-	data.Set("token", p.token.AccessToken)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.config.BaseURL+p.config.RevokeURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("revoke request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	p.token = nil
-	return nil
-}
-
-// Chat delegates to OpenAI-compatible chat with OAuth token
-func (p *MiniMaxOAuthProvider) Chat(ctx context.Context, req ChatRequest) (*Response, error) {
-	if p.token == nil {
-		return nil, fmt.Errorf("no OAuth token available")
-	}
-	openai := NewOpenAIProvider(p.provider, p.token.AccessToken, p.config.BaseURL, nil)
-	return openai.Chat(ctx, req)
-}
-
-func (p *MiniMaxOAuthProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stream, error) {
-	if p.token == nil {
-		return nil, fmt.Errorf("no OAuth token available")
-	}
-	openai := NewOpenAIProvider(p.provider, p.token.AccessToken, p.config.BaseURL, nil)
-	return openai.ChatStream(ctx, req)
-}
-```
-
-**Step 2: Write minimax_oauth_test.go** (use httptest.Server for mock OAuth server)
-
-**Step 3: Run tests**
-
-Run: `go test ./pkg/provider -run TestMiniMax -v`
-Expected: PASS
-
-**Step 4: Commit**
-
-```bash
-git add pkg/provider/minimax_oauth.go pkg/provider/minimax_oauth_test.go
-git commit -m "feat(provider): implement MiniMax OAuth device code flow"
-```
-
----
-
-## Task 4: Add OAuth Token Storage
+### Task 2: Add Persistent OAuth Token Storage
 
 **Files:**
 - Create: `pkg/config/oauth_store.go`
 - Test: `pkg/config/oauth_store_test.go`
 
-**Step 1: Create pkg/config/oauth_store.go**
+**Intent:**
+Store OAuth tokens outside main config, keyed by provider/profile identity.
 
-```go
-package config
+**Required behavior:**
 
-import (
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
-)
+- store path defaults under the smolbot config directory
+- save/load/clear by `(provider, profileID)`
+- atomic writes
+- private file permissions
+- safe behavior when the store file does not yet exist
 
-// OAuthTokenStore persists OAuth tokens to disk
-type OAuthTokenStore struct {
-	path string
-	mu   sync.RWMutex
-	data map[string]TokenEntry
-}
+**Step 1: Write failing tests**
 
-// TokenEntry represents a stored token for a provider profile
-type TokenEntry struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token,omitempty"`
-	ExpiresAt   int64     `json:"expires_at"` // Unix timestamp ms
-	Email       string    `json:"email,omitempty"`
-	Provider    string    `json:"provider"`
-	ProfileID   string    `json:"profile_id"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
+Cover:
 
-// IsExpired returns true if the token is expired or will expire within 2 minutes
-func (e *TokenEntry) IsExpired() bool {
-	return time.Until(time.Unix(e.ExpiresAt/1000, 0)) < 2*time.Minute
-}
+- save then load round-trip
+- clear removes a single entry without clobbering others
+- missing file returns not-found semantics, not a parse failure
+- store writes private permissions
 
-func NewOAuthTokenStore(path string) *OAuthTokenStore {
-	return &OAuthTokenStore{
-		path: path,
-		data: make(map[string]TokenEntry),
-	}
-}
+**Step 2: Run focused tests and confirm failure**
 
-// Load reads tokens from disk
-func (s *OAuthTokenStore) Load() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+Run: `go test ./pkg/config -run 'TestOAuthTokenStore'`
+Expected: FAIL because the store does not exist yet
 
-	f, err := os.Open(s.path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+**Step 3: Implement minimal store**
 
-	if err := json.NewDecoder(f).Decode(&s.data); err != nil {
-		return err
-	}
-	return nil
-}
+- single JSON file
+- atomic temp-write + rename
+- preserve existing entries on update
 
-// Save writes tokens to disk atomically
-func (s *OAuthTokenStore) Save() error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+**Step 4: Run focused verification**
 
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-
-	tmp := s.path + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if err := json.NewEncoder(f).Encode(s.data); err != nil {
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path)
-}
-
-// Get retrieves a token entry by profile ID
-func (s *OAuthTokenStore) Get(profileID string) (TokenEntry, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	entry, ok := s.data[profileID]
-	return entry, ok
-}
-
-// Set stores a token entry
-func (s *OAuthTokenStore) Set(profileID string, entry TokenEntry) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry.ProfileID = profileID
-	entry.UpdatedAt = time.Now()
-	s.data[profileID] = entry
-}
-
-// Delete removes a token entry
-func (s *OAuthTokenStore) Delete(profileID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.data, profileID)
-}
-
-// DefaultOAuthTokenStore returns the default store
-func DefaultOAuthTokenStore() (*OAuthTokenStore, error) {
-	paths := DefaultPaths()
-	store := NewOAuthTokenStore(filepath.Join(paths.ConfigDir(), "oauth_tokens.json"))
-	if err := store.Load(); err != nil {
-		return nil, err
-	}
-	return store, nil
-}
-```
-
-**Step 2: Write oauth_store_test.go**
-
-**Step 3: Run tests**
-
-Run: `go test ./pkg/config -run TestOAuthTokenStore -v`
+Run: `go test ./pkg/config -run 'TestOAuthTokenStore'`
 Expected: PASS
 
-**Step 4: Commit**
+**Step 5: Review gate**
+
+- spec review: confirm storage separation from main config
+- code-quality review: confirm permissions and update behavior are safe
+
+**Step 6: Checkpoint**
 
 ```bash
 git add pkg/config/oauth_store.go pkg/config/oauth_store_test.go
-git commit -m "feat(config): add OAuth token persistent storage"
+git commit -m "feat(config): add oauth token store"
 ```
 
 ---
 
-## Task 5: Register MiniMax OAuth in Provider Registry
+### Task 3: Implement A Correct MiniMax Portal Auth Client
+
+**Files:**
+- Modify/Create: `pkg/provider/minimax_oauth.go`
+- Test: `pkg/provider/minimax_oauth_test.go`
+
+**Intent:**
+Implement the real MiniMax user-code login flow and token refresh logic.
+
+**Required behavior:**
+
+- provider identity is `minimax-portal`
+- separate global/CN endpoint config is supported
+- auth-code request uses PKCE and state
+- token polling uses MiniMax’s user-code flow shape, not a generic `device_code`
+- token expiry comes from token response, not auth-code expiry
+- refresh is supported
+- revoke is optional; if implemented, it must be verified and tested
+- HTTP client must be injectable for tests
+
+**MiniMax protocol details to preserve:**
+
+- auth code endpoint: `/oauth/code`
+- token endpoint: `/oauth/token`
+- login request includes:
+  - `response_type=code`
+  - `client_id`
+  - `scope`
+  - `code_challenge`
+  - `code_challenge_method=S256`
+  - `state`
+- polling request uses:
+  - `grant_type=urn:ietf:params:oauth:grant-type:user_code`
+  - `client_id`
+  - `user_code`
+  - `code_verifier`
+
+**Step 1: Write failing tests**
+
+Cover:
+
+- initiating auth sends the expected form payload
+- state mismatch is rejected
+- pending authorization is distinguishable from hard failure
+- successful token exchange sets access/refresh token and expiry correctly
+- refresh request posts the expected form and updates the token
+- `Chat`/`ChatStream` delegates through OpenAI-compatible transport using the OAuth access token
+
+**Step 2: Run focused tests and confirm failure**
+
+Run: `go test ./pkg/provider -run 'TestMiniMaxOAuth'`
+Expected: FAIL because the current spike uses the wrong protocol/expiry behavior or the file is absent
+
+**Step 3: Implement minimal auth client**
+
+- replace incorrect spike logic as needed
+- inject `http.Client`
+- distinguish retryable pending auth from terminal errors
+- avoid timer leaks in poll loop
+
+**Step 4: Run focused verification**
+
+Run: `go test ./pkg/provider -run 'TestMiniMaxOAuth'`
+Expected: PASS
+
+**Step 5: Review gate**
+
+- spec review: confirm `minimax-portal` semantics and protocol shape
+- code-quality review: confirm timer/error handling and client injection are solid
+
+**Step 6: Checkpoint**
+
+```bash
+git add pkg/provider/minimax_oauth.go pkg/provider/minimax_oauth_test.go
+git commit -m "feat(provider): add minimax portal oauth client"
+```
+
+---
+
+### Task 4: Wire OAuth Resolution Into The Provider Registry
 
 **Files:**
 - Modify: `pkg/provider/registry.go`
+- Test: `pkg/provider/registry_test.go`
+- Modify: `cmd/smolbot/runtime.go`
+- Test: `cmd/smolbot/runtime_model_test.go`
 
-**Step 1: Add OAuth factory to NewRegistryWithDefaults**
+**Intent:**
+Allow runtime provider resolution to construct `minimax-portal` from config + token store without breaking existing `minimax`.
 
-```go
-r.RegisterFactory("minimax-oauth", func(pc config.ProviderConfig) Provider {
-    cfg := OAuthConfig{
-        BaseURL:  "https://api.minimax.io",
-        ClientID: "78257093-7e40-4613-99e0-527b14b39113",
-        AuthURL:  "/oauth/code",
-        TokenURL: "/oauth/token",
-    }
-    provider := NewMiniMaxOAuthProvider("minimax-oauth", cfg)
-    if store != nil {
-        if entry, ok := store.Get("minimax:oauth"); ok {
-            provider.SetToken(&TokenInfo{
-                AccessToken:  entry.AccessToken,
-                RefreshToken: entry.RefreshToken,
-                ExpiresAt:   time.Unix(entry.ExpiresAt/1000, 0),
-            })
-        }
-    }
-    return provider
-})
-```
+**Required behavior:**
 
-Note: Registry must accept optional OAuthTokenStore.
+- `minimax` stays API-key based
+- `minimax-portal` is selected when model/provider resolution points there
+- registry loads tokens via provider/profile linkage
+- expired access tokens refresh before use when refresh token is available
+- runtime/provider switching does not collapse `minimax-portal` back to `openai`
 
-**Step 2: Run build to verify**
+**Step 1: Write failing tests**
 
-Run: `go build ./pkg/provider`
-Expected: OK
+Cover:
 
-**Step 3: Commit**
+- registry returns API-key provider for `minimax`
+- registry returns OAuth-backed provider for `minimax-portal`
+- missing OAuth token gives a clear error
+- expired access token triggers refresh path
+
+**Step 2: Run focused tests and confirm failure**
+
+Run: `go test ./pkg/provider ./cmd/smolbot -run 'TestRegistry.*MiniMax|Test.*MiniMaxPortal'`
+Expected: FAIL because registry does not yet understand OAuth-backed provider resolution
+
+**Step 3: Implement minimal registry/runtime changes**
+
+- add factory path for `minimax-portal`
+- connect token store/profile loading
+- keep provider detection and cache keys explicit
+
+**Step 4: Run focused verification**
+
+Run: `go test ./pkg/provider ./cmd/smolbot -run 'TestRegistry.*MiniMax|Test.*MiniMaxPortal'`
+Expected: PASS
+
+**Step 5: Review gate**
+
+- spec review: confirm separate provider identities are preserved
+- code-quality review: confirm no cache-key or fallback regression
+
+**Step 6: Checkpoint**
 
 ```bash
-git add pkg/provider/registry.go
-git commit -m "feat(provider): register minimax-oauth factory in registry"
+git add pkg/provider/registry.go pkg/provider/registry_test.go cmd/smolbot/runtime.go cmd/smolbot/runtime_model_test.go
+git commit -m "feat(provider): wire minimax portal oauth into registry"
 ```
 
 ---
 
-## Task 6: Add Installer OAuth Step for MiniMax
+### Task 5: Add Installer Support For MiniMax OAuth
 
 **Files:**
-- Modify: `cmd/installer/types.go` (add stepOAuth)
-- Modify: `cmd/installer/views.go` (renderOAuth)
-- Modify: `cmd/installer/tasks.go` (executeOAuthTask)
-- Modify: `cmd/installer/main.go` (wizard flow)
+- Modify: `cmd/installer/types.go`
+- Modify: `cmd/installer/views.go`
+- Modify: `cmd/installer/tasks.go`
+- Modify: `cmd/installer/utils.go`
+- Test: `cmd/installer/*_test.go`
 
-**Step 1: Add stepOAuth to installStep enum and OAuth model fields**
+**Intent:**
+Expose MiniMax OAuth as a first-class installer choice without disturbing the existing API-key flow.
 
-**Step 2: Add renderOAuth() function showing user code + verification URL + spinner**
+**Required behavior:**
 
-**Step 3: Add executeOAuthTask() that initiates device code flow and polls**
+- installer shows separate choices for:
+  - MiniMax API key
+  - MiniMax OAuth
+- MiniMax OAuth writes provider config for `minimax-portal`
+- main config stores auth mode/profile linkage, not raw access tokens
+- user sees verification URL and user code
+- successful login stores token in OAuth store and selects a safe default model
 
-**Step 4: Run build**
+**Step 1: Write failing tests**
 
-Run: `go build ./cmd/installer`
-Expected: OK
+Cover:
 
-**Step 5: Commit**
+- selecting MiniMax OAuth writes `providers["minimax-portal"]`
+- selected model defaults to a Token Plan-safe model
+- installer persists `authType`/`profileId`
+- installer fails cleanly when login/store save fails
+
+**Step 2: Run focused tests and confirm failure**
+
+Run: `go test ./cmd/installer -run 'Test.*MiniMaxOAuth'`
+Expected: FAIL because installer has no OAuth path yet
+
+**Step 3: Implement minimal installer flow**
+
+- add explicit provider option
+- perform login
+- save token in store
+- write config patch
+
+**Step 4: Run focused verification**
+
+Run: `go test ./cmd/installer -run 'Test.*MiniMaxOAuth'`
+Expected: PASS
+
+**Step 5: Review gate**
+
+- spec review: confirm MiniMax API-key and OAuth choices are distinct
+- code-quality review: confirm installer failures are visible and non-destructive
+
+**Step 6: Checkpoint**
 
 ```bash
-git add cmd/installer/types.go cmd/installer/views.go cmd/installer/tasks.go cmd/installer/main.go
-git commit -m "feat(installer): add MiniMax OAuth wizard step"
+git add cmd/installer/types.go cmd/installer/views.go cmd/installer/tasks.go cmd/installer/utils.go cmd/installer/*_test.go
+git commit -m "feat(installer): add minimax oauth setup"
 ```
 
 ---
 
-## Task 7: Add TUI OAuth Status Display
+### Task 6: Surface OAuth Status In The Provider UI
 
 **Files:**
 - Modify: `internal/components/dialog/providers.go`
 - Test: `internal/components/dialog/providers_test.go`
+- Modify: `internal/tui/tui.go`
+- Test: `internal/tui/provider_flow_test.go`
+- Modify: `internal/client/types.go`
 
-**Step 1: Extend ProviderInfo with IsOAuth and TokenEmail fields**
+**Intent:**
+Make `/providers` and the provider dialog show auth mode and status clearly.
 
-**Step 2: Show "(OAuth)" badge in renderRow for OAuth providers**
+**Required behavior:**
 
-**Step 3: Write test for OAuth provider display**
+- provider dialog distinguishes:
+  - API key configured
+  - OAuth configured
+  - OAuth missing token/profile
+- active provider can show account identity/expiry when known
+- `minimax-portal` is rendered as MiniMax OAuth, not as a generic OpenAI-compatible row
 
-**Step 4: Run tests**
+**Step 1: Write failing tests**
 
-Run: `go test ./internal/components/dialog -run TestProviders -v`
+Cover:
+
+- active provider row shows OAuth auth type
+- configured section distinguishes API-key MiniMax from MiniMax OAuth
+- missing token/profile renders as incomplete configuration
+
+**Step 2: Run focused tests and confirm failure**
+
+Run: `go test ./internal/components/dialog ./internal/tui -run 'Test.*Provider.*OAuth|Test.*MiniMax.*OAuth'`
+Expected: FAIL because dialog/client payloads do not yet expose OAuth status
+
+**Step 3: Implement minimal provider-status surface**
+
+- extend provider info/status payloads as needed
+- render auth mode cleanly
+
+**Step 4: Run focused verification**
+
+Run: `go test ./internal/components/dialog ./internal/tui -run 'Test.*Provider.*OAuth|Test.*MiniMax.*OAuth'`
 Expected: PASS
 
-**Step 5: Commit**
+**Step 5: Review gate**
+
+- spec review: confirm provider UI now reflects real auth mode
+- code-quality review: confirm no hardcoded provider hacks beyond MiniMax naming/typing
+
+**Step 6: Checkpoint**
 
 ```bash
-git add internal/components/dialog/providers.go internal/components/dialog/providers_test.go
-git commit -m "feat(tui): display OAuth provider status in providers dialog"
+git add internal/components/dialog/providers.go internal/components/dialog/providers_test.go internal/tui/tui.go internal/tui/provider_flow_test.go internal/client/types.go
+git commit -m "feat(tui): show minimax oauth provider status"
 ```
 
 ---
 
-## Task 8: Add Model Picker OAuth Model Filter
+### Task 7: Add OAuth-Aware Model Filtering
 
 **Files:**
 - Modify: `internal/components/dialog/models.go`
+- Test: `internal/components/dialog/models_test.go`
+- Modify: `pkg/provider/discovery.go`
+- Test: `pkg/provider/discovery_test.go`
 
-**Step 1: Filter highspeed models for MiniMax Token Plan OAuth**
+**Intent:**
+Prevent obvious bad MiniMax OAuth model choices and make the model picker honest about auth requirements.
 
-When the active provider is minimax-oauth, filter out highspeed variants since they're only available via Pay-As-You-Go API keys.
+**Required behavior:**
 
-**Step 2: Run tests**
+- `minimax-portal` defaults to Token Plan-safe models
+- models not available to OAuth/Token Plan users are either hidden or clearly marked non-selectable
+- model picker still preserves the improved group/filter/save workflow already implemented on this branch
 
-Run: `go test ./internal/components/dialog -run TestModels -v`
+**Step 1: Write failing tests**
+
+Cover:
+
+- `minimax-portal` rows do not default to `MiniMax-M2.7-highspeed`
+- unavailable rows render as non-selectable info rows or carry a clear hint
+
+**Step 2: Run focused tests and confirm failure**
+
+Run: `go test ./internal/components/dialog ./pkg/provider -run 'Test.*MiniMax.*Portal|Test.*ModelPicker.*OAuth'`
+Expected: FAIL because discovery/model picker do not yet distinguish OAuth-specific availability
+
+**Step 3: Implement minimal filtering**
+
+- extend discovery metadata only as needed
+- avoid broad auth requirement machinery for unrelated providers
+
+**Step 4: Run focused verification**
+
+Run: `go test ./internal/components/dialog ./pkg/provider -run 'Test.*MiniMax.*Portal|Test.*ModelPicker.*OAuth'`
 Expected: PASS
 
-**Step 3: Commit**
+**Step 5: Review gate**
+
+- spec review: confirm Token Plan-safe behavior
+- code-quality review: confirm filtering logic is explicit and local, not speculative
+
+**Step 6: Checkpoint**
 
 ```bash
-git add internal/components/dialog/models.go
-git commit -m "feat(tui): filter highspeed models for minimax token plan"
+git add internal/components/dialog/models.go internal/components/dialog/models_test.go pkg/provider/discovery.go pkg/provider/discovery_test.go
+git commit -m "feat(provider): add minimax oauth model filtering"
 ```
 
 ---
 
-## Dependencies
+## Final Verification Gate
 
-- Task 1 → Task 2 → Task 3 (types → PKCE → OAuth provider)
-- Task 4 is independent, can run parallel with Tasks 1-3
-- Task 5 depends on Tasks 1-4
-- Task 6 depends on Tasks 1-5
-- Task 7 depends on Tasks 1-5
-- Task 8 depends on Task 7
+Run:
 
-## Verification
-
-After all tasks:
 ```bash
-go test ./pkg/provider ./pkg/config ./internal/components/dialog ./cmd/installer -v
-go build ./cmd/smolbot
+go test ./pkg/provider ./pkg/config ./cmd/installer ./cmd/smolbot ./internal/components/dialog ./internal/tui
+go build ./cmd/smolbot ./cmd/smolbot-tui ./cmd/installer
 ```
 
-## Post-Implementation Checklist
+Expected:
 
-- [ ] MiniMax OAuth device flow end-to-end test
-- [ ] Token refresh test (expire a token, verify refresh)
-- [ ] Installer OAuth wizard step manual test
-- [ ] TUI `/providers` shows OAuth badge
-- [ ] Model picker filters highspeed for Token Plan OAuth
-- [ ] Token persistence across restarts
+- all targeted package tests pass
+- all three binaries build
+
+Then run:
+
+- final spec review on the whole change
+- final code-quality review on the whole change
+
+Only after both are green may the branch be pushed or merged.
