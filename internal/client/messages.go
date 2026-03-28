@@ -71,8 +71,8 @@ func (c *Client) ModelsList() ([]ModelInfo, string, error) {
 	return payload.Models, payload.Current, nil
 }
 
-func (c *Client) ModelsSet(id string) (string, error) {
-	res, err := c.sendRequest("models.set", ModelsSetParams{Model: id})
+func (c *Client) ModelsSet(model string) (string, error) {
+	res, err := c.sendRequest("models.set", ModelsSetParams{Model: model})
 	if err != nil {
 		return "", err
 	}

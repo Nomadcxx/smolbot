@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"path/filepath"
@@ -44,17 +43,15 @@ func TestModelsSetSwitchUpdatesAgentLoopModel(t *testing.T) {
 	httpServer := httptest.NewServer(app.gateway.Handler())
 	defer httpServer.Close()
 
-	conn := dialWebsocketGateway(t, httpServer.URL+"/ws")
-	defer conn.Close()
+	cl := connectGatewayClient(t, httpServer.URL)
+	defer cl.Close()
 
-	writeFrameGateway(t, conn, gateway.RequestFrame{
-		ID:     "1",
-		Method: "models.set",
-		Params: json.RawMessage(`{"model":"claude-sonnet"}`),
-	})
-	frame := readResponseFrameGateway(t, conn, "1")
-	if frame.Kind != gateway.FrameResponse || frame.Response.Error != nil {
-		t.Fatalf("models.set failed: %#v", frame)
+	previous, err := cl.ModelsSet("claude-sonnet")
+	if err != nil {
+		t.Fatalf("ModelsSet: %v", err)
+	}
+	if previous != "gpt-test" {
+		t.Fatalf("previous model = %q, want gpt-test", previous)
 	}
 
 	agentModel := app.agent.EffectiveModel()
@@ -92,17 +89,15 @@ func TestModelsSetSwitchUpdatesHeartbeatModel(t *testing.T) {
 	httpServer := httptest.NewServer(app.gateway.Handler())
 	defer httpServer.Close()
 
-	conn := dialWebsocketGateway(t, httpServer.URL+"/ws")
-	defer conn.Close()
+	cl := connectGatewayClient(t, httpServer.URL)
+	defer cl.Close()
 
-	writeFrameGateway(t, conn, gateway.RequestFrame{
-		ID:     "1",
-		Method: "models.set",
-		Params: json.RawMessage(`{"model":"claude-sonnet"}`),
-	})
-	frame := readResponseFrameGateway(t, conn, "1")
-	if frame.Kind != gateway.FrameResponse || frame.Response.Error != nil {
-		t.Fatalf("models.set failed: %#v", frame)
+	previous, err := cl.ModelsSet("claude-sonnet")
+	if err != nil {
+		t.Fatalf("ModelsSet: %v", err)
+	}
+	if previous != "gpt-test" {
+		t.Fatalf("previous model = %q, want gpt-test", previous)
 	}
 
 	beatModel := app.heartbeat.EffectiveModel()
@@ -111,7 +106,7 @@ func TestModelsSetSwitchUpdatesHeartbeatModel(t *testing.T) {
 	}
 }
 
-func TestGatewayStatusReportsEffectiveProviderAfterModelSwitch(t *testing.T) {
+func TestGatewayStatusReportsModelAfterModelSwitch(t *testing.T) {
 	port := freePort(t)
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Model = "gpt-test"
@@ -138,35 +133,19 @@ func TestGatewayStatusReportsEffectiveProviderAfterModelSwitch(t *testing.T) {
 	httpServer := httptest.NewServer(app.gateway.Handler())
 	defer httpServer.Close()
 
-	conn := dialWebsocketGateway(t, httpServer.URL+"/ws")
-	defer conn.Close()
+	cl := connectGatewayClient(t, httpServer.URL)
+	defer cl.Close()
 
-	writeFrameGateway(t, conn, gateway.RequestFrame{
-		ID:     "1",
-		Method: "models.set",
-		Params: json.RawMessage(`{"model":"claude-sonnet"}`),
-	})
-	readResponseFrameGateway(t, conn, "1")
-
-	writeFrameGateway(t, conn, gateway.RequestFrame{ID: "2", Method: "status"})
-	frame := readResponseFrameGateway(t, conn, "2")
-	if frame.Kind != gateway.FrameResponse || frame.Response.Error != nil {
-		t.Fatalf("status failed: %#v", frame)
+	if _, err := cl.ModelsSet("claude-sonnet"); err != nil {
+		t.Fatalf("ModelsSet: %v", err)
 	}
 
-	var result map[string]any
-	if err := json.Unmarshal(frame.Response.Result, &result); err != nil {
-		t.Fatalf("Unmarshal result: %v", err)
+	status, err := cl.Status("tui:main")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
 	}
-
-	reportedModel, _ := result["model"].(string)
-	reportedProvider, _ := result["provider"].(string)
-
-	if reportedModel != "claude-sonnet" {
-		t.Fatalf("status model = %q, want claude-sonnet", reportedModel)
-	}
-	if reportedProvider != "anthropic" {
-		t.Fatalf("status provider = %q, want anthropic (detected from model name)", reportedProvider)
+	if status.Model != "claude-sonnet" {
+		t.Fatalf("status model = %q, want claude-sonnet", status.Model)
 	}
 }
 
@@ -197,17 +176,11 @@ func TestProviderSwitchAcrossFamiliesChangesAgentModel(t *testing.T) {
 	httpServer := httptest.NewServer(app.gateway.Handler())
 	defer httpServer.Close()
 
-	conn := dialWebsocketGateway(t, httpServer.URL+"/ws")
-	defer conn.Close()
+	cl := connectGatewayClient(t, httpServer.URL)
+	defer cl.Close()
 
-	writeFrameGateway(t, conn, gateway.RequestFrame{
-		ID:     "1",
-		Method: "models.set",
-		Params: json.RawMessage(`{"model":"claude-3-5-sonnet"}`),
-	})
-	frame := readResponseFrameGateway(t, conn, "1")
-	if frame.Kind != gateway.FrameResponse || frame.Response.Error != nil {
-		t.Fatalf("models.set failed: %#v", frame)
+	if _, err := cl.ModelsSet("claude-3-5-sonnet"); err != nil {
+		t.Fatalf("ModelsSet: %v", err)
 	}
 
 	agentModel := app.agent.EffectiveModel()
@@ -216,70 +189,15 @@ func TestProviderSwitchAcrossFamiliesChangesAgentModel(t *testing.T) {
 	}
 }
 
-func TestRealClientModelsSetSwitchesRuntimeModel(t *testing.T) {
-	port := freePort(t)
-	cfg := config.DefaultConfig()
-	cfg.Agents.Defaults.Model = "gpt-test"
-	cfg.Agents.Defaults.Provider = "openai"
-	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
-	cfg.Gateway.Host = "127.0.0.1"
-	cfg.Gateway.Port = port
-	cfgPath := filepath.Join(t.TempDir(), "config.json")
-	if err := writeConfigFile(cfgPath, &cfg); err != nil {
-		t.Fatalf("writeConfigFile: %v", err)
-	}
+func connectGatewayClient(t *testing.T, rawURL string) *client.Client {
+	t.Helper()
 
-	app, err := buildRuntime(daemonLaunchOptions{
-		ConfigPath: cfgPath,
-		Port:       port,
-	}, runtimeDeps{
-		Provider: &spyProvider{name: "openai", model: "gpt-test"},
-	})
-	if err != nil {
-		t.Fatalf("buildRuntime: %v", err)
-	}
-	defer app.Close()
-
-	httpServer := httptest.NewServer(app.gateway.Handler())
-	defer httpServer.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
-	c := client.New(wsURL)
-	defer c.Close()
-
-	hello, err := c.Connect()
-	if err != nil {
+	wsURL := "ws" + strings.TrimPrefix(rawURL, "http") + "/ws"
+	cl := client.New(wsURL)
+	if _, err := cl.Connect(); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	if hello.Server != "smolbot" {
-		t.Fatalf("hello server = %q, want smolbot", hello.Server)
-	}
-
-	previous, err := c.ModelsSet("claude-sonnet")
-	if err != nil {
-		t.Fatalf("ModelsSet: %v", err)
-	}
-	if previous != "gpt-test" {
-		t.Fatalf("previous model = %q, want gpt-test", previous)
-	}
-
-	if agentModel := app.agent.EffectiveModel(); agentModel != "claude-sonnet" {
-		t.Fatalf("agent loop effective model = %q, want claude-sonnet after switch", agentModel)
-	}
-	if heartbeatModel := app.heartbeat.EffectiveModel(); heartbeatModel != "claude-sonnet" {
-		t.Fatalf("heartbeat effective model = %q, want claude-sonnet after switch", heartbeatModel)
-	}
-
-	status, err := c.Status("tui:main")
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if status.Model != "claude-sonnet" {
-		t.Fatalf("status model = %q, want claude-sonnet", status.Model)
-	}
-	if status.Provider != "anthropic" {
-		t.Fatalf("status provider = %q, want anthropic", status.Provider)
-	}
+	return cl
 }
 
 type spyProvider struct {

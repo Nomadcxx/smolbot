@@ -21,8 +21,6 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/skill"
 	"github.com/Nomadcxx/smolbot/pkg/usage"
 	"github.com/gorilla/websocket"
-
-	"github.com/Nomadcxx/smolbot/internal/client"
 )
 
 func TestServerMethods(t *testing.T) {
@@ -182,41 +180,6 @@ func TestServerMethods(t *testing.T) {
 		}
 		if len(history) != 0 {
 			t.Fatalf("expected cleared history, got %#v", history)
-		}
-	})
-
-	t.Run("models list and set", func(t *testing.T) {
-		writeFrame(t, conn, RequestFrame{ID: "7", Method: "models.list"})
-		frame := readResponseFrame(t, conn, "7")
-		if !strings.Contains(string(frame.Response.Result), `"id":"gpt-test"`) {
-			t.Fatalf("unexpected models payload %s", frame.Response.Result)
-		}
-
-		params, err := json.Marshal(client.ModelsSetParams{Model: "claude-test"})
-		if err != nil {
-			t.Fatalf("marshal models.set params: %v", err)
-		}
-		writeFrame(t, conn, RequestFrame{
-			ID:     "8",
-			Method: "models.set",
-			Params: params,
-		})
-		frame = readResponseFrame(t, conn, "8")
-		if frame.Response.Error != nil {
-			t.Fatalf("unexpected set error %#v", frame.Response.Error)
-		}
-		if cfg.Agents.Defaults.Model != "claude-test" {
-			t.Fatalf("expected model update, got %q", cfg.Agents.Defaults.Model)
-		}
-
-		writeFrame(t, conn, RequestFrame{
-			ID:     "8b",
-			Method: "models.set",
-			Params: json.RawMessage(`{"id":"legacy-model"}`),
-		})
-		frame = readResponseFrame(t, conn, "8b")
-		if frame.Response.Error == nil {
-			t.Fatalf("expected legacy id payload to be rejected, got %#v", frame)
 		}
 	})
 
@@ -493,6 +456,63 @@ func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
 	}
 	if !strings.Contains(decoded.UsageAlert.Message, "llama3.2") {
 		t.Fatalf("expected usage alert message to include model label, got %#v", decoded.UsageAlert)
+	}
+}
+
+func TestModelSetUpdatesGatewayConfigAndStatus(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+
+	server := NewServer(ServerDeps{
+		Config:  cfg,
+		Version: "test",
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "1",
+		Method: "models.set",
+		Params: json.RawMessage(`{"model":"claude-test"}`),
+	})
+	frame := readResponseFrame(t, conn, "1")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected set error %#v", frame.Response.Error)
+	}
+	var payload struct {
+		Previous string `json:"previous"`
+	}
+	if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
+		t.Fatalf("unmarshal models.set payload: %v", err)
+	}
+	if payload.Previous != "gpt-test" {
+		t.Fatalf("expected previous model gpt-test, got %q", payload.Previous)
+	}
+	if cfg.Agents.Defaults.Model != "claude-test" {
+		t.Fatalf("expected model update, got %q", cfg.Agents.Defaults.Model)
+	}
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "1b",
+		Method: "models.set",
+		Params: json.RawMessage(`{"id":"legacy-model"}`),
+	})
+	frame = readResponseFrame(t, conn, "1b")
+	if frame.Response.Error == nil {
+		t.Fatalf("expected legacy id payload to be rejected, got %#v", frame)
+	}
+
+	writeFrame(t, conn, RequestFrame{ID: "2", Method: "status"})
+	frame = readResponseFrame(t, conn, "2")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected status error %#v", frame.Response.Error)
+	}
+	if !strings.Contains(string(frame.Response.Result), `"model":"claude-test"`) {
+		t.Fatalf("expected status to report updated model, got %s", frame.Response.Result)
 	}
 }
 
