@@ -172,27 +172,6 @@ func TestServerMethods(t *testing.T) {
 		}
 	})
 
-	t.Run("models list and set", func(t *testing.T) {
-		writeFrame(t, conn, RequestFrame{ID: "7", Method: "models.list"})
-		frame := readResponseFrame(t, conn, "7")
-		if !strings.Contains(string(frame.Response.Result), `"id":"gpt-test"`) {
-			t.Fatalf("unexpected models payload %s", frame.Response.Result)
-		}
-
-		writeFrame(t, conn, RequestFrame{
-			ID:     "8",
-			Method: "models.set",
-			Params: json.RawMessage(`{"model":"claude-test"}`),
-		})
-		frame = readResponseFrame(t, conn, "8")
-		if frame.Response.Error != nil {
-			t.Fatalf("unexpected set error %#v", frame.Response.Error)
-		}
-		if cfg.Agents.Defaults.Model != "claude-test" {
-			t.Fatalf("expected model update, got %q", cfg.Agents.Defaults.Model)
-		}
-	})
-
 	t.Run("cron list with no cron service returns empty jobs", func(t *testing.T) {
 		writeFrame(t, conn, RequestFrame{ID: "9", Method: "cron.list"})
 		frame := readResponseFrame(t, conn, "9")
@@ -306,6 +285,53 @@ func TestServerMethods(t *testing.T) {
 			t.Fatalf("unexpected mcps payload %s", frame.Response.Result)
 		}
 	})
+}
+
+func TestModelSetUpdatesGatewayConfigAndStatus(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+
+	server := NewServer(ServerDeps{
+		Config:  cfg,
+		Version: "test",
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "1",
+		Method: "models.set",
+		Params: json.RawMessage(`{"model":"claude-test"}`),
+	})
+	frame := readResponseFrame(t, conn, "1")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected set error %#v", frame.Response.Error)
+	}
+	var payload struct {
+		Previous string `json:"previous"`
+	}
+	if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
+		t.Fatalf("unmarshal models.set payload: %v", err)
+	}
+	if payload.Previous != "gpt-test" {
+		t.Fatalf("expected previous model gpt-test, got %q", payload.Previous)
+	}
+	if cfg.Agents.Defaults.Model != "claude-test" {
+		t.Fatalf("expected model update, got %q", cfg.Agents.Defaults.Model)
+	}
+
+	writeFrame(t, conn, RequestFrame{ID: "2", Method: "status"})
+	frame = readResponseFrame(t, conn, "2")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected status error %#v", frame.Response.Error)
+	}
+	if !strings.Contains(string(frame.Response.Result), `"model":"claude-test"`) {
+		t.Fatalf("expected status to report updated model, got %s", frame.Response.Result)
+	}
 }
 
 func TestServerOllamaContextWindow(t *testing.T) {

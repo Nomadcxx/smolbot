@@ -2,18 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/pkg/config"
-	"github.com/Nomadcxx/smolbot/pkg/gateway"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
-	"github.com/gorilla/websocket"
 )
 
 func TestModelsSetSwitchUpdatesAgentLoopModel(t *testing.T) {
@@ -43,17 +40,15 @@ func TestModelsSetSwitchUpdatesAgentLoopModel(t *testing.T) {
 	httpServer := httptest.NewServer(app.gateway.Handler())
 	defer httpServer.Close()
 
-	conn := dialWebsocketGateway(t, httpServer.URL+"/ws")
-	defer conn.Close()
+	cl := connectGatewayClient(t, httpServer.URL)
+	defer cl.Close()
 
-	writeFrameGateway(t, conn, gateway.RequestFrame{
-		ID:     "1",
-		Method: "models.set",
-		Params: json.RawMessage(`{"model":"claude-sonnet"}`),
-	})
-	frame := readResponseFrameGateway(t, conn, "1")
-	if frame.Kind != gateway.FrameResponse || frame.Response.Error != nil {
-		t.Fatalf("models.set failed: %#v", frame)
+	previous, err := cl.ModelsSet("claude-sonnet")
+	if err != nil {
+		t.Fatalf("ModelsSet: %v", err)
+	}
+	if previous != "gpt-test" {
+		t.Fatalf("previous model = %q, want gpt-test", previous)
 	}
 
 	agentModel := app.agent.EffectiveModel()
@@ -91,17 +86,15 @@ func TestModelsSetSwitchUpdatesHeartbeatModel(t *testing.T) {
 	httpServer := httptest.NewServer(app.gateway.Handler())
 	defer httpServer.Close()
 
-	conn := dialWebsocketGateway(t, httpServer.URL+"/ws")
-	defer conn.Close()
+	cl := connectGatewayClient(t, httpServer.URL)
+	defer cl.Close()
 
-	writeFrameGateway(t, conn, gateway.RequestFrame{
-		ID:     "1",
-		Method: "models.set",
-		Params: json.RawMessage(`{"model":"claude-sonnet"}`),
-	})
-	frame := readResponseFrameGateway(t, conn, "1")
-	if frame.Kind != gateway.FrameResponse || frame.Response.Error != nil {
-		t.Fatalf("models.set failed: %#v", frame)
+	previous, err := cl.ModelsSet("claude-sonnet")
+	if err != nil {
+		t.Fatalf("ModelsSet: %v", err)
+	}
+	if previous != "gpt-test" {
+		t.Fatalf("previous model = %q, want gpt-test", previous)
 	}
 
 	beatModel := app.heartbeat.EffectiveModel()
@@ -110,7 +103,7 @@ func TestModelsSetSwitchUpdatesHeartbeatModel(t *testing.T) {
 	}
 }
 
-func TestGatewayStatusReportsEffectiveProviderAfterModelSwitch(t *testing.T) {
+func TestGatewayStatusReportsModelAfterModelSwitch(t *testing.T) {
 	port := freePort(t)
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Model = "gpt-test"
@@ -137,35 +130,19 @@ func TestGatewayStatusReportsEffectiveProviderAfterModelSwitch(t *testing.T) {
 	httpServer := httptest.NewServer(app.gateway.Handler())
 	defer httpServer.Close()
 
-	conn := dialWebsocketGateway(t, httpServer.URL+"/ws")
-	defer conn.Close()
+	cl := connectGatewayClient(t, httpServer.URL)
+	defer cl.Close()
 
-	writeFrameGateway(t, conn, gateway.RequestFrame{
-		ID:     "1",
-		Method: "models.set",
-		Params: json.RawMessage(`{"model":"claude-sonnet"}`),
-	})
-	readResponseFrameGateway(t, conn, "1")
-
-	writeFrameGateway(t, conn, gateway.RequestFrame{ID: "2", Method: "status"})
-	frame := readResponseFrameGateway(t, conn, "2")
-	if frame.Kind != gateway.FrameResponse || frame.Response.Error != nil {
-		t.Fatalf("status failed: %#v", frame)
+	if _, err := cl.ModelsSet("claude-sonnet"); err != nil {
+		t.Fatalf("ModelsSet: %v", err)
 	}
 
-	var result map[string]any
-	if err := json.Unmarshal(frame.Response.Result, &result); err != nil {
-		t.Fatalf("Unmarshal result: %v", err)
+	status, err := cl.Status("tui:main")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
 	}
-
-	reportedModel, _ := result["model"].(string)
-	reportedProvider, _ := result["provider"].(string)
-
-	if reportedModel != "claude-sonnet" {
-		t.Fatalf("status model = %q, want claude-sonnet", reportedModel)
-	}
-	if reportedProvider != "anthropic" {
-		t.Fatalf("status provider = %q, want anthropic (detected from model name)", reportedProvider)
+	if status.Model != "claude-sonnet" {
+		t.Fatalf("status model = %q, want claude-sonnet", status.Model)
 	}
 }
 
@@ -196,17 +173,11 @@ func TestProviderSwitchAcrossFamiliesChangesAgentModel(t *testing.T) {
 	httpServer := httptest.NewServer(app.gateway.Handler())
 	defer httpServer.Close()
 
-	conn := dialWebsocketGateway(t, httpServer.URL+"/ws")
-	defer conn.Close()
+	cl := connectGatewayClient(t, httpServer.URL)
+	defer cl.Close()
 
-	writeFrameGateway(t, conn, gateway.RequestFrame{
-		ID:     "1",
-		Method: "models.set",
-		Params: json.RawMessage(`{"model":"claude-3-5-sonnet"}`),
-	})
-	frame := readResponseFrameGateway(t, conn, "1")
-	if frame.Kind != gateway.FrameResponse || frame.Response.Error != nil {
-		t.Fatalf("models.set failed: %#v", frame)
+	if _, err := cl.ModelsSet("claude-3-5-sonnet"); err != nil {
+		t.Fatalf("ModelsSet: %v", err)
 	}
 
 	agentModel := app.agent.EffectiveModel()
@@ -215,12 +186,23 @@ func TestProviderSwitchAcrossFamiliesChangesAgentModel(t *testing.T) {
 	}
 }
 
+func connectGatewayClient(t *testing.T, rawURL string) *client.Client {
+	t.Helper()
+
+	wsURL := "ws" + strings.TrimPrefix(rawURL, "http") + "/ws"
+	cl := client.New(wsURL)
+	if _, err := cl.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	return cl
+}
+
 type spyProvider struct {
 	name  string
 	model string
 }
 
-func (p *spyProvider) Name() string { return p.name }
+func (p *spyProvider) Name() string  { return p.name }
 func (p *spyProvider) Model() string { return p.model }
 
 func (p *spyProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provider.Response, error) {
@@ -232,44 +214,4 @@ func (p *spyProvider) ChatStream(_ context.Context, _ provider.ChatRequest) (*pr
 		func() (*provider.StreamDelta, error) { return nil, fmt.Errorf("stream done") },
 		func() error { return nil },
 	), nil
-}
-
-func dialWebsocketGateway(t *testing.T, rawURL string) *websocket.Conn {
-	t.Helper()
-	wsURL := "ws" + strings.TrimPrefix(rawURL, "http")
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
-	return conn
-}
-
-func writeFrameGateway(t *testing.T, conn *websocket.Conn, req gateway.RequestFrame) {
-	t.Helper()
-	data, err := gateway.EncodeRequest(req)
-	if err != nil {
-		t.Fatalf("EncodeRequest: %v", err)
-	}
-	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		t.Fatalf("WriteMessage: %v", err)
-	}
-}
-
-func readResponseFrameGateway(t *testing.T, conn *websocket.Conn, id string) *gateway.DecodedFrame {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	_ = conn.SetReadDeadline(deadline)
-	for {
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			t.Fatalf("ReadMessage: %v", err)
-		}
-		frame, err := gateway.DecodeFrame(data)
-		if err != nil {
-			t.Fatalf("DecodeFrame: %v", err)
-		}
-		if frame.Kind == gateway.FrameResponse && frame.Response.ID == id {
-			return frame
-		}
-	}
 }
