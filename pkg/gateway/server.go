@@ -292,13 +292,16 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			)
 			if err == nil && summary.ProviderID != "" {
 				payload["persistedUsage"] = map[string]any{
-					"providerId":    summary.ProviderID,
-					"modelName":     summary.ModelName,
-					"sessionTokens": summary.SessionTokens,
-					"todayTokens":   summary.TodayTokens,
-					"weeklyTokens":  summary.WeeklyTokens,
-					"budgetStatus":  summary.BudgetStatus,
-					"warningLevel":  summary.WarningLevel,
+					"providerId":      summary.ProviderID,
+					"modelName":       summary.ModelName,
+					"sessionTokens":   summary.SessionTokens,
+					"todayTokens":     summary.TodayTokens,
+					"weeklyTokens":    summary.WeeklyTokens,
+					"sessionRequests": summary.SessionRequests,
+					"todayRequests":   summary.TodayRequests,
+					"weeklyRequests":  summary.WeeklyRequests,
+					"budgetStatus":    summary.BudgetStatus,
+					"warningLevel":    summary.WarningLevel,
 				}
 				if summary.Quota != nil {
 					payload["persistedUsage"].(map[string]any)["quota"] = map[string]any{

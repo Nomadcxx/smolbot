@@ -62,22 +62,37 @@ func TestContextSectionRendersUsageAndCompression(t *testing.T) {
 	}
 }
 
-func TestUsageSectionRendersPersistedSummary(t *testing.T) {
+func TestUsageSectionRendersObservedAndLiveQuotaBlocks(t *testing.T) {
 	section := UsageSection{
 		summary: &client.UsageSummary{
-			ProviderID:    "ollama",
-			ModelName:     "llama3.2",
-			SessionTokens: 50,
-			TodayTokens:   50,
-			WeeklyTokens:  90,
-			BudgetStatus:  "warning",
-			WarningLevel:  "medium",
+			ProviderID:      "ollama",
+			ModelName:       "llama3.2",
+			SessionTokens:   50,
+			TodayTokens:     50,
+			WeeklyTokens:    90,
+			SessionRequests: 2,
+			TodayRequests:   2,
+			WeeklyRequests:  3,
+			Quota: &client.QuotaSummary{
+				ProviderID:         "ollama",
+				PlanName:           "pro",
+				SessionUsedPercent: 2,
+				WeeklyUsedPercent:  26.5,
+				State:              "live",
+				Source:             "ollama_settings_html",
+			},
 		},
 	}
 
 	got := plain(section.Render(28, 0, theme.Current()))
-	if !strings.Contains(got, "ollama / llama3.2") || !strings.Contains(got, "session 50") || !strings.Contains(got, "week 90") || !strings.Contains(got, "warning medium") {
+	if !strings.Contains(got, "Observed") || !strings.Contains(got, "session 50") || !strings.Contains(got, "today 50") || !strings.Contains(got, "week 90") {
 		t.Fatalf("unexpected usage render: %q", got)
+	}
+	if !strings.Contains(got, "reqs 2/2/3") {
+		t.Fatalf("expected request counts in observed block, got %q", got)
+	}
+	if !strings.Contains(got, "Quota") || !strings.Contains(got, "pro") || !strings.Contains(got, "2.0%") || !strings.Contains(got, "26.5%") {
+		t.Fatalf("expected live quota block, got %q", got)
 	}
 }
 
@@ -89,6 +104,11 @@ func TestUsageSectionAvoidsDuplicatingQualifiedProviderModel(t *testing.T) {
 			SessionTokens: 50,
 			TodayTokens:   50,
 			WeeklyTokens:  90,
+			Quota: &client.QuotaSummary{
+				ProviderID: "ollama",
+				State:      "expired",
+				Source:     "ollama_settings_html",
+			},
 		},
 	}
 
@@ -99,6 +119,53 @@ func TestUsageSectionAvoidsDuplicatingQualifiedProviderModel(t *testing.T) {
 	if strings.Contains(got, "ollama / ollama/llama3.2") {
 		t.Fatalf("expected provider label to avoid duplication, got %q", got)
 	}
+}
+
+func TestUsageSectionRendersQuotaUnavailableAndExpiredStates(t *testing.T) {
+	t.Run("unavailable", func(t *testing.T) {
+		section := UsageSection{
+			summary: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				Quota: &client.QuotaSummary{
+					ProviderID: "ollama",
+					State:      "unavailable",
+					Source:     "ollama_settings_html",
+				},
+			},
+		}
+
+		got := plain(section.Render(28, 0, theme.Current()))
+		if !strings.Contains(got, "Quota") || !strings.Contains(got, "unavailable") {
+			t.Fatalf("expected unavailable quota line, got %q", got)
+		}
+	})
+
+	t.Run("expired", func(t *testing.T) {
+		section := UsageSection{
+			summary: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				Quota: &client.QuotaSummary{
+					ProviderID: "ollama",
+					PlanName:   "pro",
+					State:      "expired",
+					Source:     "ollama_settings_html",
+				},
+			},
+		}
+
+		got := plain(section.Render(28, 0, theme.Current()))
+		if !strings.Contains(got, "Quota") || !strings.Contains(got, "expired") {
+			t.Fatalf("expected expired quota line, got %q", got)
+		}
+	})
 }
 
 func TestUsageSectionRendersEmptyState(t *testing.T) {

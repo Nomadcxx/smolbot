@@ -1,5 +1,7 @@
 package client
 
+import "time"
+
 // UsageInfo contains token usage information
 type UsageInfo struct {
 	PromptTokens     int `json:"promptTokens"`
@@ -15,14 +17,38 @@ type ChannelStatus struct {
 }
 
 type UsageSummary struct {
-	ProviderID    string `json:"providerId"`
-	ModelName     string `json:"modelName"`
-	SessionTokens int    `json:"sessionTokens"`
-	TodayTokens   int    `json:"todayTokens"`
-	WeeklyTokens  int    `json:"weeklyTokens"`
-	EstimatedCost string `json:"estimatedCost,omitempty"`
-	BudgetStatus  string `json:"budgetStatus,omitempty"`
-	WarningLevel  string `json:"warningLevel,omitempty"`
+	ProviderID      string        `json:"providerId"`
+	ModelName       string        `json:"modelName"`
+	SessionTokens   int           `json:"sessionTokens"`
+	TodayTokens     int           `json:"todayTokens"`
+	WeeklyTokens    int           `json:"weeklyTokens"`
+	SessionRequests int           `json:"sessionRequests,omitempty"`
+	TodayRequests   int           `json:"todayRequests,omitempty"`
+	WeeklyRequests  int           `json:"weeklyRequests,omitempty"`
+	EstimatedCost   string        `json:"estimatedCost,omitempty"`
+	BudgetStatus    string        `json:"budgetStatus,omitempty"`
+	WarningLevel    string        `json:"warningLevel,omitempty"`
+	Quota           *QuotaSummary `json:"quota,omitempty"`
+}
+
+type QuotaSummary struct {
+	ProviderID           string    `json:"providerId"`
+	AccountName          string    `json:"accountName,omitempty"`
+	AccountEmail         string    `json:"accountEmail,omitempty"`
+	PlanName             string    `json:"planName,omitempty"`
+	SessionUsedPercent   float64   `json:"sessionUsedPercent,omitempty"`
+	SessionResetsAt      time.Time `json:"sessionResetsAt,omitempty"`
+	WeeklyUsedPercent    float64   `json:"weeklyUsedPercent,omitempty"`
+	WeeklyResetsAt       time.Time `json:"weeklyResetsAt,omitempty"`
+	NotifyUsageLimits    bool      `json:"notifyUsageLimits,omitempty"`
+	State                string    `json:"state,omitempty"`
+	Source               string    `json:"source,omitempty"`
+	FetchedAt            time.Time `json:"fetchedAt,omitempty"`
+	ExpiresAt            time.Time `json:"expiresAt,omitempty"`
+	IdentityState        string    `json:"identityState,omitempty"`
+	IdentitySource       string    `json:"identitySource,omitempty"`
+	IdentityAccountName  string    `json:"identityAccountName,omitempty"`
+	IdentityAccountEmail string    `json:"identityAccountEmail,omitempty"`
 }
 
 type UsageAlert struct {
