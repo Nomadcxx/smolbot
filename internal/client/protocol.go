@@ -126,9 +126,12 @@ type SessionInfo struct {
 }
 
 type ModelInfo struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Provider    string `json:"provider"`
+	Description string `json:"description,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Capability  string `json:"capability,omitempty"`
 }
 
 type HistoryMessage struct {

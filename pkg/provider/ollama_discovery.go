@@ -246,32 +246,7 @@ func anyToInt(value any) (int, bool) {
 	}
 }
 
-// ModelInfo represents a model for the TUI
-type ModelInfo struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-}
-
-// GetAvailableModels returns all available models for the current provider configuration
-func GetAvailableModels(cfg *config.Config) ([]ModelInfo, error) {
-	provider := cfg.Agents.Defaults.Provider
-
-	switch provider {
-	case "ollama":
-		return getOllamaModels(cfg)
-	default:
-		// For other providers, return just the current model
-		// Future: implement discovery for OpenRouter, etc.
-		return []ModelInfo{{
-			ID:       cfg.Agents.Defaults.Model,
-			Name:     cfg.Agents.Defaults.Model,
-			Provider: provider,
-		}}, nil
-	}
-}
-
-func getOllamaModels(cfg *config.Config) ([]ModelInfo, error) {
+func discoverOllamaModels(cfg *config.Config) ([]ModelInfo, error) {
 	baseURL := cfg.Providers["ollama"].APIBase
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
@@ -280,21 +255,33 @@ func getOllamaModels(cfg *config.Config) ([]ModelInfo, error) {
 	client := NewOllamaClient(baseURL)
 	ollamaModels, err := client.ListModels()
 	if err != nil {
-		// If Ollama is not available, return just the current model
-		return []ModelInfo{{
-			ID:       cfg.Agents.Defaults.Model,
-			Name:     cfg.Agents.Defaults.Model,
-			Provider: "ollama",
-		}}, nil
+		return nil, err
 	}
 
 	models := make([]ModelInfo, len(ollamaModels))
 	for i, m := range ollamaModels {
 		models[i] = ModelInfo{
-			ID:       m.Name,
-			Name:     m.Name,
-			Provider: "ollama",
+			ID:          m.Name,
+			Name:        m.Name,
+			Provider:    "ollama",
+			Description: ollamaModelDescription(m),
+			Source:      "ollama.live",
+			Capability:  "local",
 		}
 	}
 	return models, nil
+}
+
+func ollamaModelDescription(model OllamaModel) string {
+	parts := make([]string, 0, 3)
+	if family := strings.TrimSpace(model.Details.Family); family != "" {
+		parts = append(parts, family)
+	}
+	if size := strings.TrimSpace(model.Details.ParameterSize); size != "" {
+		parts = append(parts, size)
+	}
+	if quantization := strings.TrimSpace(model.Details.QuantizationLevel); quantization != "" {
+		parts = append(parts, quantization)
+	}
+	return strings.Join(parts, " • ")
 }

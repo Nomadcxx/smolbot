@@ -438,16 +438,8 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		if err != nil {
 			return nil, fmt.Errorf("get available models: %w", err)
 		}
-		modelList := make([]map[string]any, len(models))
-		for i, m := range models {
-			modelList[i] = map[string]any{
-				"id":       m.ID,
-				"name":     m.Name,
-				"provider": m.Provider,
-			}
-		}
 		return map[string]any{
-			"models":  modelList,
+			"models":  models,
 			"current": s.currentModel(),
 		}, nil
 	case "compact":

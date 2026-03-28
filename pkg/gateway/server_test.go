@@ -521,6 +521,72 @@ func TestModelSetUpdatesGatewayConfigAndStatus(t *testing.T) {
 	}
 }
 
+func TestModelsListReturnsRichDiscoveryPayload(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-5"
+	cfg.Agents.Defaults.Provider = "openai"
+	cfg.Providers = map[string]config.ProviderConfig{
+		"openai":     {APIKey: "sk-openai"},
+		"openrouter": {APIKey: "sk-openrouter", APIBase: "https://openrouter.ai/api/v1"},
+	}
+
+	server := NewServer(ServerDeps{
+		Config:  cfg,
+		Version: "test",
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{ID: "models", Method: "models.list"})
+	frame := readResponseFrame(t, conn, "models")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected models.list error %#v", frame.Response.Error)
+	}
+
+	var payload struct {
+		Models  []provider.ModelInfo `json:"models"`
+		Current string               `json:"current"`
+	}
+	if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
+		t.Fatalf("unmarshal models.list payload: %v", err)
+	}
+	if payload.Current != "gpt-5" {
+		t.Fatalf("current = %q, want gpt-5", payload.Current)
+	}
+	if len(payload.Models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(payload.Models))
+	}
+
+	foundOpenRouter := false
+	for _, model := range payload.Models {
+		if model.Provider != "openrouter" {
+			continue
+		}
+		foundOpenRouter = true
+		if model.ID != "openrouter/gpt-5" {
+			t.Fatalf("openrouter id = %q, want openrouter/gpt-5", model.ID)
+		}
+		if model.Name != "OpenRouter" {
+			t.Fatalf("openrouter name = %q, want OpenRouter", model.Name)
+		}
+		if model.Source != "config" {
+			t.Fatalf("openrouter source = %q, want config", model.Source)
+		}
+		if model.Capability != "openai-compatible" {
+			t.Fatalf("openrouter capability = %q, want openai-compatible", model.Capability)
+		}
+		if model.Description == "" {
+			t.Fatal("expected openrouter description to be populated")
+		}
+	}
+	if !foundOpenRouter {
+		t.Fatalf("expected openrouter model entry, got %#v", payload.Models)
+	}
+}
+
 func TestModelSetCallbackFailureDoesNotMutateConfig(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Agents.Defaults.Model = "gpt-test"
