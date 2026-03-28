@@ -35,7 +35,8 @@ const (
 	providerOllama    = "ollama"
 	providerOpenAI    = "openai"
 	providerAnthropic = "anthropic"
-	providerAzure     = "azure"
+	providerAzure     = "azure_openai"
+	providerMiniMax   = "minimax"
 	providerCustom    = "custom"
 )
 
@@ -44,6 +45,7 @@ var providers = []string{
 	providerOpenAI,
 	providerAnthropic,
 	providerAzure,
+	providerMiniMax,
 	providerCustom,
 }
 

@@ -46,8 +46,16 @@ func NewRegistryWithDefaults(cfg *config.Config) *Registry {
 	}
 	for _, name := range openAICompatible {
 		providerName := name
+		defaultBase := ""
+		if providerName == "minimax" {
+			defaultBase = "https://api.minimax.io/v1"
+		}
 		r.RegisterFactory(providerName, func(pc config.ProviderConfig) Provider {
-			return NewOpenAIProvider(providerName, pc.APIKey, pc.APIBase, pc.ExtraHeaders)
+			apiBase := pc.APIBase
+			if apiBase == "" {
+				apiBase = defaultBase
+			}
+			return NewOpenAIProvider(providerName, pc.APIKey, apiBase, pc.ExtraHeaders)
 		})
 	}
 
