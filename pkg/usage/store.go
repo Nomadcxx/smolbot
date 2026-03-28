@@ -99,6 +99,27 @@ CREATE TABLE IF NOT EXISTS historical_usage_samples (
 );
 
 CREATE INDEX IF NOT EXISTS idx_historical_usage_samples_provider_sampled ON historical_usage_samples(provider_id, sampled_at, id);
+
+CREATE TABLE IF NOT EXISTS quota_summaries (
+	provider_id TEXT PRIMARY KEY,
+	account_name TEXT NOT NULL DEFAULT '',
+	account_email TEXT NOT NULL DEFAULT '',
+	plan_name TEXT NOT NULL DEFAULT '',
+	session_used_percent REAL NOT NULL DEFAULT 0,
+	session_resets_at DATETIME,
+	weekly_used_percent REAL NOT NULL DEFAULT 0,
+	weekly_resets_at DATETIME,
+	notify_usage_limits INTEGER NOT NULL DEFAULT 0,
+	state TEXT NOT NULL DEFAULT 'unavailable',
+	source TEXT NOT NULL DEFAULT '',
+	fetched_at DATETIME NOT NULL,
+	expires_at DATETIME NOT NULL,
+	identity_state TEXT NOT NULL DEFAULT '',
+	identity_source TEXT NOT NULL DEFAULT '',
+	identity_account_name TEXT NOT NULL DEFAULT '',
+	identity_account_email TEXT NOT NULL DEFAULT '',
+	updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 `
 
 type Store struct {

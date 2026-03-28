@@ -30,9 +30,15 @@ func (p *Paths) ConfigFile() string { return filepath.Join(p.root, "config.json"
 func (p *Paths) Workspace() string  { return p.workspace }
 func (p *Paths) SessionsDB() string { return filepath.Join(p.root, "sessions.db") }
 func (p *Paths) UsageDB() string    { return filepath.Join(p.root, "usage.db") }
-func (p *Paths) JobsFile() string   { return filepath.Join(p.root, "jobs.json") }
-func (p *Paths) MemoryDir() string  { return filepath.Join(p.workspace, "memory") }
-func (p *Paths) SkillsDir() string  { return filepath.Join(p.root, "skills") }
+func (p *Paths) OllamaCookieJar() string {
+	return filepath.Join(p.root, "ollama_cookies.json")
+}
+func (p *Paths) OllamaQuotaCache() string {
+	return filepath.Join(p.root, "ollama_quota.db")
+}
+func (p *Paths) JobsFile() string  { return filepath.Join(p.root, "jobs.json") }
+func (p *Paths) MemoryDir() string { return filepath.Join(p.workspace, "memory") }
+func (p *Paths) SkillsDir() string { return filepath.Join(p.root, "skills") }
 func (p *Paths) ChatHistory() string {
 	return filepath.Join(p.root, "chat_history")
 }

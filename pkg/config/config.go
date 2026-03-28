@@ -13,6 +13,7 @@ type Config struct {
 	Agents    AgentsConfig              `json:"agents"`
 	Providers map[string]ProviderConfig `json:"providers"`
 	Channels  ChannelsConfig            `json:"channels"`
+	Quota     QuotaConfig               `json:"quota"`
 	Gateway   GatewayConfig             `json:"gateway"`
 	Tools     ToolsConfig               `json:"tools"`
 }
@@ -88,6 +89,11 @@ type GatewayConfig struct {
 	Heartbeat HeartbeatConfig `json:"heartbeat"`
 }
 
+type QuotaConfig struct {
+	RefreshIntervalMinutes        int  `json:"refreshIntervalMinutes"`
+	BrowserCookieDiscoveryEnabled bool `json:"browserCookieDiscoveryEnabled"`
+}
+
 type HeartbeatConfig struct {
 	Enabled  bool   `json:"enabled"`
 	Interval int    `json:"interval"`
@@ -157,6 +163,10 @@ func DefaultConfig() Config {
 			},
 			Telegram: TelegramChannelConfig{},
 			Discord:  DiscordChannelConfig{},
+		},
+		Quota: QuotaConfig{
+			RefreshIntervalMinutes:        60,
+			BrowserCookieDiscoveryEnabled: true,
 		},
 		Gateway: GatewayConfig{
 			Host: "127.0.0.1",

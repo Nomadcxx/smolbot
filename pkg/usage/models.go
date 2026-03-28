@@ -52,6 +52,53 @@ type ProviderSummary struct {
 	WarningLevel    string
 }
 
+type QuotaState string
+
+const (
+	QuotaStateLive        QuotaState = "live"
+	QuotaStateStale       QuotaState = "stale"
+	QuotaStateExpired     QuotaState = "expired"
+	QuotaStateUnavailable QuotaState = "unavailable"
+)
+
+type QuotaSource string
+
+const (
+	QuotaSourceUnknown            QuotaSource = ""
+	QuotaSourceOllamaAPIMe        QuotaSource = "ollama_api_me"
+	QuotaSourceOllamaSettingsHTML QuotaSource = "ollama_settings_html"
+)
+
+type QuotaIdentityState string
+
+const (
+	QuotaIdentityStateUnknown            QuotaIdentityState = ""
+	QuotaIdentityStateAuthenticated      QuotaIdentityState = "authenticated"
+	QuotaIdentityStateAuthenticatedEmpty QuotaIdentityState = "authenticated_empty"
+	QuotaIdentityStateUnauthenticated    QuotaIdentityState = "unauthenticated"
+	QuotaIdentityStateError              QuotaIdentityState = "error"
+)
+
+type QuotaSummary struct {
+	ProviderID           string
+	AccountName          string
+	AccountEmail         string
+	PlanName             string
+	SessionUsedPercent   float64
+	SessionResetsAt      *time.Time
+	WeeklyUsedPercent    float64
+	WeeklyResetsAt       *time.Time
+	NotifyUsageLimits    bool
+	State                QuotaState
+	Source               QuotaSource
+	FetchedAt            time.Time
+	ExpiresAt            time.Time
+	IdentityState        QuotaIdentityState
+	IdentitySource       QuotaSource
+	IdentityAccountName  string
+	IdentityAccountEmail string
+}
+
 type Budget struct {
 	ID              string
 	Name            string

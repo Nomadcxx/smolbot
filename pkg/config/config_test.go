@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"testing"
 )
 
@@ -52,6 +53,10 @@ func TestConfigRoundTrip(t *testing.T) {
 		"gateway": {
 			"host": "127.0.0.1",
 			"port": 18790
+		},
+		"quota": {
+			"refreshIntervalMinutes": 15,
+			"browserCookieDiscoveryEnabled": false
 		},
 		"tools": {
 			"restrictToWorkspace": true,
@@ -104,6 +109,15 @@ func TestConfigRoundTrip(t *testing.T) {
 	if got := cfg.Channels.Discord.AllowedChannelIDs; len(got) != 1 || got[0] != "987654321" {
 		t.Errorf("discord allowedChannelIDs = %#v", got)
 	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota"); !got.IsValid() {
+		t.Fatal("quota config field is missing")
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("RefreshIntervalMinutes"); !got.IsValid() || got.Int() != 15 {
+		t.Fatalf("quota refreshIntervalMinutes = %v, want 15", got)
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("BrowserCookieDiscoveryEnabled"); !got.IsValid() || got.Bool() {
+		t.Fatalf("quota browserCookieDiscoveryEnabled = %v, want false", got)
+	}
 	if !cfg.Tools.RestrictToWorkspace {
 		t.Error("restrictToWorkspace should be true")
 	}
@@ -113,7 +127,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 }
 
-func TestConfigDefaults(t *testing.T) {
+func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Agents.Defaults.MaxTokens != 8192 {
 		t.Errorf("default maxTokens = %d, want 8192", cfg.Agents.Defaults.MaxTokens)
@@ -132,6 +146,15 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if cfg.Channels.Signal.CLIPath == "" || cfg.Channels.Signal.DataDir == "" {
 		t.Fatalf("signal defaults = %+v, want non-empty paths", cfg.Channels.Signal)
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota"); !got.IsValid() {
+		t.Fatal("quota defaults are missing")
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("RefreshIntervalMinutes"); !got.IsValid() || got.Int() != 60 {
+		t.Fatalf("quota refreshIntervalMinutes = %v, want 60", got)
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("BrowserCookieDiscoveryEnabled"); !got.IsValid() || !got.Bool() {
+		t.Fatalf("quota browserCookieDiscoveryEnabled = %v, want true", got)
 	}
 	if cfg.Channels.WhatsApp.DeviceName == "" || cfg.Channels.WhatsApp.StorePath == "" {
 		t.Fatalf("whatsapp defaults = %+v, want non-empty settings", cfg.Channels.WhatsApp)
@@ -232,6 +255,16 @@ func TestPaths(t *testing.T) {
 	}
 	if p.UsageDB() != "/home/test/.smolbot/usage.db" {
 		t.Errorf("UsageDB = %q", p.UsageDB())
+	}
+	if got := reflect.ValueOf(p).MethodByName("OllamaCookieJar"); !got.IsValid() {
+		t.Fatal("OllamaCookieJar path helper is missing")
+	} else if got.Call(nil)[0].String() != "/home/test/.smolbot/ollama_cookies.json" {
+		t.Errorf("OllamaCookieJar = %q", got.Call(nil)[0].String())
+	}
+	if got := reflect.ValueOf(p).MethodByName("OllamaQuotaCache"); !got.IsValid() {
+		t.Fatal("OllamaQuotaCache path helper is missing")
+	} else if got.Call(nil)[0].String() != "/home/test/.smolbot/ollama_quota.db" {
+		t.Errorf("OllamaQuotaCache = %q", got.Call(nil)[0].String())
 	}
 	if p.JobsFile() != "/home/test/.smolbot/jobs.json" {
 		t.Errorf("JobsFile = %q", p.JobsFile())

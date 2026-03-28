@@ -23,6 +23,7 @@ func TestNewStoreCreatesPhaseOneTables(t *testing.T) {
 		"budgets",
 		"budget_alerts",
 		"historical_usage_samples",
+		"quota_summaries",
 	} {
 		if !tableExists(t, store, table) {
 			t.Fatalf("expected table %q to exist", table)
@@ -43,10 +44,124 @@ func TestNewStoreCreatesPhaseOneTablesFileBacked(t *testing.T) {
 		"budgets",
 		"budget_alerts",
 		"historical_usage_samples",
+		"quota_summaries",
 	} {
 		if !tableExists(t, store, table) {
 			t.Fatalf("expected table %q to exist", table)
 		}
+	}
+}
+
+func TestQuotaSnapshotSaveAndLoadLatest(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	sessionResetsAt := time.Date(2026, 3, 28, 0, 0, 0, 0, time.UTC)
+	weeklyResetsAt := time.Date(2026, 3, 30, 0, 0, 0, 0, time.UTC)
+	fetchedAt := time.Date(2026, 3, 27, 23, 0, 0, 0, time.UTC)
+	expiresAt := fetchedAt.Add(time.Hour)
+
+	want := QuotaSummary{
+		ProviderID:          "ollama",
+		AccountName:         "nomadxxx",
+		AccountEmail:        "lukegiles32@protonmail.com",
+		PlanName:            "pro",
+		SessionUsedPercent:  2,
+		SessionResetsAt:     &sessionResetsAt,
+		WeeklyUsedPercent:   26.5,
+		WeeklyResetsAt:      &weeklyResetsAt,
+		NotifyUsageLimits:   true,
+		State:               QuotaStateLive,
+		Source:              QuotaSourceOllamaSettingsHTML,
+		FetchedAt:           fetchedAt,
+		ExpiresAt:           expiresAt,
+		IdentityState:       QuotaIdentityStateAuthenticated,
+		IdentitySource:      QuotaSourceOllamaAPIMe,
+		IdentityAccountName: "nomadxxx",
+	}
+
+	if err := store.SaveQuotaSummary(context.Background(), want); err != nil {
+		t.Fatalf("SaveQuotaSummary: %v", err)
+	}
+
+	got, err := store.LatestQuotaSummary("ollama")
+	if err != nil {
+		t.Fatalf("LatestQuotaSummary: %v", err)
+	}
+
+	if got.ProviderID != want.ProviderID {
+		t.Fatalf("ProviderID = %q, want %q", got.ProviderID, want.ProviderID)
+	}
+	if got.AccountName != want.AccountName || got.AccountEmail != want.AccountEmail || got.PlanName != want.PlanName {
+		t.Fatalf("account fields = %+v, want %+v", got, want)
+	}
+	if got.SessionUsedPercent != want.SessionUsedPercent || got.WeeklyUsedPercent != want.WeeklyUsedPercent {
+		t.Fatalf("quota percents = %+v, want %+v", got, want)
+	}
+	if got.SessionResetsAt == nil || !got.SessionResetsAt.Equal(sessionResetsAt) {
+		t.Fatalf("SessionResetsAt = %v, want %v", got.SessionResetsAt, sessionResetsAt)
+	}
+	if got.WeeklyResetsAt == nil || !got.WeeklyResetsAt.Equal(weeklyResetsAt) {
+		t.Fatalf("WeeklyResetsAt = %v, want %v", got.WeeklyResetsAt, weeklyResetsAt)
+	}
+	if got.State != want.State || got.Source != want.Source {
+		t.Fatalf("state/source = %q/%q, want %q/%q", got.State, got.Source, want.State, want.Source)
+	}
+	if !got.FetchedAt.Equal(fetchedAt) || !got.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("freshness = %v/%v, want %v/%v", got.FetchedAt, got.ExpiresAt, fetchedAt, expiresAt)
+	}
+	if got.IdentityState != want.IdentityState || got.IdentitySource != want.IdentitySource || got.IdentityAccountName != want.IdentityAccountName {
+		t.Fatalf("identity metadata = %+v, want %+v", got, want)
+	}
+}
+
+func TestQuotaCachePersistsAcrossRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.db")
+
+	store, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	fetchedAt := time.Date(2026, 3, 28, 1, 0, 0, 0, time.UTC)
+	expiresAt := fetchedAt.Add(time.Hour)
+	if err := store.SaveQuotaSummary(context.Background(), QuotaSummary{
+		ProviderID:         "ollama",
+		PlanName:           "pro",
+		SessionUsedPercent: 12.5,
+		WeeklyUsedPercent:  30,
+		State:              QuotaStateStale,
+		Source:             QuotaSourceOllamaSettingsHTML,
+		FetchedAt:          fetchedAt,
+		ExpiresAt:          expiresAt,
+	}); err != nil {
+		t.Fatalf("SaveQuotaSummary: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reopened, err := NewStore(path)
+	if err != nil {
+		t.Fatalf("NewStore reopen: %v", err)
+	}
+	defer reopened.Close()
+
+	got, err := reopened.LatestQuotaSummary("ollama")
+	if err != nil {
+		t.Fatalf("LatestQuotaSummary: %v", err)
+	}
+	if got.PlanName != "pro" {
+		t.Fatalf("PlanName = %q, want pro", got.PlanName)
+	}
+	if got.State != QuotaStateStale {
+		t.Fatalf("State = %q, want %q", got.State, QuotaStateStale)
+	}
+	if !got.FetchedAt.Equal(fetchedAt) || !got.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("freshness = %v/%v, want %v/%v", got.FetchedAt, got.ExpiresAt, fetchedAt, expiresAt)
 	}
 }
 
