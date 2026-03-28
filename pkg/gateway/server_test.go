@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -484,10 +485,14 @@ func TestModelSetUpdatesGatewayConfigAndStatus(t *testing.T) {
 		t.Fatalf("unexpected set error %#v", frame.Response.Error)
 	}
 	var payload struct {
+		Current  string `json:"current"`
 		Previous string `json:"previous"`
 	}
 	if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
 		t.Fatalf("unmarshal models.set payload: %v", err)
+	}
+	if payload.Current != "claude-test" {
+		t.Fatalf("expected current model claude-test, got %q", payload.Current)
 	}
 	if payload.Previous != "gpt-test" {
 		t.Fatalf("expected previous model gpt-test, got %q", payload.Previous)
@@ -513,6 +518,75 @@ func TestModelSetUpdatesGatewayConfigAndStatus(t *testing.T) {
 	}
 	if !strings.Contains(string(frame.Response.Result), `"model":"claude-test"`) {
 		t.Fatalf("expected status to report updated model, got %s", frame.Response.Result)
+	}
+}
+
+func TestModelSetCallbackFailureDoesNotMutateConfig(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+
+	server := NewServer(ServerDeps{
+		Config:  cfg,
+		Version: "test",
+		SetModelCallback: func(string) (string, error) {
+			return "", errors.New("switch failed")
+		},
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "1",
+		Method: "models.set",
+		Params: json.RawMessage(`{"model":"claude-test"}`),
+	})
+	frame := readResponseFrame(t, conn, "1")
+	if frame.Response.Error == nil {
+		t.Fatalf("expected models.set error, got %#v", frame)
+	}
+	if cfg.Agents.Defaults.Model != "gpt-test" {
+		t.Fatalf("model mutated to %q on callback failure, want gpt-test", cfg.Agents.Defaults.Model)
+	}
+}
+
+func TestModelSetTrimsWhitespaceBeforeCallbackAndPersistence(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+
+	var callbackModel string
+	server := NewServer(ServerDeps{
+		Config:  cfg,
+		Version: "test",
+		SetModelCallback: func(model string) (string, error) {
+			callbackModel = model
+			return model, nil
+		},
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "1",
+		Method: "models.set",
+		Params: json.RawMessage(`{"model":"  claude-test  "}`),
+	})
+	frame := readResponseFrame(t, conn, "1")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected set error %#v", frame.Response.Error)
+	}
+	if callbackModel != "claude-test" {
+		t.Fatalf("callback model = %q, want trimmed claude-test", callbackModel)
+	}
+	if cfg.Agents.Defaults.Model != "claude-test" {
+		t.Fatalf("persisted model = %q, want trimmed claude-test", cfg.Agents.Defaults.Model)
 	}
 }
 

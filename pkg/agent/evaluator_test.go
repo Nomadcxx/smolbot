@@ -53,6 +53,28 @@ func TestEvaluator(t *testing.T) {
 			t.Fatalf("unexpected decision prompt content %q", got)
 		}
 	})
+
+	t.Run("SetModel propagates to provider decision provider", func(t *testing.T) {
+		fakeProvider := &fakeDecisionChatProvider{
+			resp: &provider.Response{Content: "deliver=true"},
+		}
+		decisionProvider := &ProviderDecisionProvider{
+			Provider:     fakeProvider,
+			Model:        "gpt-test",
+			SystemPrompt: "Decide carefully.",
+		}
+		evaluator := NewEvaluator(decisionProvider)
+		evaluator.SetModel("claude-test")
+		if !evaluator.ShouldDeliver(context.Background(), "background output") {
+			t.Fatal("expected deliver=true to approve delivery")
+		}
+		if len(fakeProvider.requests) != 1 {
+			t.Fatalf("expected one provider request, got %d", len(fakeProvider.requests))
+		}
+		if got := fakeProvider.requests[0].Model; got != "claude-test" {
+			t.Fatalf("request model = %q, want claude-test after SetModel", got)
+		}
+	})
 }
 
 type fakeDecisionProvider struct {

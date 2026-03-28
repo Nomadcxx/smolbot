@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -93,10 +94,11 @@ func (r *Registry) CurrentModel() string {
 }
 
 func (r *Registry) resolveProvider(model string) resolvedProvider {
-	name := r.cfg.Agents.Defaults.Provider
-	if name == "" {
-		name = detectProviderName(model, r.cfg.Providers)
+	fallback := ""
+	if r.cfg != nil {
+		fallback = r.cfg.Agents.Defaults.Provider
 	}
+	name := detectProviderName(model, fallback, r.cfg.Providers, r.factories)
 
 	providerConfig, hasConfig := r.cfg.Providers[name]
 	factoryKey := name
@@ -139,24 +141,45 @@ type resolvedProvider struct {
 	providerConfig config.ProviderConfig
 }
 
-func detectProviderName(model string, providers map[string]config.ProviderConfig) string {
-	lowerModel := strings.ToLower(model)
+func detectProviderName(model, fallback string, providers map[string]config.ProviderConfig, factories map[string]ProviderFactory) string {
+	lowerModel := strings.ToLower(strings.TrimSpace(model))
 
 	if strings.HasPrefix(lowerModel, "claude-") || strings.HasPrefix(lowerModel, "anthropic/") {
 		return "anthropic"
+	}
+	if strings.HasPrefix(lowerModel, "gpt-") || strings.HasPrefix(lowerModel, "openai/") {
+		return "openai"
 	}
 	if strings.HasPrefix(lowerModel, "azure/") {
 		return "azure_openai"
 	}
 
-	for name := range providers {
-		lowerName := strings.ToLower(name)
+	names := make([]string, 0, len(factories))
+	for name := range factories {
 		if name == "anthropic" || name == "azure_openai" || name == "openai" {
 			continue
 		}
+		names = append(names, name)
+	}
+	for name := range providers {
+		if name == "anthropic" || name == "azure_openai" || name == "openai" {
+			continue
+		}
+		if _, ok := factories[name]; ok {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		lowerName := strings.ToLower(name)
 		if strings.HasPrefix(lowerModel, lowerName+"/") || strings.Contains(lowerModel, lowerName) {
 			return name
 		}
+	}
+
+	if strings.TrimSpace(fallback) != "" {
+		return fallback
 	}
 
 	return "openai"

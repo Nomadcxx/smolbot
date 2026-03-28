@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -16,6 +18,7 @@ import (
 	"github.com/Nomadcxx/smolbot/internal/theme"
 	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 	cfgpkg "github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/gorilla/websocket"
 )
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -36,6 +39,7 @@ type fakeClient struct {
 	resetErr   error
 	compactErr error
 	modelSets  []string
+	modelSetResult string
 }
 
 type abortCall struct {
@@ -72,7 +76,8 @@ func (f *fakeClient) ModelsSet(id string) (string, error) {
 	if f.modelErr != nil {
 		return "", f.modelErr
 	}
-	if f.current != "" {
+	if f.modelSetResult != "" {
+		f.current = f.modelSetResult
 		return f.current, nil
 	}
 	f.current = id
@@ -1304,7 +1309,7 @@ func TestSyncStatusUsesCurrentSession(t *testing.T) {
 
 func TestModelSetUsesNormalizedGatewayCurrent(t *testing.T) {
 	model := New(app.Config{})
-	fake := &fakeClient{current: "ollama/qwen3:8b"}
+	fake := &fakeClient{modelSetResult: "ollama/qwen3:8b"}
 	model.client = fake
 
 	updated, cmd := model.handleSlashCommand("/model ollama_chat/qwen3:8b")
@@ -1318,6 +1323,95 @@ func TestModelSetUsesNormalizedGatewayCurrent(t *testing.T) {
 	}
 	if len(fake.modelSets) != 1 || fake.modelSets[0] != "ollama_chat/qwen3:8b" {
 		t.Fatalf("expected gateway client to receive requested model, got %#v", fake.modelSets)
+	}
+}
+
+func TestModelSlashCommandUsesRealClientModelsSetContract(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	received := make(chan json.RawMessage, 1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("Upgrade: %v", err)
+		}
+		defer conn.Close()
+
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("Read hello: %v", err)
+		}
+		var hello client.Request
+		if err := json.Unmarshal(raw, &hello); err != nil {
+			t.Fatalf("Unmarshal hello: %v", err)
+		}
+		if err := conn.WriteJSON(client.Response{
+			Type:    client.FrameRes,
+			ID:      hello.ID,
+			OK:      true,
+			Payload: json.RawMessage(`{"server":"smolbot","version":"test","protocol":1,"methods":["models.set"],"events":[]}`),
+		}); err != nil {
+			t.Fatalf("Write hello response: %v", err)
+		}
+
+		_, raw, err = conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("Read models.set: %v", err)
+		}
+		var wire struct {
+			ID     string          `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatalf("Unmarshal models.set: %v", err)
+		}
+		received <- append([]byte(nil), wire.Params...)
+		if wire.Method != "models.set" {
+			t.Fatalf("expected models.set request, got %#v", wire)
+		}
+		if err := conn.WriteJSON(client.Response{
+			Type:    client.FrameRes,
+			ID:      wire.ID,
+			OK:      true,
+			Payload: json.RawMessage(`{"current":"ollama/qwen3:8b","previous":"gpt-test"}`),
+		}); err != nil {
+			t.Fatalf("Write models.set response: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	cl := client.New("ws" + strings.TrimPrefix(srv.URL, "http") + "/ws")
+	if _, err := cl.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer cl.Close()
+
+	model := New(app.Config{})
+	model.client = cl
+
+	updated, cmd := model.handleSlashCommand("/model ollama_chat/qwen3:8b")
+	got := updated.(Model)
+	msg := cmd()
+	updated, _ = got.Update(msg)
+	got = updated.(Model)
+
+	if got.app.Model != "ollama/qwen3:8b" {
+		t.Fatalf("expected normalized gateway current model, got %q", got.app.Model)
+	}
+
+	var params struct {
+		Model string `json:"model"`
+		ID    string `json:"id"`
+	}
+	if err := json.Unmarshal(<-received, &params); err != nil {
+		t.Fatalf("Unmarshal params: %v", err)
+	}
+	if params.Model != "ollama_chat/qwen3:8b" {
+		t.Fatalf("expected canonical model field, got %#v", params)
+	}
+	if params.ID != "" {
+		t.Fatalf("unexpected legacy id field in params: %#v", params)
 	}
 }
 

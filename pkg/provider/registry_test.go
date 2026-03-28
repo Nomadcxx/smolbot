@@ -74,6 +74,27 @@ func TestRegistryPrefixMatching(t *testing.T) {
 	}
 }
 
+func TestRegistryExplicitModelOverridesFallbackProvider(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Provider = "openai"
+
+	r := NewRegistry(&cfg)
+	r.RegisterFactory("anthropic", func(_ config.ProviderConfig) Provider {
+		return &mockProvider{name: "anthropic"}
+	})
+	r.RegisterFactory("openai", func(_ config.ProviderConfig) Provider {
+		return &mockProvider{name: "openai"}
+	})
+
+	p, err := r.ForModel("claude-sonnet-4-20250514")
+	if err != nil {
+		t.Fatalf("ForModel: %v", err)
+	}
+	if p.Name() != "anthropic" {
+		t.Fatalf("provider = %q, want anthropic override for explicit claude model", p.Name())
+	}
+}
+
 func TestRegistryCaching(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Providers["openai"] = config.ProviderConfig{APIKey: "sk-xxx"}

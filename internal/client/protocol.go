@@ -74,6 +74,11 @@ type ModelsSetParams struct {
 	Model string `json:"model"`
 }
 
+type ModelsSetPayload struct {
+	Current  string `json:"current"`
+	Previous string `json:"previous"`
+}
+
 type ProgressPayload struct {
 	Content string `json:"content"`
 }

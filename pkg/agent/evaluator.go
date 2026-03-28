@@ -32,6 +32,15 @@ func NewEvaluator(provider DecisionProvider) *Evaluator {
 	return &Evaluator{provider: provider}
 }
 
+func (e *Evaluator) SetModel(model string) {
+	if e == nil || e.provider == nil {
+		return
+	}
+	if setter, ok := e.provider.(interface{ SetModel(string) }); ok {
+		setter.SetModel(model)
+	}
+}
+
 func (e *Evaluator) ShouldDeliver(ctx context.Context, content string) bool {
 	if e == nil || e.provider == nil {
 		return true

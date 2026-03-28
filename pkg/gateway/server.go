@@ -48,7 +48,7 @@ type ServerDeps struct {
 	Skills           *skill.Registry
 	Version          string
 	StartedAt        time.Time
-	SetModelCallback func(model string) error
+	SetModelCallback func(model string) (string, error)
 }
 
 type Server struct {
@@ -61,7 +61,7 @@ type Server struct {
 	skills           *skill.Registry
 	version          string
 	started          time.Time
-	setModelCallback func(model string) error
+	setModelCallback func(model string) (string, error)
 
 	upgrader          websocket.Upgrader
 	connectedClients  atomic.Int64
@@ -561,19 +561,28 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return nil, fmt.Errorf("parse models.set params: %w", err)
 		}
-		if strings.TrimSpace(params.Model) == "" {
+		model := strings.TrimSpace(params.Model)
+		if model == "" {
 			return nil, fmt.Errorf("parse models.set params: missing model")
 		}
 		previous := s.currentModel()
-		if s.config != nil {
-			s.config.Agents.Defaults.Model = params.Model
-		}
+		current := model
 		if s.setModelCallback != nil {
-			if err := s.setModelCallback(params.Model); err != nil {
+			resolved, err := s.setModelCallback(model)
+			if err != nil {
 				return nil, err
 			}
+			if strings.TrimSpace(resolved) != "" {
+				current = resolved
+			}
 		}
-		return map[string]any{"previous": previous}, nil
+		if s.config != nil {
+			s.config.Agents.Defaults.Model = current
+		}
+		return map[string]any{
+			"current":  current,
+			"previous": previous,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown method %q", req.Method)
 	}
