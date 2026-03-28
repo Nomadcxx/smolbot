@@ -655,6 +655,71 @@ func TestPersistedUsageWarningFallsBackToSummaryWhenAlertPayloadMissing(t *testi
 	}
 }
 
+func TestQuotaStateWarningIsDedupedUntilStateChanges(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 120
+	model.height = 32
+	model.sidebarVisible = true
+	model.messages.SetSize(120, 20)
+	model.recalcLayout()
+
+	expiredStatus := StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "ollama/llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				Quota: &client.QuotaSummary{
+					State: "expired",
+				},
+			},
+		},
+	}
+
+	updated, _ := model.Update(expiredStatus)
+	got := updated.(Model)
+	expiredMessage := "Quota status for ollama/llama3.2 expired."
+	view := plain(got.messages.View())
+	if strings.Count(view, expiredMessage) != 1 {
+		t.Fatalf("expected initial quota-expired warning, got %q", view)
+	}
+
+	updated, _ = got.Update(expiredStatus)
+	got = updated.(Model)
+	view = plain(got.messages.View())
+	if strings.Count(view, expiredMessage) != 1 {
+		t.Fatalf("expected unchanged quota-expired warning to be deduped, got %q", view)
+	}
+
+	staleStatus := StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "ollama/llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				Quota: &client.QuotaSummary{
+					State: "stale",
+				},
+			},
+		},
+	}
+	updated, _ = got.Update(staleStatus)
+	got = updated.(Model)
+	staleMessage := "Quota status for ollama/llama3.2 is stale."
+	view = plain(got.messages.View())
+	if strings.Count(view, expiredMessage) != 1 || strings.Count(view, staleMessage) != 1 {
+		t.Fatalf("expected stale quota warning to append once on state change, got %q", view)
+	}
+}
+
 func TestClearResetsPersistedUsageWarningDeduper(t *testing.T) {
 	model := New(app.Config{})
 	model.width = 120

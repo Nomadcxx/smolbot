@@ -1197,16 +1197,22 @@ func usageAlertKey(session string, alert *client.UsageAlert) string {
 }
 
 func usageAlertFromSummary(summary *client.UsageSummary) *client.UsageAlert {
-	if summary == nil || strings.TrimSpace(summary.WarningLevel) == "" {
+	if summary == nil {
 		return nil
 	}
-	return &client.UsageAlert{
-		ProviderID:   summary.ProviderID,
-		ModelName:    summary.ModelName,
-		BudgetStatus: summary.BudgetStatus,
-		WarningLevel: summary.WarningLevel,
-		Message:      persistedUsageAlertMessage(summary.ProviderID, summary.ModelName, summary.WarningLevel),
+	if strings.TrimSpace(summary.WarningLevel) != "" {
+		return &client.UsageAlert{
+			ProviderID:   summary.ProviderID,
+			ModelName:    summary.ModelName,
+			BudgetStatus: summary.BudgetStatus,
+			WarningLevel: summary.WarningLevel,
+			Message:      persistedUsageAlertMessage(summary.ProviderID, summary.ModelName, summary.WarningLevel),
+		}
 	}
+	if quotaAlert := quotaAlertFromSummary(summary); quotaAlert != nil {
+		return quotaAlert
+	}
+	return nil
 }
 
 func persistedUsageAlertMessage(providerID, modelName, warningLevel string) string {
@@ -1225,6 +1231,46 @@ func persistedUsageAlertMessage(providerID, modelName, warningLevel string) stri
 		return "Usage warning for " + label + "."
 	}
 	return fmt.Sprintf("Usage warning for %s: %s budget threshold reached.", label, level)
+}
+
+func quotaAlertFromSummary(summary *client.UsageSummary) *client.UsageAlert {
+	if summary == nil || summary.Quota == nil {
+		return nil
+	}
+	state := strings.ToLower(strings.TrimSpace(summary.Quota.State))
+	if state != "expired" && state != "stale" && state != "unavailable" {
+		return nil
+	}
+
+	return &client.UsageAlert{
+		ProviderID:   summary.ProviderID,
+		ModelName:    summary.ModelName,
+		BudgetStatus: "quota",
+		WarningLevel: state,
+		Message:      quotaAlertMessage(summary.ProviderID, summary.ModelName, state),
+	}
+}
+
+func quotaAlertMessage(providerID, modelName, state string) string {
+	label := strings.TrimSpace(modelName)
+	providerID = strings.TrimSpace(providerID)
+	if label == "" {
+		label = providerID
+	} else if providerID != "" && !strings.HasPrefix(label, providerID+"/") {
+		label = providerID + "/" + label
+	}
+	if label == "" {
+		label = "usage"
+	}
+
+	switch state {
+	case "expired":
+		return fmt.Sprintf("Quota status for %s expired. Reconnect your Ollama web session to refresh account usage.", label)
+	case "stale":
+		return fmt.Sprintf("Quota status for %s is stale. Showing the last cached account usage.", label)
+	default:
+		return fmt.Sprintf("Quota status for %s is unavailable. Observed usage remains available.", label)
+	}
 }
 
 func buildProviderLines(models []client.ModelInfo, current string, status client.StatusPayload, cfg *cfgpkg.Config) []string {
