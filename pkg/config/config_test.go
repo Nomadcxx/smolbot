@@ -287,3 +287,199 @@ func TestDefaultPaths(t *testing.T) {
 		t.Error("root should not be empty")
 	}
 }
+
+func TestProviderQuotaConfigHelpers(t *testing.T) {
+	t.Run("Provider returns correct config", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: true, BrowserCookieDiscoveryEnabled: true, CookieHeader: "foo=bar"},
+			},
+		}
+		p := q.Provider("ollama")
+		if !p.Enabled {
+			t.Error("ollama provider should be enabled")
+		}
+		if p.CookieHeader != "foo=bar" {
+			t.Errorf("cookieHeader = %q, want foo=bar", p.CookieHeader)
+		}
+	})
+
+	t.Run("Provider returns empty for unknown", func(t *testing.T) {
+		q := QuotaConfig{Providers: map[string]ProviderQuotaConfig{}}
+		p := q.Provider("unknown")
+		if p.Enabled {
+			t.Error("unknown provider should not be enabled")
+		}
+	})
+
+	t.Run("Provider returns empty when no providers", func(t *testing.T) {
+		q := QuotaConfig{}
+		p := q.Provider("ollama")
+		if p.Enabled {
+			t.Error("should return empty config when no providers")
+		}
+	})
+
+	t.Run("HasEnabledProvider returns true when enabled", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: true},
+			},
+		}
+		if !q.HasEnabledProvider("ollama") {
+			t.Error("HasEnabledProvider(ollama) should be true")
+		}
+	})
+
+	t.Run("HasEnabledProvider returns false when disabled", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: false},
+			},
+		}
+		if q.HasEnabledProvider("ollama") {
+			t.Error("HasEnabledProvider(ollama) should be false")
+		}
+	})
+
+	t.Run("HasEnabledProvider returns false for unknown", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: true},
+			},
+		}
+		if q.HasEnabledProvider("openai") {
+			t.Error("HasEnabledProvider(unknown) should be false")
+		}
+	})
+
+	t.Run("HasAnyEnabledProvider returns true when any enabled", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: true},
+				"openai": {Enabled: false},
+			},
+		}
+		if !q.HasAnyEnabledProvider() {
+			t.Error("HasAnyEnabledProvider should be true")
+		}
+	})
+
+	t.Run("HasAnyEnabledProvider returns false when none enabled", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: false},
+				"openai": {Enabled: false},
+			},
+		}
+		if q.HasAnyEnabledProvider() {
+			t.Error("HasAnyEnabledProvider should be false")
+		}
+	})
+}
+
+func TestQuotaConfigMigratesOllamaFromDefaults(t *testing.T) {
+	t.Run("migrates when default provider is ollama", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Agents.Defaults.Provider = "ollama"
+		normalizeQuotaConfig(&cfg)
+		if !cfg.Quota.HasEnabledProvider("ollama") {
+			t.Error("should migrate ollama when default provider is ollama")
+		}
+	})
+
+	t.Run("migrates when default model starts with ollama/", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Agents.Defaults.Model = "ollama/llama3"
+		normalizeQuotaConfig(&cfg)
+		if !cfg.Quota.HasEnabledProvider("ollama") {
+			t.Error("should migrate ollama when model starts with ollama/")
+		}
+	})
+
+	t.Run("does not migrate when refresh interval is zero", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Agents.Defaults.Provider = "ollama"
+		cfg.Quota.RefreshIntervalMinutes = 0
+		normalizeQuotaConfig(&cfg)
+		if cfg.Quota.HasEnabledProvider("ollama") {
+			t.Error("should not migrate when refresh interval is 0")
+		}
+	})
+
+	t.Run("does not overwrite existing provider config", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Agents.Defaults.Provider = "ollama"
+		cfg.Quota.RefreshIntervalMinutes = 30
+		cfg.Quota.Providers = map[string]ProviderQuotaConfig{
+			"ollama": {Enabled: false},
+		}
+		normalizeQuotaConfig(&cfg)
+		if cfg.Quota.HasEnabledProvider("ollama") {
+			t.Error("should not overwrite existing explicit config")
+		}
+	})
+
+	t.Run("loads provider-scoped quota config", func(t *testing.T) {
+		input := `{
+			"quota": {
+				"refreshIntervalMinutes": 30,
+				"providers": {
+					"ollama": {
+						"enabled": true,
+						"browserCookieDiscoveryEnabled": false,
+						"cookieHeader": "session=abc"
+					}
+				}
+			}
+		}`
+		var cfg Config
+		if err := json.Unmarshal([]byte(input), &cfg); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		normalizeQuotaConfig(&cfg)
+		p := cfg.Quota.Provider("ollama")
+		if !p.Enabled {
+			t.Error("ollama should be enabled")
+		}
+		if p.CookieHeader != "session=abc" {
+			t.Errorf("cookieHeader = %q, want session=abc", p.CookieHeader)
+		}
+		if p.BrowserCookieDiscoveryEnabled {
+			t.Error("browserCookieDiscoveryEnabled should be false")
+		}
+	})
+}
+
+func TestLoadMigratesLegacyOllamaQuota(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	input := `{
+		"agents": {
+			"defaults": {
+				"provider": "ollama",
+				"model": "llama3"
+			}
+		},
+		"quota": {
+			"refreshIntervalMinutes": 45,
+			"browserCookieDiscoveryEnabled": false,
+			"ollamaCookieHeader": "legacy=header"
+		}
+	}`
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Quota.HasEnabledProvider("ollama") {
+		t.Fatal("ollama quota should be migrated")
+	}
+	p := cfg.Quota.Provider("ollama")
+	if p.CookieHeader != "legacy=header" {
+		t.Errorf("cookieHeader = %q, want legacy=header", p.CookieHeader)
+	}
+}
