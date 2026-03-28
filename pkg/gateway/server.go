@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	clientproto "github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	"github.com/Nomadcxx/smolbot/pkg/config"
@@ -556,11 +557,12 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		}
 		return map[string]any{"servers": servers}, nil
 	case "models.set":
-		params := struct {
-			Model string `json:"model"`
-		}{}
+		params := clientproto.ModelsSetParams{}
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return nil, fmt.Errorf("parse models.set params: %w", err)
+		}
+		if strings.TrimSpace(params.Model) == "" {
+			return nil, fmt.Errorf("parse models.set params: missing model")
 		}
 		previous := s.currentModel()
 		if s.config != nil {

@@ -72,7 +72,7 @@ func (c *Client) ModelsList() ([]ModelInfo, string, error) {
 }
 
 func (c *Client) ModelsSet(id string) (string, error) {
-	res, err := c.sendRequest("models.set", map[string]string{"id": id})
+	res, err := c.sendRequest("models.set", ModelsSetParams{Model: id})
 	if err != nil {
 		return "", err
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/gateway"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
@@ -215,12 +216,78 @@ func TestProviderSwitchAcrossFamiliesChangesAgentModel(t *testing.T) {
 	}
 }
 
+func TestRealClientModelsSetSwitchesRuntimeModel(t *testing.T) {
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{
+		Provider: &spyProvider{name: "openai", model: "gpt-test"},
+	})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	defer app.Close()
+
+	httpServer := httptest.NewServer(app.gateway.Handler())
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+	c := client.New(wsURL)
+	defer c.Close()
+
+	hello, err := c.Connect()
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if hello.Server != "smolbot" {
+		t.Fatalf("hello server = %q, want smolbot", hello.Server)
+	}
+
+	previous, err := c.ModelsSet("claude-sonnet")
+	if err != nil {
+		t.Fatalf("ModelsSet: %v", err)
+	}
+	if previous != "gpt-test" {
+		t.Fatalf("previous model = %q, want gpt-test", previous)
+	}
+
+	if agentModel := app.agent.EffectiveModel(); agentModel != "claude-sonnet" {
+		t.Fatalf("agent loop effective model = %q, want claude-sonnet after switch", agentModel)
+	}
+	if heartbeatModel := app.heartbeat.EffectiveModel(); heartbeatModel != "claude-sonnet" {
+		t.Fatalf("heartbeat effective model = %q, want claude-sonnet after switch", heartbeatModel)
+	}
+
+	status, err := c.Status("tui:main")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Model != "claude-sonnet" {
+		t.Fatalf("status model = %q, want claude-sonnet", status.Model)
+	}
+	if status.Provider != "anthropic" {
+		t.Fatalf("status provider = %q, want anthropic", status.Provider)
+	}
+}
+
 type spyProvider struct {
 	name  string
 	model string
 }
 
-func (p *spyProvider) Name() string { return p.name }
+func (p *spyProvider) Name() string  { return p.name }
 func (p *spyProvider) Model() string { return p.model }
 
 func (p *spyProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provider.Response, error) {

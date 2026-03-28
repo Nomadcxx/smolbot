@@ -35,6 +35,7 @@ type fakeClient struct {
 	modelErr   error
 	resetErr   error
 	compactErr error
+	modelSets  []string
 }
 
 type abortCall struct {
@@ -67,6 +68,7 @@ func (f *fakeClient) ModelsList() ([]client.ModelInfo, string, error) {
 	return f.models, f.current, nil
 }
 func (f *fakeClient) ModelsSet(id string) (string, error) {
+	f.modelSets = append(f.modelSets, id)
 	if f.modelErr != nil {
 		return "", f.modelErr
 	}
@@ -1302,7 +1304,8 @@ func TestSyncStatusUsesCurrentSession(t *testing.T) {
 
 func TestModelSetUsesNormalizedGatewayCurrent(t *testing.T) {
 	model := New(app.Config{})
-	model.client = &fakeClient{current: "ollama/qwen3:8b"}
+	fake := &fakeClient{current: "ollama/qwen3:8b"}
+	model.client = fake
 
 	updated, cmd := model.handleSlashCommand("/model ollama_chat/qwen3:8b")
 	got := updated.(Model)
@@ -1312,6 +1315,9 @@ func TestModelSetUsesNormalizedGatewayCurrent(t *testing.T) {
 
 	if got.app.Model != "ollama/qwen3:8b" {
 		t.Fatalf("expected normalized gateway model id, got %q", got.app.Model)
+	}
+	if len(fake.modelSets) != 1 || fake.modelSets[0] != "ollama_chat/qwen3:8b" {
+		t.Fatalf("expected gateway client to receive requested model, got %#v", fake.modelSets)
 	}
 }
 

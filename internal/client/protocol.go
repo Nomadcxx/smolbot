@@ -70,6 +70,10 @@ type ChatAbortParams struct {
 	RunID   string `json:"runId,omitempty"`
 }
 
+type ModelsSetParams struct {
+	Model string `json:"model"`
+}
+
 type ProgressPayload struct {
 	Content string `json:"content"`
 }
@@ -144,20 +148,20 @@ type ChannelErrorPayload struct {
 
 // CompressionInfo contains context compression state for UI display
 type CompressionInfo struct {
-	Enabled            bool    `json:"enabled"`
-	Mode               string  `json:"mode"`               // conservative, default, aggressive
-	LastRun            string  `json:"lastRun,omitempty"` // ISO timestamp
-	OriginalTokens     int     `json:"originalTokens"`
-	CompressedTokens   int     `json:"compressedTokens"`
-	ReductionPercent   float64 `json:"reductionPercent"`   // 0-100
+	Enabled          bool    `json:"enabled"`
+	Mode             string  `json:"mode"`              // conservative, default, aggressive
+	LastRun          string  `json:"lastRun,omitempty"` // ISO timestamp
+	OriginalTokens   int     `json:"originalTokens"`
+	CompressedTokens int     `json:"compressedTokens"`
+	ReductionPercent float64 `json:"reductionPercent"` // 0-100
 }
 
 // UsageLevel categorizes token usage for color coding
 type UsageLevel int
 
 const (
-	UsageLevelLow UsageLevel = iota    // < 60%
-	UsageLevelMedium                   // 60-80%
-	UsageLevelHigh                     // 80-90%
-	UsageLevelCritical                 // > 90%
+	UsageLevelLow      UsageLevel = iota // < 60%
+	UsageLevelMedium                     // 60-80%
+	UsageLevelHigh                       // 80-90%
+	UsageLevelCritical                   // > 90%
 )

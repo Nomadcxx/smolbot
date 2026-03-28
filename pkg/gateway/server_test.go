@@ -21,6 +21,8 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/skill"
 	"github.com/Nomadcxx/smolbot/pkg/usage"
 	"github.com/gorilla/websocket"
+
+	"github.com/Nomadcxx/smolbot/internal/client"
 )
 
 func TestServerMethods(t *testing.T) {
@@ -190,10 +192,14 @@ func TestServerMethods(t *testing.T) {
 			t.Fatalf("unexpected models payload %s", frame.Response.Result)
 		}
 
+		params, err := json.Marshal(client.ModelsSetParams{Model: "claude-test"})
+		if err != nil {
+			t.Fatalf("marshal models.set params: %v", err)
+		}
 		writeFrame(t, conn, RequestFrame{
 			ID:     "8",
 			Method: "models.set",
-			Params: json.RawMessage(`{"model":"claude-test"}`),
+			Params: params,
 		})
 		frame = readResponseFrame(t, conn, "8")
 		if frame.Response.Error != nil {
@@ -201,6 +207,16 @@ func TestServerMethods(t *testing.T) {
 		}
 		if cfg.Agents.Defaults.Model != "claude-test" {
 			t.Fatalf("expected model update, got %q", cfg.Agents.Defaults.Model)
+		}
+
+		writeFrame(t, conn, RequestFrame{
+			ID:     "8b",
+			Method: "models.set",
+			Params: json.RawMessage(`{"id":"legacy-model"}`),
+		})
+		frame = readResponseFrame(t, conn, "8b")
+		if frame.Response.Error == nil {
+			t.Fatalf("expected legacy id payload to be rejected, got %#v", frame)
 		}
 	})
 
