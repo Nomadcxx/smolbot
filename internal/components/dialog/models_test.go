@@ -16,8 +16,8 @@ func TestModelsModelShowsCurrentModel(t *testing.T) {
 	}
 
 	model := NewModels([]client.ModelInfo{
-		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic"},
-		{ID: "gpt-5", Name: "GPT-5", Provider: "openai"},
+		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic", Selectable: true},
+		{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
 	}, "gpt-5")
 
 	view := model.View()
@@ -38,9 +38,9 @@ func TestModelsModelGroupsByProvider(t *testing.T) {
 	}
 
 	model := NewModels([]client.ModelInfo{
-		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic"},
-		{ID: "gpt-5", Name: "GPT-5", Provider: "openai"},
-		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai"},
+		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic", Selectable: true},
+		{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
+		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Selectable: true},
 	}, "gpt-5")
 
 	view := model.View()
@@ -58,6 +58,54 @@ func TestModelsModelGroupsByProvider(t *testing.T) {
 	openaiIdx := strings.Index(view, "Provider: openai (current)")
 	if anthropicIdx == -1 || openaiIdx == -1 || anthropicIdx > openaiIdx {
 		t.Fatalf("expected provider groups in stable order, got %q", view)
+	}
+}
+
+func TestModelsModelDoesNotChooseInfoOnlyRow(t *testing.T) {
+	model := NewModels([]client.ModelInfo{
+		{ID: "openrouter", Name: "OpenRouter", Provider: "openrouter", Source: "config", Selectable: false},
+		{ID: "openrouter/auto", Name: "Auto", Provider: "openrouter", Selectable: true},
+	}, "openrouter/auto")
+
+	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	model = updated
+	if cmd != nil {
+		if _, ok := cmd().(ModelChosenMsg); ok {
+			t.Fatal("expected info-only row to ignore enter")
+		}
+	}
+
+	model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	model, cmd = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd == nil {
+		t.Fatal("expected selectable row to emit a choice")
+	}
+	msg := cmd()
+	chosen, ok := msg.(ModelChosenMsg)
+	if !ok {
+		t.Fatalf("expected ModelChosenMsg, got %T", msg)
+	}
+	if chosen.ID != "openrouter/auto" {
+		t.Fatalf("chosen id = %q, want openrouter/auto", chosen.ID)
+	}
+}
+
+func TestModelsModelAllowsLegacyRowsWithoutSelectableMetadata(t *testing.T) {
+	model := NewModels([]client.ModelInfo{
+		{ID: "gpt-5", Name: "GPT-5", Provider: "openai"},
+	}, "gpt-5")
+
+	_, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd == nil {
+		t.Fatal("expected legacy row without selectable metadata to remain selectable")
+	}
+	msg := cmd()
+	chosen, ok := msg.(ModelChosenMsg)
+	if !ok {
+		t.Fatalf("expected ModelChosenMsg, got %T", msg)
+	}
+	if chosen.ID != "gpt-5" {
+		t.Fatalf("chosen id = %q, want gpt-5", chosen.ID)
 	}
 }
 

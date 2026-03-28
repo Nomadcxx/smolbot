@@ -267,6 +267,7 @@ func discoverOllamaModels(cfg *config.Config) ([]ModelInfo, error) {
 			Description: ollamaModelDescription(m),
 			Source:      "ollama.live",
 			Capability:  "local",
+			Selectable:  true,
 		}
 	}
 	return models, nil

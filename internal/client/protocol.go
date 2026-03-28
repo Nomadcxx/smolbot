@@ -132,6 +132,7 @@ type ModelInfo struct {
 	Description string `json:"description,omitempty"`
 	Source      string `json:"source,omitempty"`
 	Capability  string `json:"capability,omitempty"`
+	Selectable  bool   `json:"selectable"`
 }
 
 type HistoryMessage struct {

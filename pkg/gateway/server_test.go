@@ -579,6 +579,9 @@ func TestModelsListReturnsRichDiscoveryPayload(t *testing.T) {
 		if model.Source != "config" {
 			t.Fatalf("openrouter source = %q, want config", model.Source)
 		}
+		if model.Selectable {
+			t.Fatal("expected openrouter provider-backed row to be info-only")
+		}
 		if model.Capability != "openai-compatible" {
 			t.Fatalf("openrouter capability = %q, want openai-compatible", model.Capability)
 		}

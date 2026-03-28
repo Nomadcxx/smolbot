@@ -54,6 +54,9 @@ func (m ModelsModel) Update(msg tea.Msg) (ModelsModel, tea.Cmd) {
 			if len(m.filtered) == 0 {
 				return m, nil
 			}
+			if !isSelectableModel(m.filtered[m.cursor]) {
+				return m, nil
+			}
 			id := m.filtered[m.cursor].ID
 			return m, func() tea.Msg { return ModelChosenMsg{ID: id} }
 		case "backspace":
@@ -213,12 +216,22 @@ func (r modelRenderRow) render(t *theme.Theme) string {
 		if r.active {
 			label += lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render(" current")
 		}
+		if !isSelectableModel(model) {
+			label += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" info")
+		}
 		row := "  " + label
 		if len(descParts) > 0 {
 			row += lipgloss.NewStyle().Foreground(t.TextMuted).Render("  " + strings.Join(descParts, " • "))
 		}
 		return row
 	}
+}
+
+func isSelectableModel(model client.ModelInfo) bool {
+	if model.Selectable {
+		return true
+	}
+	return model.Source != "config"
 }
 
 func optionalModelDescription(value any) string {

@@ -69,6 +69,9 @@ func TestGetAvailableModelsUsesLiveOllamaDiscovery(t *testing.T) {
 	if got.Capability != "local" {
 		t.Fatalf("ollama capability = %q, want local", got.Capability)
 	}
+	if !got.Selectable {
+		t.Fatal("expected live ollama row to be selectable")
+	}
 	if got.Description == "" {
 		t.Fatal("expected ollama description to be populated from live metadata")
 	}
@@ -103,6 +106,9 @@ func TestGetAvailableModelsIncludesConfiguredCompatibleProviders(t *testing.T) {
 	}
 	if openAI.Source != "config" {
 		t.Fatalf("openai source = %q, want config", openAI.Source)
+	}
+	if openAI.Selectable {
+		t.Fatal("expected provider-backed openai row to be info-only")
 	}
 	if openAI.Capability != "openai-compatible" {
 		t.Fatalf("openai capability = %q, want openai-compatible", openAI.Capability)
@@ -140,6 +146,9 @@ func TestGetAvailableModelsIncludesConfiguredCompatibleProviders(t *testing.T) {
 	if current.Source != "fallback" {
 		t.Fatalf("current source = %q, want fallback", current.Source)
 	}
+	if !current.Selectable {
+		t.Fatal("expected current fallback row to stay selectable")
+	}
 }
 
 func TestGetAvailableModelsFallsBackWhenOllamaDiscoveryUnavailable(t *testing.T) {
@@ -168,6 +177,9 @@ func TestGetAvailableModelsFallsBackWhenOllamaDiscoveryUnavailable(t *testing.T)
 	}
 	if ollama.Source != "fallback" {
 		t.Fatalf("ollama source = %q, want fallback", ollama.Source)
+	}
+	if !ollama.Selectable {
+		t.Fatal("expected ollama fallback row to be selectable")
 	}
 	if ollama.Description == "" {
 		t.Fatal("expected ollama fallback description")

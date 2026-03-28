@@ -16,6 +16,7 @@ type ModelInfo struct {
 	Description string `json:"description,omitempty"`
 	Source      string `json:"source,omitempty"`
 	Capability  string `json:"capability,omitempty"`
+	Selectable  bool   `json:"selectable"`
 }
 
 // GetAvailableModels returns a provider-aware model catalog for the current configuration.
@@ -110,6 +111,7 @@ func configuredProviderModel(cfg *config.Config, providerID string) ModelInfo {
 		Description: description,
 		Source:      "config",
 		Capability:  capability,
+		Selectable:  false,
 	}
 }
 
@@ -144,6 +146,7 @@ func fallbackModel(cfg *config.Config, providerID, reason string) ModelInfo {
 		Description: description,
 		Source:      "fallback",
 		Capability:  capability,
+		Selectable:  true,
 	}
 }
 
