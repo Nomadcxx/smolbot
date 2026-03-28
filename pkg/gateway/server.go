@@ -300,6 +300,27 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 					"budgetStatus":  summary.BudgetStatus,
 					"warningLevel":  summary.WarningLevel,
 				}
+				if summary.Quota != nil {
+					payload["persistedUsage"].(map[string]any)["quota"] = map[string]any{
+						"providerId":           summary.Quota.ProviderID,
+						"accountName":          summary.Quota.AccountName,
+						"accountEmail":         summary.Quota.AccountEmail,
+						"planName":             summary.Quota.PlanName,
+						"sessionUsedPercent":   summary.Quota.SessionUsedPercent,
+						"sessionResetsAt":      timeToRFC3339(summary.Quota.SessionResetsAt),
+						"weeklyUsedPercent":    summary.Quota.WeeklyUsedPercent,
+						"weeklyResetsAt":       timeToRFC3339(summary.Quota.WeeklyResetsAt),
+						"notifyUsageLimits":    summary.Quota.NotifyUsageLimits,
+						"state":                summary.Quota.State,
+						"source":               summary.Quota.Source,
+						"fetchedAt":            summary.Quota.FetchedAt.UTC().Format(time.RFC3339),
+						"expiresAt":            summary.Quota.ExpiresAt.UTC().Format(time.RFC3339),
+						"identityState":        summary.Quota.IdentityState,
+						"identitySource":       summary.Quota.IdentitySource,
+						"identityAccountName":  summary.Quota.IdentityAccountName,
+						"identityAccountEmail": summary.Quota.IdentityAccountEmail,
+					}
+				}
 				if alert, ok := usageAlertPayload(summary); ok {
 					payload["usageAlert"] = alert
 				}
@@ -551,6 +572,13 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 	default:
 		return nil, fmt.Errorf("unknown method %q", req.Method)
 	}
+}
+
+func timeToRFC3339(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
 }
 
 func (s *Server) writeResponse(client *clientState, id string, payload any) error {

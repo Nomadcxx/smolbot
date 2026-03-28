@@ -99,7 +99,7 @@ func TestServerMethods(t *testing.T) {
 		}
 		var payload struct {
 			Provider string `json:"provider"`
-			Usage struct {
+			Usage    struct {
 				ContextWindow int `json:"contextWindow"`
 			} `json:"usage"`
 		}
@@ -344,6 +344,22 @@ func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertBudget: %v", err)
 	}
+	sessionResetsAt := now.Add(3 * time.Hour)
+	weeklyResetsAt := now.Add(48 * time.Hour)
+	if err := usageStore.SaveQuotaSummary(context.Background(), usage.QuotaSummary{
+		ProviderID:         "ollama",
+		PlanName:           "pro",
+		SessionUsedPercent: 2,
+		SessionResetsAt:    &sessionResetsAt,
+		WeeklyUsedPercent:  26.5,
+		WeeklyResetsAt:     &weeklyResetsAt,
+		State:              usage.QuotaStateLive,
+		Source:             usage.QuotaSourceOllamaSettingsHTML,
+		FetchedAt:          now,
+		ExpiresAt:          now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("SaveQuotaSummary: %v", err)
+	}
 
 	for _, record := range []usage.CompletionRecord{
 		{
@@ -419,6 +435,13 @@ func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
 			SessionTokens int    `json:"sessionTokens"`
 			TodayTokens   int    `json:"todayTokens"`
 			WeeklyTokens  int    `json:"weeklyTokens"`
+			Quota         struct {
+				PlanName           string  `json:"planName"`
+				SessionUsedPercent float64 `json:"sessionUsedPercent"`
+				WeeklyUsedPercent  float64 `json:"weeklyUsedPercent"`
+				State              string  `json:"state"`
+				Source             string  `json:"source"`
+			} `json:"quota"`
 		} `json:"persistedUsage"`
 		UsageAlert struct {
 			ProviderID   string `json:"providerId"`
@@ -442,6 +465,12 @@ func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
 	}
 	if decoded.PersistedUsage.SessionTokens != 50 || decoded.PersistedUsage.TodayTokens != 50 || decoded.PersistedUsage.WeeklyTokens != 90 {
 		t.Fatalf("unexpected persisted usage summary: %#v", decoded.PersistedUsage)
+	}
+	if decoded.PersistedUsage.Quota.PlanName != "pro" || decoded.PersistedUsage.Quota.SessionUsedPercent != 2 || decoded.PersistedUsage.Quota.WeeklyUsedPercent != 26.5 {
+		t.Fatalf("unexpected persisted quota summary: %#v", decoded.PersistedUsage.Quota)
+	}
+	if decoded.PersistedUsage.Quota.State != string(usage.QuotaStateLive) || decoded.PersistedUsage.Quota.Source != string(usage.QuotaSourceOllamaSettingsHTML) {
+		t.Fatalf("unexpected persisted quota state: %#v", decoded.PersistedUsage.Quota)
 	}
 	if decoded.UsageAlert.ProviderID != "ollama" || decoded.UsageAlert.WarningLevel != "medium" {
 		t.Fatalf("unexpected usage alert: %#v", decoded.UsageAlert)

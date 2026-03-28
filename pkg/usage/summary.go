@@ -92,6 +92,15 @@ func (s *Store) CurrentProviderSummary(sessionKey, providerID, modelName string,
 	}
 	summary.BudgetStatus = budgetStatus
 	summary.WarningLevel = warningLevel
+
+	quota, err := s.LatestQuotaSummary(providerID)
+	switch {
+	case err == nil:
+		summary.Quota = &quota
+	case err == sql.ErrNoRows:
+	default:
+		return ProviderSummary{}, fmt.Errorf("load latest quota summary: %w", err)
+	}
 	return summary, nil
 }
 

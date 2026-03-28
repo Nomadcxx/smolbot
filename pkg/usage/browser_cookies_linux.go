@@ -3,10 +3,15 @@
 package usage
 
 import (
+	"database/sql"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func discoverLinuxChromiumCookieDBs(home string) []string {
@@ -76,4 +81,96 @@ func cloneCookie(cookie *http.Cookie) *http.Cookie {
 	}
 	clone := *cookie
 	return &clone
+}
+
+func importOllamaCookiesFromLinuxBrowsers(home, outputPath string) (int, error) {
+	paths := discoverLinuxChromiumCookieDBs(home)
+	if len(paths) == 0 {
+		return 0, fmt.Errorf("no chromium cookie databases found")
+	}
+
+	var imported []*http.Cookie
+	for _, path := range paths {
+		cookies, err := readOllamaCookiesFromChromiumDB(path)
+		if err != nil {
+			continue
+		}
+		imported = append(imported, cookies...)
+	}
+	imported = filterOllamaCookies(imported)
+	if len(imported) == 0 {
+		return 0, fmt.Errorf("no readable ollama cookies found")
+	}
+
+	store := newCookieJarStore(outputPath)
+	if err := store.Save(imported); err != nil {
+		return 0, err
+	}
+	return len(imported), nil
+}
+
+func ImportOllamaCookiesFromLinuxBrowsers(home, outputPath string) (int, error) {
+	return importOllamaCookiesFromLinuxBrowsers(home, outputPath)
+}
+
+func readOllamaCookiesFromChromiumDB(path string) ([]*http.Cookie, error) {
+	db, err := sql.Open("sqlite3", sqliteDSN(path)+"&mode=ro&_query_only=on")
+	if err != nil {
+		return nil, fmt.Errorf("open cookie db: %w", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`
+		SELECT host_key, name, value, path, expires_utc, is_secure, is_httponly
+		FROM cookies
+		WHERE host_key LIKE '%ollama%'
+		ORDER BY host_key, name
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query cookies: %w", err)
+	}
+	defer rows.Close()
+
+	var cookies []*http.Cookie
+	for rows.Next() {
+		var hostKey string
+		var name string
+		var value string
+		var cookiePath string
+		var expiresUTC int64
+		var isSecure int
+		var isHTTPOnly int
+		if err := rows.Scan(&hostKey, &name, &value, &cookiePath, &expiresUTC, &isSecure, &isHTTPOnly); err != nil {
+			return nil, fmt.Errorf("scan cookie: %w", err)
+		}
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		cookie := &http.Cookie{
+			Name:     name,
+			Value:    value,
+			Domain:   hostKey,
+			Path:     cookiePath,
+			Secure:   isSecure != 0,
+			HttpOnly: isHTTPOnly != 0,
+		}
+		if expiresAt := chromiumTime(expiresUTC); !expiresAt.IsZero() {
+			cookie.Expires = expiresAt
+		}
+		cookies = append(cookies, cookie)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate cookies: %w", err)
+	}
+	return cookies, nil
+}
+
+func chromiumTime(v int64) time.Time {
+	if v <= 0 {
+		return time.Time{}
+	}
+	const chromiumUnixOffsetSeconds = 11644473600
+	seconds := v / 1_000_000
+	micros := v % 1_000_000
+	return time.Unix(seconds-chromiumUnixOffsetSeconds, micros*1_000).UTC()
 }

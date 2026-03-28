@@ -50,6 +50,7 @@ type ProviderSummary struct {
 	WeeklyRequests  int
 	BudgetStatus    string
 	WarningLevel    string
+	Quota           *QuotaSummary
 }
 
 type QuotaState string

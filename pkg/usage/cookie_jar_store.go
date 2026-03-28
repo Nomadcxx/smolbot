@@ -1,5 +1,3 @@
-//go:build linux
-
 package usage
 
 import (
@@ -33,6 +31,10 @@ type storedCookie struct {
 
 func newCookieJarStore(path string) *cookieJarStore {
 	return &cookieJarStore{path: filepath.Clean(path)}
+}
+
+func NewCookieJarStore(path string) CookieLoader {
+	return newCookieJarStore(path)
 }
 
 func (s *cookieJarStore) Save(cookies []*http.Cookie) error {

@@ -75,6 +75,8 @@ type runtimeDeps struct {
 	HeartbeatRun      func(context.Context) error
 	HeartbeatInterval time.Duration
 	HeartbeatEnabled  bool
+	QuotaRun          func(context.Context) error
+	QuotaInterval     time.Duration
 	SetModelCallback  func(model string) error
 }
 
@@ -92,8 +94,10 @@ type runtimeApp struct {
 	heartbeat        *heartbeat.Service
 	runCron          func(context.Context, time.Time) error
 	runBeat          func(context.Context) error
+	runQuota         func(context.Context) error
 	cronEvery        time.Duration
 	beatEvery        time.Duration
+	quotaEvery       time.Duration
 	beatOn           bool
 	gateway          *gateway.Server
 }
@@ -666,6 +670,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		runBeat:    heartbeatService.RunOnce,
 		cronEvery:  time.Second,
 		beatEvery:  time.Duration(cfg.Gateway.Heartbeat.Interval) * time.Minute,
+		quotaEvery: time.Duration(cfg.Quota.RefreshIntervalMinutes) * time.Minute,
 		beatOn:     cfg.Gateway.Heartbeat.Enabled,
 		gateway: gateway.NewServer(gateway.ServerDeps{
 			Agent:     loop,
@@ -696,6 +701,15 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	}
 	if deps.HeartbeatEnabled {
 		app.beatOn = true
+	}
+	if app.runQuota == nil && shouldEnableOllamaQuota(cfg, usageStore) {
+		app.runQuota = newOllamaQuotaRunner(cfg, paths, usageStore)
+	}
+	if deps.QuotaRun != nil {
+		app.runQuota = deps.QuotaRun
+	}
+	if deps.QuotaInterval > 0 {
+		app.quotaEvery = deps.QuotaInterval
 	}
 	return app, nil
 }
@@ -1167,6 +1181,65 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 				}
 			}
 		}()
+	}
+	if app.runQuota != nil && app.quotaEvery > 0 {
+		go func() {
+			ticker := time.NewTicker(app.quotaEvery)
+			defer ticker.Stop()
+			run := func() {
+				if err := app.runQuota(ctx); err != nil {
+					log.Printf("[runtime] quota refresh failed: %v", err)
+				}
+			}
+			run()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					run()
+				}
+			}
+		}()
+	}
+}
+
+func shouldEnableOllamaQuota(cfg *config.Config, store *usage.Store) bool {
+	if cfg == nil || store == nil {
+		return false
+	}
+	if cfg.Quota.RefreshIntervalMinutes <= 0 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(cfg.Agents.Defaults.Provider), "ollama")
+}
+
+func newOllamaQuotaRunner(cfg *config.Config, paths *config.Paths, store *usage.Store) func(context.Context) error {
+	cookiePath := paths.OllamaCookieJar()
+	cookieLoader := usage.NewCookieJarStore(cookiePath)
+	fetcher := &usage.OllamaQuotaFetcher{
+		Clock:        time.Now,
+		Signer:       usage.NewOllamaKeySigner(""),
+		CookieLoader: cookieLoader,
+	}
+
+	return func(ctx context.Context) error {
+		if cfg != nil && cfg.Quota.BrowserCookieDiscoveryEnabled {
+			cookies, err := cookieLoader.Load()
+			if err != nil || len(cookies) == 0 {
+				if _, importErr := usage.ImportOllamaCookiesFromLinuxBrowsers("", cookiePath); importErr != nil {
+					log.Printf("[runtime] ollama cookie import skipped: %v", importErr)
+				}
+			}
+		}
+
+		summary, err := fetcher.Fetch(ctx)
+		if summary.ProviderID != "" {
+			if saveErr := store.SaveQuotaSummary(ctx, summary); saveErr != nil {
+				return fmt.Errorf("save quota summary: %w", saveErr)
+			}
+		}
+		return err
 	}
 }
 

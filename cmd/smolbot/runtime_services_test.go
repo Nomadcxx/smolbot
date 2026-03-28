@@ -82,12 +82,43 @@ func TestBuildRuntimeRegistersCronTool(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeConfiguresOllamaQuotaRunner(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "ollama/llama3.2"
+	cfg.Agents.Defaults.Provider = "ollama"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = freePort(t)
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       cfg.Gateway.Port,
+	}, runtimeDeps{})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	defer app.Close()
+
+	if app.runQuota == nil {
+		t.Fatal("expected Ollama runtime to configure quota runner")
+	}
+	if app.quotaEvery != time.Hour {
+		t.Fatalf("quotaEvery = %s, want %s", app.quotaEvery, time.Hour)
+	}
+}
+
 func TestLaunchDaemonRunsCronAndHeartbeatLoops(t *testing.T) {
 	orig := launchRuntimeDeps
 	defer func() { launchRuntimeDeps = orig }()
 
 	var cronCalls atomic.Int32
 	var heartbeatCalls atomic.Int32
+	var quotaCalls atomic.Int32
 	launchRuntimeDeps = func() runtimeDeps {
 		return runtimeDeps{
 			CronRun: func(context.Context, time.Time) error {
@@ -101,6 +132,11 @@ func TestLaunchDaemonRunsCronAndHeartbeatLoops(t *testing.T) {
 			},
 			HeartbeatInterval: 10 * time.Millisecond,
 			HeartbeatEnabled:  true,
+			QuotaRun: func(context.Context) error {
+				quotaCalls.Add(1)
+				return nil
+			},
+			QuotaInterval: 10 * time.Millisecond,
 		}
 	}
 
@@ -118,7 +154,7 @@ func TestLaunchDaemonRunsCronAndHeartbeatLoops(t *testing.T) {
 	waitForHealth(t, port)
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if cronCalls.Load() > 0 && heartbeatCalls.Load() > 0 {
+		if cronCalls.Load() > 0 && heartbeatCalls.Load() > 0 && quotaCalls.Load() > 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -133,6 +169,9 @@ func TestLaunchDaemonRunsCronAndHeartbeatLoops(t *testing.T) {
 	}
 	if heartbeatCalls.Load() == 0 {
 		t.Fatal("expected heartbeat loop to run")
+	}
+	if quotaCalls.Load() == 0 {
+		t.Fatal("expected quota loop to run")
 	}
 }
 

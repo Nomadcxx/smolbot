@@ -330,6 +330,61 @@ func TestSummaryQueriesAndCurrentProviderSummary(t *testing.T) {
 	}
 }
 
+func TestCurrentProviderSummaryIncludesLatestQuota(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)
+	if err := store.RecordCompletion(context.Background(), CompletionRecord{
+		SessionKey:       "s1",
+		ProviderID:       "ollama",
+		ModelName:        "llama3.2",
+		RequestType:      "chat",
+		PromptTokens:     12,
+		CompletionTokens: 8,
+		TotalTokens:      20,
+		Status:           "success",
+		UsageSource:      "reported",
+		RecordedAt:       now,
+	}); err != nil {
+		t.Fatalf("RecordCompletion: %v", err)
+	}
+
+	sessionResetsAt := now.Add(3 * time.Hour)
+	weeklyResetsAt := now.Add(48 * time.Hour)
+	if err := store.SaveQuotaSummary(context.Background(), QuotaSummary{
+		ProviderID:         "ollama",
+		PlanName:           "pro",
+		SessionUsedPercent: 2,
+		SessionResetsAt:    &sessionResetsAt,
+		WeeklyUsedPercent:  26.5,
+		WeeklyResetsAt:     &weeklyResetsAt,
+		State:              QuotaStateLive,
+		Source:             QuotaSourceOllamaSettingsHTML,
+		FetchedAt:          now,
+		ExpiresAt:          now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("SaveQuotaSummary: %v", err)
+	}
+
+	summary, err := store.CurrentProviderSummary("s1", "ollama", "llama3.2", now)
+	if err != nil {
+		t.Fatalf("CurrentProviderSummary: %v", err)
+	}
+	if summary.Quota == nil {
+		t.Fatal("Quota = nil, want latest quota summary")
+	}
+	if summary.Quota.PlanName != "pro" {
+		t.Fatalf("Quota.PlanName = %q, want pro", summary.Quota.PlanName)
+	}
+	if summary.Quota.State != QuotaStateLive || summary.Quota.Source != QuotaSourceOllamaSettingsHTML {
+		t.Fatalf("unexpected quota summary: %+v", summary.Quota)
+	}
+}
+
 func TestBudgetThresholdAlertsDedupingAndReset(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

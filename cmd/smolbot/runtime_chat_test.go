@@ -16,6 +16,7 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/gateway"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
+	"github.com/Nomadcxx/smolbot/pkg/usage"
 	"github.com/gorilla/websocket"
 )
 
@@ -165,6 +166,22 @@ func TestBuildRuntimeWiresUsageStoreIntoAgentAndGateway(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("ProcessDirect: %v", err)
 	}
+	sessionResetsAt := time.Date(2026, 3, 28, 0, 0, 0, 0, time.UTC)
+	weeklyResetsAt := time.Date(2026, 3, 30, 0, 0, 0, 0, time.UTC)
+	if err := app.usage.SaveQuotaSummary(context.Background(), usage.QuotaSummary{
+		ProviderID:         "openai",
+		PlanName:           "pro",
+		SessionUsedPercent: 2,
+		SessionResetsAt:    &sessionResetsAt,
+		WeeklyUsedPercent:  26.5,
+		WeeklyResetsAt:     &weeklyResetsAt,
+		State:              usage.QuotaStateLive,
+		Source:             usage.QuotaSourceOllamaSettingsHTML,
+		FetchedAt:          time.Date(2026, 3, 27, 23, 0, 0, 0, time.UTC),
+		ExpiresAt:          time.Date(2026, 3, 28, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveQuotaSummary: %v", err)
+	}
 
 	if _, err := os.Stat(app.paths.UsageDB()); err != nil {
 		t.Fatalf("usage db stat: %v", err)
@@ -197,6 +214,13 @@ func TestBuildRuntimeWiresUsageStoreIntoAgentAndGateway(t *testing.T) {
 			SessionTokens int    `json:"sessionTokens"`
 			TodayTokens   int    `json:"todayTokens"`
 			WeeklyTokens  int    `json:"weeklyTokens"`
+			Quota         struct {
+				PlanName           string  `json:"planName"`
+				SessionUsedPercent float64 `json:"sessionUsedPercent"`
+				WeeklyUsedPercent  float64 `json:"weeklyUsedPercent"`
+				State              string  `json:"state"`
+				Source             string  `json:"source"`
+			} `json:"quota"`
 		} `json:"persistedUsage"`
 	}
 	if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
@@ -210,6 +234,12 @@ func TestBuildRuntimeWiresUsageStoreIntoAgentAndGateway(t *testing.T) {
 	}
 	if payload.PersistedUsage.SessionTokens != 20 || payload.PersistedUsage.TodayTokens != 20 || payload.PersistedUsage.WeeklyTokens != 20 {
 		t.Fatalf("unexpected persisted usage summary: %#v", payload.PersistedUsage)
+	}
+	if payload.PersistedUsage.Quota.PlanName != "pro" || payload.PersistedUsage.Quota.SessionUsedPercent != 2 || payload.PersistedUsage.Quota.WeeklyUsedPercent != 26.5 {
+		t.Fatalf("unexpected persisted quota summary: %#v", payload.PersistedUsage.Quota)
+	}
+	if payload.PersistedUsage.Quota.State != string(usage.QuotaStateLive) || payload.PersistedUsage.Quota.Source != string(usage.QuotaSourceOllamaSettingsHTML) {
+		t.Fatalf("unexpected persisted quota state: %#v", payload.PersistedUsage.Quota)
 	}
 }
 
