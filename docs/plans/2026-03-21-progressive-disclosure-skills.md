@@ -645,7 +645,7 @@ git commit -m "fix: address test failures from progressive disclosure changes"
 
 **Step 1: Create token counting script**
 
-Create `scripts/measure_tokens.go`:
+Create `scripts/measure_tokens/main.go`:
 ```go
 package main
 
@@ -693,7 +693,7 @@ func main() {
 **Step 2: Run measurement**
 
 ```bash
-go run scripts/measure_tokens.go
+go run ./scripts/measure_tokens
 ```
 
 **Step 3: Compare with old system**
@@ -706,7 +706,7 @@ Document the savings:
 **Step 4: Commit**
 
 ```bash
-git add scripts/measure_tokens.go
+git add scripts/measure_tokens/main.go
 git commit -m "chore: add token measurement script"
 ```
 

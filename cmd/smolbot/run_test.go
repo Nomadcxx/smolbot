@@ -125,6 +125,18 @@ func TestChannelsCommands(t *testing.T) {
 	if got := out.String(); strings.Contains(got, "complete") {
 		t.Fatalf("expected no misleading completion line in output %q", got)
 	}
+
+	out.Reset()
+	cmd = NewRootCmd("test")
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"channels", "login", "discord"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute discord login: %v", err)
+	}
+	if loginCalled != "discord" {
+		t.Fatalf("expected login flow for discord, got %q", loginCalled)
+	}
 }
 
 func TestChannelsLoginUsesCommandContext(t *testing.T) {

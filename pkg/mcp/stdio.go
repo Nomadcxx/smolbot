@@ -2,12 +2,14 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +26,7 @@ type StdioTransport struct {
 	pending map[string]chan responseResult
 	closed  bool
 	readErr error
+	stderr  *stderrCapture
 }
 
 type responseResult struct {
@@ -36,6 +39,41 @@ var errTransportWriteInterrupted = errors.New("mcp transport write interrupted")
 type writeResult struct {
 	err     error
 	aborted bool
+}
+
+type stderrCapture struct {
+	mu       sync.Mutex
+	buf      bytes.Buffer
+	capBytes int
+}
+
+func newStderrCapture(capBytes int) *stderrCapture {
+	return &stderrCapture{capBytes: capBytes}
+}
+
+func (c *stderrCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.capBytes <= 0 {
+		return len(p), nil
+	}
+	remaining := c.capBytes - c.buf.Len()
+	if remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		_, _ = c.buf.Write(p)
+	}
+	return len(p), nil
+}
+
+func (c *stderrCapture) Snapshot() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.TrimSpace(c.buf.String())
 }
 
 func NewStdioTransport(ctx context.Context, command string, args []string, env map[string]string) (*StdioTransport, error) {
@@ -58,7 +96,8 @@ func NewStdioTransport(ctx context.Context, command string, args []string, env m
 		cancel()
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = io.Discard
+	stderr := newStderrCapture(4096)
+	cmd.Stderr = stderr
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -73,6 +112,7 @@ func NewStdioTransport(ctx context.Context, command string, args []string, env m
 		stdin:   stdin,
 		cancel:  cancel,
 		pending: make(map[string]chan responseResult),
+		stderr:  stderr,
 	}
 	t.startReadLoop(scanner)
 	return t, nil
@@ -283,6 +323,7 @@ func (t *StdioTransport) startReadLoop(scanner *bufio.Scanner) error {
 		if err == nil {
 			err = io.EOF
 		}
+		err = t.withStderr(err)
 		t.stateMu.Lock()
 		t.closed = true
 		t.readErr = err
@@ -295,4 +336,18 @@ func (t *StdioTransport) startReadLoop(scanner *bufio.Scanner) error {
 		}
 	}()
 	return nil
+}
+
+func (t *StdioTransport) withStderr(err error) error {
+	if err == nil {
+		return nil
+	}
+	stderr := ""
+	if t != nil && t.stderr != nil {
+		stderr = t.stderr.Snapshot()
+	}
+	if stderr == "" {
+		return err
+	}
+	return fmt.Errorf("%w: stderr: %s", err, stderr)
 }

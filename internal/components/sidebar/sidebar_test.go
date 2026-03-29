@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"image/color"
 	"os"
 	"strings"
 	"testing"
@@ -59,6 +60,162 @@ func TestContextSectionRendersUsageAndCompression(t *testing.T) {
 	got := plain(section.Render(28, 0, theme.Current()))
 	if !strings.Contains(got, "78%") || !strings.Contains(got, "78K / 100K") || !strings.Contains(got, "↓ 42% compacted") {
 		t.Fatalf("unexpected context render: %q", got)
+	}
+}
+
+func TestUsageSectionRendersObservedAndLiveQuotaBlocks(t *testing.T) {
+	section := UsageSection{
+		summary: &client.UsageSummary{
+			ProviderID:      "ollama",
+			ModelName:       "llama3.2",
+			SessionTokens:   50,
+			TodayTokens:     50,
+			WeeklyTokens:    90,
+			SessionRequests: 2,
+			TodayRequests:   2,
+			WeeklyRequests:  3,
+			Quota: &client.QuotaSummary{
+				ProviderID:         "ollama",
+				PlanName:           "pro",
+				SessionUsedPercent: 2,
+				WeeklyUsedPercent:  26.5,
+				State:              "live",
+				Source:             "ollama_settings_html",
+			},
+		},
+	}
+
+	got := plain(section.Render(28, 0, theme.Current()))
+	if !strings.Contains(got, "Observed") || !strings.Contains(got, "session 50") || !strings.Contains(got, "today 50") || !strings.Contains(got, "week 90") {
+		t.Fatalf("unexpected usage render: %q", got)
+	}
+	if !strings.Contains(got, "reqs 2/2/3") {
+		t.Fatalf("expected request counts in observed block, got %q", got)
+	}
+	if !strings.Contains(got, "Quota") || !strings.Contains(got, "pro") || !strings.Contains(got, "2.0%") || !strings.Contains(got, "26.5%") {
+		t.Fatalf("expected live quota block, got %q", got)
+	}
+}
+
+func TestUsageSectionAvoidsDuplicatingQualifiedProviderModel(t *testing.T) {
+	section := UsageSection{
+		summary: &client.UsageSummary{
+			ProviderID:    "ollama",
+			ModelName:     "ollama/llama3.2",
+			SessionTokens: 50,
+			TodayTokens:   50,
+			WeeklyTokens:  90,
+			Quota: &client.QuotaSummary{
+				ProviderID: "ollama",
+				State:      "expired",
+				Source:     "ollama_settings_html",
+			},
+		},
+	}
+
+	got := plain(section.Render(28, 0, theme.Current()))
+	if !strings.Contains(got, "ollama/llama3.2") {
+		t.Fatalf("expected qualified provider/model label, got %q", got)
+	}
+	if strings.Contains(got, "ollama / ollama/llama3.2") {
+		t.Fatalf("expected provider label to avoid duplication, got %q", got)
+	}
+}
+
+func TestUsageSectionRendersQuotaUnavailableAndExpiredStates(t *testing.T) {
+	t.Run("unavailable", func(t *testing.T) {
+		section := UsageSection{
+			summary: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				Quota: &client.QuotaSummary{
+					ProviderID: "ollama",
+					State:      "unavailable",
+					Source:     "ollama_settings_html",
+				},
+			},
+		}
+
+		got := plain(section.Render(28, 0, theme.Current()))
+		if !strings.Contains(got, "Quota") || !strings.Contains(got, "unavailable") {
+			t.Fatalf("expected unavailable quota line, got %q", got)
+		}
+	})
+
+	t.Run("expired", func(t *testing.T) {
+		section := UsageSection{
+			summary: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				Quota: &client.QuotaSummary{
+					ProviderID: "ollama",
+					PlanName:   "pro",
+					State:      "expired",
+					Source:     "ollama_settings_html",
+				},
+			},
+		}
+
+		got := plain(section.Render(28, 0, theme.Current()))
+		if !strings.Contains(got, "Quota") || !strings.Contains(got, "expired") {
+			t.Fatalf("expected expired quota line, got %q", got)
+		}
+	})
+}
+
+func TestUsageSectionRendersEmptyState(t *testing.T) {
+	section := UsageSection{}
+
+	got := plain(section.Render(28, 0, theme.Current()))
+	if got != "—" {
+		t.Fatalf("expected empty usage state, got %q", got)
+	}
+}
+
+func TestSeverityColorReturnsCorrectColor(t *testing.T) {
+	th := theme.Current()
+	cases := []struct {
+		pct      float64
+		wantFunc func(*theme.Theme) color.Color
+	}{
+		{50.0, func(th *theme.Theme) color.Color { return th.TextMuted }},
+		{59.9, func(th *theme.Theme) color.Color { return th.TextMuted }},
+		{60.0, func(th *theme.Theme) color.Color { return th.Warning }},
+		{70.0, func(th *theme.Theme) color.Color { return th.Warning }},
+		{79.9, func(th *theme.Theme) color.Color { return th.Warning }},
+		{80.0, func(th *theme.Theme) color.Color { return th.Error }},
+		{95.0, func(th *theme.Theme) color.Color { return th.Error }},
+	}
+	for _, tc := range cases {
+		fn := severityColor(tc.pct)
+		got := fn(th)
+		want := tc.wantFunc(th)
+		if got != want {
+			t.Errorf("severityColor(%f) = %v, want %v", tc.pct, got, want)
+		}
+	}
+}
+
+func TestUsageSectionHidesQuotaWhenNil(t *testing.T) {
+	section := UsageSection{
+		summary: &client.UsageSummary{
+			ProviderID:    "ollama",
+			ModelName:     "llama3.2",
+			SessionTokens: 50,
+			TodayTokens:   50,
+			WeeklyTokens:  90,
+		},
+	}
+
+	got := plain(section.Render(28, 0, theme.Current()))
+	if strings.Contains(got, "Quota") {
+		t.Fatalf("expected no Quota block when summary.Quota is nil, got %q", got)
 	}
 }
 
@@ -145,17 +302,24 @@ func TestSidebarViewAndCompactView(t *testing.T) {
 	model.SetCWD(home + "/project")
 	model.SetModel("gpt-4o")
 	model.SetUsage(client.UsageInfo{TotalTokens: 78000, ContextWindow: 100000})
+	model.SetPersistedUsage(&client.UsageSummary{
+		ProviderID:    "ollama",
+		ModelName:     "llama3.2",
+		SessionTokens: 50,
+		TodayTokens:   50,
+		WeeklyTokens:  90,
+	})
 	model.SetCompression(&client.CompressionInfo{Enabled: true, ReductionPercent: 42})
 	model.SetChannels([]ChannelEntry{{Name: "WhatsApp", State: "connected"}})
 	model.SetMCPs([]MCPEntry{{Name: "memory", Status: "connected"}})
 
 	view := plain(model.View())
-	if !strings.Contains(view, "SESSION") || !strings.Contains(view, "CONTEXT") {
+	if !strings.Contains(view, "SESSION") || !strings.Contains(view, "CONTEXT") || !strings.Contains(view, "USAGE") {
 		t.Fatalf("expected sidebar view to include sections, got %q", view)
 	}
 
 	compact := plain(model.CompactView())
-	if !strings.Contains(compact, "SESSION") || !strings.Contains(compact, "CHANNELS") {
+	if !strings.Contains(compact, "SESSION") || !strings.Contains(compact, "USAGE") || !strings.Contains(compact, "CHANNELS") {
 		t.Fatalf("expected compact view to include multiple columns, got %q", compact)
 	}
 }
@@ -166,6 +330,13 @@ func TestSidebarViewRespectsHeightBudget(t *testing.T) {
 	model.SetSession("tui:main")
 	model.SetModel("gpt-4o")
 	model.SetUsage(client.UsageInfo{TotalTokens: 78000, ContextWindow: 100000})
+	model.SetPersistedUsage(&client.UsageSummary{
+		ProviderID:    "ollama",
+		ModelName:     "llama3.2",
+		SessionTokens: 50,
+		TodayTokens:   50,
+		WeeklyTokens:  90,
+	})
 	model.SetChannels([]ChannelEntry{
 		{Name: "WhatsApp", State: "connected"},
 		{Name: "Signal", State: "connected"},

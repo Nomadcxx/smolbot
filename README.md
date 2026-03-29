@@ -172,6 +172,60 @@ Configure in `config.json`:
 }
 ```
 
+### Quota Tracking
+
+For Ollama providers, you can enable quota tracking to monitor your API usage against your Ollama account limits.
+
+**Supported browsers for auto-discovery:**
+
+- Chromium-based: Chrome, Brave, Edge, Vivaldi, Zen
+- Firefox-based: Firefox, Zen
+
+**Configuration:**
+
+```json
+{
+  "quota": {
+    "refreshIntervalMinutes": 60,
+    "providers": {
+      "ollama": {
+        "enabled": true,
+        "browserCookieDiscoveryEnabled": true
+      }
+    }
+  }
+}
+```
+
+Or with manual cookie fallback:
+
+```json
+{
+  "quota": {
+    "refreshIntervalMinutes": 60,
+    "providers": {
+      "ollama": {
+        "enabled": true,
+        "browserCookieDiscoveryEnabled": false,
+        "cookieHeader": "session=abc123; cf_clearance=xyz"
+      }
+    }
+  }
+}
+```
+
+**Setup options:**
+
+1. **Installer**: Toggle quota tracking during installation (Ollama only)
+2. **Onboarding**: Run `smolbot onboard` and enable when prompted
+3. **Manual**: Edit `~/.smolbot/config.json` directly
+
+**Sidebar display:**
+
+- `Quota` only appears when configured and available
+- Percentage values show severity: green (<60%), yellow (60-80%), red (>80%)
+- `Observed` shows smolbot's local usage; `Quota` shows account-backed usage
+
 ## Security
 
 **Workspace Sandboxing:**

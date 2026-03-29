@@ -182,9 +182,11 @@ func executeTaskCmd(index int, m *model) tea.Cmd {
 	return func() tea.Msg {
 		task := &m.tasks[index]
 		err := task.execute(m)
+		skipped := err != nil && task.optional
 		return taskCompleteMsg{
 			index:   index,
 			success: err == nil,
+			skipped: skipped,
 			err:     err,
 		}
 	}

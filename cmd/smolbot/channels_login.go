@@ -13,6 +13,9 @@ func newChannelsLoginCmd(opts *rootOptions) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			channelName := args[0]
+			if channelName == "signal" {
+				return runSignalLogin(cmd.Context(), *opts, cmd.OutOrStdout())
+			}
 			if channelName == "whatsapp" {
 				if jsonOutput {
 					return runWhatsAppLoginJSON(cmd.Context(), *opts)

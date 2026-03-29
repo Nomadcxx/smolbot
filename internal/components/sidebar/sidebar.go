@@ -20,6 +20,7 @@ type Model struct {
 
 	session  SessionSection
 	context  ContextSection
+	usage    UsageSection
 	channels ChannelsSection
 	mcps     MCPsSection
 	cron     CronSection
@@ -76,6 +77,10 @@ func (m *Model) SetUsage(usage client.UsageInfo) {
 	m.context.usage = usage
 }
 
+func (m *Model) SetPersistedUsage(summary *client.UsageSummary) {
+	m.usage.summary = summary
+}
+
 func (m *Model) SetCompression(info *client.CompressionInfo) {
 	m.context.compression = info
 }
@@ -101,6 +106,7 @@ func (m Model) View() string {
 	sections := []string{
 		renderSectionBlock(m.session, m.width, 0, t),
 		renderSectionBlock(m.context, m.width, 0, t),
+		renderSectionBlock(m.usage, m.width, 0, t),
 		renderSectionBlock(m.channels, m.width, limits["CHANNELS"], t),
 		renderSectionBlock(m.mcps, m.width, limits["MCPS"], t),
 		renderSectionBlock(m.cron, m.width, limits["SCHEDULED"], t),
@@ -134,6 +140,7 @@ func (m Model) CompactView() string {
 	sections := []Section{
 		m.session,
 		m.context,
+		m.usage,
 		m.channels,
 		m.mcps,
 		m.cron,
@@ -189,6 +196,7 @@ func (m Model) getDynamicLimits() map[string]int {
 	fixedBlocks := []string{
 		renderSectionBlock(m.session, m.width, 0, theme.Current()),
 		renderSectionBlock(m.context, m.width, 0, theme.Current()),
+		renderSectionBlock(m.usage, m.width, 0, theme.Current()),
 	}
 	if m.channels.ItemCount() == 0 {
 		fixedBlocks = append(fixedBlocks, renderSectionBlock(m.channels, m.width, 0, theme.Current()))

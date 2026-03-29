@@ -125,6 +125,7 @@ type Model struct {
 	streaming            bool
 	currentRunID         string
 	contextWarned        bool
+	usageAlertKey        string
 	flashSeq             int
 	compactionFrame      int
 	progressBuffer       string
@@ -502,6 +503,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sidebar.SetSession(firstNonEmpty(msg.Payload.Session, m.app.Session))
 		m.sidebar.SetModel(m.app.Model)
 		m.sidebar.SetUsage(msg.Payload.Usage)
+		m.sidebar.SetPersistedUsage(msg.Payload.PersistedUsage)
+		m.maybeWarnPersistedUsage(firstNonEmpty(msg.Payload.Session, m.app.Session), msg.Payload.UsageAlert, msg.Payload.PersistedUsage)
 		m.sidebar.SetChannels(mapChannelEntries(msg.Payload.Channels))
 		if cwd, err := os.Getwd(); err == nil {
 			m.sidebar.SetCWD(cwd)
@@ -537,6 +540,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.footer.SetSession(msg.Key)
 		m.messages = chat.NewMessages()
 		m.contextWarned = false
+		m.clearPersistedUsageWarning()
 		m.resetProgressFlush()
 		m.recalcLayout()
 		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
@@ -565,6 +569,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages = chat.NewMessages()
 		m.dialog = nil
 		m.contextWarned = false
+		m.clearPersistedUsageWarning()
 		m.resetProgressFlush()
 		m.recalcLayout()
 		return m, tea.Batch(m.loadHistoryCmd(), m.persistStateCmd(), m.syncStatusCmd(false))
@@ -575,6 +580,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages = chat.NewMessages()
 		m.dialog = nil
 		m.contextWarned = false
+		m.clearPersistedUsageWarning()
 		m.resetProgressFlush()
 		m.recalcLayout()
 		return m, tea.Batch(m.persistStateCmd(), m.syncStatusCmd(false))
@@ -863,6 +869,7 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			m.footer.SetSession(m.app.Session)
 			m.messages = chat.NewMessages()
 			m.contextWarned = false
+			m.clearPersistedUsageWarning()
 			m.recalcLayout()
 			return m, m.persistStateCmd()
 		}
@@ -903,6 +910,7 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.resetProgressFlush()
 		m.messages = chat.NewMessages()
 		m.contextWarned = false
+		m.clearPersistedUsageWarning()
 	case "/help":
 		m.messages.AppendAssistant("Commands: /compact, /session, /session new, /session reset, /model, /model <name>, /theme <name>, /skills, /mcps, /providers, /keybindings, /clear, /status, /help, /quit")
 	case "/quit":
@@ -1147,6 +1155,122 @@ func (m *Model) maybeWarnContextUsage(pct int) {
 	}
 	m.contextWarned = true
 	m.messages.AppendSystem(fmt.Sprintf("Context is %d%% full. Use /compact to free space.", pct))
+}
+
+func (m *Model) maybeWarnPersistedUsage(session string, alert *client.UsageAlert, summary *client.UsageSummary) {
+	if alert == nil {
+		alert = usageAlertFromSummary(summary)
+	}
+	key := usageAlertKey(session, alert)
+	if key == "" {
+		m.clearPersistedUsageWarning()
+		return
+	}
+	if m.usageAlertKey == key {
+		return
+	}
+	m.usageAlertKey = key
+	if strings.TrimSpace(alert.Message) != "" {
+		m.messages.AppendSystem(alert.Message)
+	}
+}
+
+func (m *Model) clearPersistedUsageWarning() {
+	m.usageAlertKey = ""
+}
+
+func usageAlertKey(session string, alert *client.UsageAlert) string {
+	if alert == nil {
+		return ""
+	}
+	if strings.TrimSpace(alert.WarningLevel) == "" && strings.TrimSpace(alert.Message) == "" {
+		return ""
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(session),
+		strings.TrimSpace(alert.ProviderID),
+		strings.TrimSpace(alert.ModelName),
+		strings.TrimSpace(alert.BudgetStatus),
+		strings.TrimSpace(alert.WarningLevel),
+		strings.TrimSpace(alert.Message),
+	}, "\x00")
+}
+
+func usageAlertFromSummary(summary *client.UsageSummary) *client.UsageAlert {
+	if summary == nil {
+		return nil
+	}
+	if strings.TrimSpace(summary.WarningLevel) != "" {
+		return &client.UsageAlert{
+			ProviderID:   summary.ProviderID,
+			ModelName:    summary.ModelName,
+			BudgetStatus: summary.BudgetStatus,
+			WarningLevel: summary.WarningLevel,
+			Message:      persistedUsageAlertMessage(summary.ProviderID, summary.ModelName, summary.WarningLevel),
+		}
+	}
+	if quotaAlert := quotaAlertFromSummary(summary); quotaAlert != nil {
+		return quotaAlert
+	}
+	return nil
+}
+
+func persistedUsageAlertMessage(providerID, modelName, warningLevel string) string {
+	label := strings.TrimSpace(modelName)
+	providerID = strings.TrimSpace(providerID)
+	if label == "" {
+		label = providerID
+	} else if providerID != "" && !strings.HasPrefix(label, providerID+"/") {
+		label = providerID + "/" + label
+	}
+	if label == "" {
+		label = "usage"
+	}
+	level := strings.TrimSpace(warningLevel)
+	if level == "" {
+		return "Usage warning for " + label + "."
+	}
+	return fmt.Sprintf("Usage warning for %s: %s budget threshold reached.", label, level)
+}
+
+func quotaAlertFromSummary(summary *client.UsageSummary) *client.UsageAlert {
+	if summary == nil || summary.Quota == nil {
+		return nil
+	}
+	state := strings.ToLower(strings.TrimSpace(summary.Quota.State))
+	if state != "expired" && state != "stale" && state != "unavailable" {
+		return nil
+	}
+
+	return &client.UsageAlert{
+		ProviderID:   summary.ProviderID,
+		ModelName:    summary.ModelName,
+		BudgetStatus: "quota",
+		WarningLevel: state,
+		Message:      quotaAlertMessage(summary.ProviderID, summary.ModelName, state),
+	}
+}
+
+func quotaAlertMessage(providerID, modelName, state string) string {
+	label := strings.TrimSpace(modelName)
+	providerID = strings.TrimSpace(providerID)
+	if label == "" {
+		label = providerID
+	} else if providerID != "" && !strings.HasPrefix(label, providerID+"/") {
+		label = providerID + "/" + label
+	}
+	if label == "" {
+		label = "usage"
+	}
+
+	switch state {
+	case "expired":
+		return fmt.Sprintf("Quota status for %s expired. Reconnect your Ollama web session to refresh account usage.", label)
+	case "stale":
+		return fmt.Sprintf("Quota status for %s is stale. Showing the last cached account usage.", label)
+	default:
+		return fmt.Sprintf("Quota status for %s is unavailable. Observed usage remains available.", label)
+	}
 }
 
 func buildProviderLines(models []client.ModelInfo, current string, status client.StatusPayload, cfg *cfgpkg.Config) []string {

@@ -18,7 +18,9 @@ import (
 
 	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
+	discordchannel "github.com/Nomadcxx/smolbot/pkg/channel/discord"
 	signalchannel "github.com/Nomadcxx/smolbot/pkg/channel/signal"
+	telegramchannel "github.com/Nomadcxx/smolbot/pkg/channel/telegram"
 	whatsappchannel "github.com/Nomadcxx/smolbot/pkg/channel/whatsapp"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/cron"
@@ -30,6 +32,7 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/skill"
 	"github.com/Nomadcxx/smolbot/pkg/tokenizer"
 	"github.com/Nomadcxx/smolbot/pkg/tool"
+	"github.com/Nomadcxx/smolbot/pkg/usage"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -72,6 +75,8 @@ type runtimeDeps struct {
 	HeartbeatRun      func(context.Context) error
 	HeartbeatInterval time.Duration
 	HeartbeatEnabled  bool
+	QuotaRun          func(context.Context) error
+	QuotaInterval     time.Duration
 	SetModelCallback  func(model string) error
 }
 
@@ -79,6 +84,7 @@ type runtimeApp struct {
 	config           *config.Config
 	paths            *config.Paths
 	sessions         *session.Store
+	usage            *usage.Store
 	mcpCleanup       func()
 	channels         *channel.Manager
 	tools            *tool.Registry
@@ -88,8 +94,10 @@ type runtimeApp struct {
 	heartbeat        *heartbeat.Service
 	runCron          func(context.Context, time.Time) error
 	runBeat          func(context.Context) error
+	runQuota         func(context.Context) error
 	cronEvery        time.Duration
 	beatEvery        time.Duration
+	quotaEvery       time.Duration
 	beatOn           bool
 	gateway          *gateway.Server
 }
@@ -125,6 +133,14 @@ var newSignalChannel = func(cfg config.SignalChannelConfig) channel.Channel {
 
 var newWhatsAppChannel = func(cfg config.WhatsAppChannelConfig) (channel.Channel, error) {
 	return whatsappchannel.NewProductionAdapter(cfg)
+}
+
+var newTelegramChannel = func(cfg config.TelegramChannelConfig) (channel.Channel, error) {
+	return telegramchannel.NewProductionAdapter(cfg)
+}
+
+var newDiscordChannel = func(cfg config.DiscordChannelConfig) (channel.Channel, error) {
+	return discordchannel.NewProductionAdapter(cfg)
 }
 
 var runChatRuntimeDeps = func() runtimeDeps {
@@ -193,6 +209,22 @@ func collectOnboardConfigFromIO(ctx context.Context, opts rootOptions, in io.Rea
 		return nil, err
 	}
 	cfg.Agents.Defaults.Model = modelName
+
+	if strings.EqualFold(strings.TrimSpace(providerName), "ollama") {
+		quotaEnabled, err := promptWithDefault(reader, out, "Enable quota setup", "y")
+		if err != nil {
+			return nil, err
+		}
+		if isYes(quotaEnabled) {
+			cfg.Quota.RefreshIntervalMinutes = 60
+			cfg.Quota.Providers = map[string]config.ProviderQuotaConfig{
+				"ollama": {
+					Enabled:                        true,
+					BrowserCookieDiscoveryEnabled:  true,
+				},
+			}
+		}
+	}
 
 	providerCfg := cfg.Providers[providerName]
 	apiKey, err := promptWithDefault(reader, out, "API key", providerCfg.APIKey)
@@ -543,12 +575,18 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	if err != nil {
 		return nil, err
 	}
+	usageStore, err := usage.NewStore(paths.UsageDB())
+	if err != nil {
+		_ = sessions.Close()
+		return nil, err
+	}
 
 	runtimeProvider := deps.Provider
 	if runtimeProvider == nil {
 		registry := provider.NewRegistryWithDefaults(cfg)
 		runtimeProvider, err = registry.ForModel(cfg.Agents.Defaults.Model)
 		if err != nil {
+			_ = usageStore.Close()
 			_ = sessions.Close()
 			return nil, err
 		}
@@ -557,6 +595,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	channels := channel.NewManager()
 	configured, err := configuredChannels(cfg, false)
 	if err != nil {
+		_ = usageStore.Close()
 		_ = sessions.Close()
 		return nil, err
 	}
@@ -578,22 +617,19 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		mcpCleanup = cleanup
 		warnings, err := mgr.DiscoverAndRegister(context.Background(), tools, cfg.Tools.MCPServers)
 		if err != nil {
-			_ = sessions.Close()
-			if mcpCleanup != nil {
-				mcpCleanup()
+			slog.Warn("mcp discovery failed; continuing without discovered tools", "error", err)
+		} else {
+			for _, warning := range warnings {
+				slog.Warn("mcp discovery warning", "msg", warning)
 			}
-			return nil, fmt.Errorf("mcp discovery: %w", err)
-		}
-		for _, warning := range warnings {
-			slog.Warn("mcp discovery warning", "msg", warning)
-		}
-		registered := make([]string, 0)
-		for _, def := range tools.Definitions() {
-			if strings.HasPrefix(def.Name, "mcp_") {
-				registered = append(registered, def.Name)
+			registered := make([]string, 0)
+			for _, def := range tools.Definitions() {
+				if strings.HasPrefix(def.Name, "mcp_") {
+					registered = append(registered, def.Name)
+				}
 			}
+			slog.Info("mcp discovery completed", "servers", len(cfg.Tools.MCPServers), "count", len(registered), "tools", registered)
 		}
-		slog.Info("mcp discovery completed", "servers", len(cfg.Tools.MCPServers), "count", len(registered), "tools", registered)
 	}
 	spawner := &runtimeSpawner{}
 	loop := agent.NewAgentLoop(agent.LoopDeps{
@@ -603,6 +639,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		Config:        cfg,
 		Skills:        skills,
 		Tokenizer:     tokenizer.New(),
+		UsageRecorder: usageStore,
 		Workspace:     paths.Workspace(),
 		MessageRouter: channels,
 		Spawner:       spawner,
@@ -638,6 +675,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		config:     cfg,
 		paths:      paths,
 		sessions:   sessions,
+		usage:      usageStore,
 		mcpCleanup: mcpCleanup,
 		channels:   channels,
 		tools:      tools,
@@ -648,12 +686,14 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		runBeat:    heartbeatService.RunOnce,
 		cronEvery:  time.Second,
 		beatEvery:  time.Duration(cfg.Gateway.Heartbeat.Interval) * time.Minute,
+		quotaEvery: time.Duration(cfg.Quota.RefreshIntervalMinutes) * time.Minute,
 		beatOn:     cfg.Gateway.Heartbeat.Enabled,
 		gateway: gateway.NewServer(gateway.ServerDeps{
 			Agent:     loop,
 			Sessions:  sessions,
 			Channels:  channels,
 			Config:    cfg,
+			Usage:     usageStore,
 			Version:   version,
 			StartedAt: time.Now(),
 			SetModelCallback: func(model string) error {
@@ -677,6 +717,15 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	}
 	if deps.HeartbeatEnabled {
 		app.beatOn = true
+	}
+	if app.runQuota == nil && shouldEnableOllamaQuota(cfg, usageStore) {
+		app.runQuota = newOllamaQuotaRunner(cfg, paths, usageStore)
+	}
+	if deps.QuotaRun != nil {
+		app.runQuota = deps.QuotaRun
+	}
+	if deps.QuotaInterval > 0 {
+		app.quotaEvery = deps.QuotaInterval
 	}
 	return app, nil
 }
@@ -767,17 +816,22 @@ func runChannelLoginImpl(ctx context.Context, opts rootOptions, channelName stri
 
 	deps := launchRuntimeDeps()
 	manager := channel.NewManager()
+	var selected channel.Channel
 	if configured, err := configuredChannel(cfg, channelName, true); err != nil {
 		return err
 	} else if configured != nil {
+		selected = configured
 		manager.Register(configured)
 	}
 	for _, registered := range deps.Channels {
 		if registered != nil && channelEnabled(cfg, registered.Name()) {
+			if strings.EqualFold(strings.TrimSpace(registered.Name()), strings.TrimSpace(channelName)) {
+				selected = registered
+			}
 			manager.Register(registered)
 		}
 	}
-	return manager.LoginWithUpdates(ctx, channelName, func(status channel.Status) error {
+	err = manager.LoginWithUpdates(ctx, channelName, func(status channel.Status) error {
 		if out == nil || status.State == "" {
 			return nil
 		}
@@ -788,6 +842,21 @@ func runChannelLoginImpl(ctx context.Context, opts rootOptions, channelName stri
 		_, err := fmt.Fprintf(out, "%s\n", status.State)
 		return err
 	})
+	if err != nil && selected != nil {
+		if _, interactive := selected.(channel.InteractiveLoginHandler); interactive {
+			return err
+		}
+		if reporter, ok := selected.(channel.StatusReporter); ok && out != nil {
+			if status, statusErr := reporter.Status(ctx); statusErr == nil && status.State != "" {
+				if status.Detail != "" {
+					_, _ = fmt.Fprintf(out, "%s: %s\n", status.State, status.Detail)
+				} else {
+					_, _ = fmt.Fprintf(out, "%s\n", status.State)
+				}
+			}
+		}
+	}
+	return err
 }
 
 func loadRuntimeConfig(configPath, workspace string, port int) (*config.Config, *config.Paths, error) {
@@ -887,6 +956,10 @@ func channelEnabled(cfg *config.Config, name string) bool {
 		return cfg.Channels.Signal.Enabled
 	case "whatsapp":
 		return cfg.Channels.WhatsApp.Enabled
+	case "telegram":
+		return cfg.Channels.Telegram.Enabled
+	case "discord":
+		return cfg.Channels.Discord.Enabled
 	default:
 		return true
 	}
@@ -908,6 +981,20 @@ func configuredChannels(cfg *config.Config, includeDisabled bool) ([]channel.Cha
 		}
 		out = append(out, whatsApp)
 	}
+	if includeDisabled || cfg.Channels.Telegram.Enabled {
+		telegram, err := newTelegramChannel(cfg.Channels.Telegram)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, telegram)
+	}
+	if includeDisabled || cfg.Channels.Discord.Enabled {
+		discord, err := newDiscordChannel(cfg.Channels.Discord)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, discord)
+	}
 	return out, nil
 }
 
@@ -924,6 +1011,14 @@ func configuredChannel(cfg *config.Config, name string, includeDisabled bool) (c
 	case "whatsapp":
 		if includeDisabled || cfg.Channels.WhatsApp.Enabled {
 			return newWhatsAppChannel(cfg.Channels.WhatsApp)
+		}
+	case "telegram":
+		if includeDisabled || cfg.Channels.Telegram.Enabled {
+			return newTelegramChannel(cfg.Channels.Telegram)
+		}
+	case "discord":
+		if includeDisabled || cfg.Channels.Discord.Enabled {
+			return newDiscordChannel(cfg.Channels.Discord)
 		}
 	}
 	return nil, nil
@@ -950,8 +1045,17 @@ func (a *runtimeApp) Close() error {
 		a.mcpCleanup()
 		a.mcpCleanup = nil
 	}
+	var errs []error
+	if a.usage != nil {
+		errs = append(errs, a.usage.Close())
+		a.usage = nil
+	}
 	if a.sessions != nil {
-		return a.sessions.Close()
+		errs = append(errs, a.sessions.Close())
+		a.sessions = nil
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	return nil
 }
@@ -1049,6 +1153,15 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 	if app == nil {
 		return
 	}
+	reportLoopError := func(err error) {
+		if err == nil {
+			return
+		}
+		select {
+		case errCh <- err:
+		default:
+		}
+	}
 	if app.runCron != nil && app.cronEvery > 0 {
 		go func() {
 			ticker := time.NewTicker(app.cronEvery)
@@ -1060,6 +1173,8 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 				case now := <-ticker.C:
 					if err := app.runCron(ctx, now); err != nil {
 						log.Printf("[runtime] cron run failed: %v", err)
+						reportLoopError(err)
+						return
 					}
 				}
 			}
@@ -1076,10 +1191,87 @@ func startRuntimeLoops(ctx context.Context, app *runtimeApp, errCh chan<- error)
 				case <-ticker.C:
 					if err := app.runBeat(ctx); err != nil {
 						log.Printf("[runtime] heartbeat run failed: %v", err)
+						reportLoopError(err)
+						return
 					}
 				}
 			}
 		}()
+	}
+	if app.runQuota != nil && app.quotaEvery > 0 {
+		go func() {
+			ticker := time.NewTicker(app.quotaEvery)
+			defer ticker.Stop()
+			run := func() {
+				if err := app.runQuota(ctx); err != nil {
+					log.Printf("[runtime] quota refresh failed: %v", err)
+				}
+			}
+			run()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					run()
+				}
+			}
+		}()
+	}
+}
+
+func shouldEnableOllamaQuota(cfg *config.Config, store *usage.Store) bool {
+	if cfg == nil || store == nil {
+		return false
+	}
+	if cfg.Quota.RefreshIntervalMinutes <= 0 {
+		return false
+	}
+	return cfg.Quota.HasEnabledProvider("ollama")
+}
+
+func newOllamaQuotaRunner(cfg *config.Config, paths *config.Paths, store *usage.Store) func(context.Context) error {
+	cookiePath := paths.OllamaCookieJar()
+	cookieLoader := usage.NewCookieJarStore(cookiePath)
+	fetcher := &usage.OllamaQuotaFetcher{
+		Clock:        time.Now,
+		Signer:       usage.NewOllamaKeySigner(""),
+		CookieLoader: cookieLoader,
+	}
+	providerCfg := config.ProviderQuotaConfig{}
+	if cfg != nil {
+		providerCfg = cfg.Quota.Provider("ollama")
+	}
+
+	return func(ctx context.Context) error {
+		if cfg != nil {
+			cookieHeader := strings.TrimSpace(providerCfg.CookieHeader)
+			if cookieHeader == "" {
+				cookieHeader = strings.TrimSpace(cfg.Quota.OllamaCookieHeader)
+			}
+			if cookieHeader != "" {
+				if err := usage.WriteOllamaCookieHeader(cookiePath, cookieHeader); err != nil {
+					log.Printf("[runtime] ollama cookie header override failed: %v", err)
+				}
+			} else {
+				if providerCfg.BrowserCookieDiscoveryEnabled {
+					cookies, err := cookieLoader.Load()
+					if err != nil || len(cookies) == 0 {
+						if _, importErr := usage.ImportOllamaCookiesFromLinuxBrowsers("", cookiePath); importErr != nil {
+							log.Printf("[runtime] ollama cookie import skipped: %v", importErr)
+						}
+					}
+				}
+			}
+		}
+
+		summary, err := fetcher.Fetch(ctx)
+		if summary.ProviderID != "" {
+			if saveErr := store.SaveQuotaSummary(ctx, summary); saveErr != nil {
+				return fmt.Errorf("save quota summary: %w", saveErr)
+			}
+		}
+		return err
 	}
 }
 

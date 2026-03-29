@@ -329,6 +329,440 @@ func TestStatusLoadedUpdatesFooterUsage(t *testing.T) {
 	}
 }
 
+func TestStatusLoadedHydratesSidebarPersistedUsage(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 120
+	model.height = 32
+	model.sidebarVisible = true
+	model.recalcLayout()
+
+	updated, _ := model.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			Usage: client.UsageInfo{
+				TotalTokens:   68000,
+				ContextWindow: 131072,
+			},
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				BudgetStatus:  "warning",
+				WarningLevel:  "medium",
+			},
+		},
+	})
+	got := updated.(Model)
+
+	sidebarView := plain(got.sidebar.View())
+	if !strings.Contains(sidebarView, "USAGE") || !strings.Contains(sidebarView, "ollama / llama3.2") {
+		t.Fatalf("expected persisted usage header and provider, got %q", sidebarView)
+	}
+	if !strings.Contains(sidebarView, "session 50") || !strings.Contains(sidebarView, "week 90") {
+		t.Fatalf("expected persisted usage totals, got %q", sidebarView)
+	}
+	if !strings.Contains(sidebarView, "68K / 131.1K") {
+		t.Fatalf("expected context usage to remain visible, got %q", sidebarView)
+	}
+}
+
+func TestStatusLoadedHydratesQualifiedPersistedUsageModel(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 120
+	model.height = 32
+	model.sidebarVisible = true
+	model.recalcLayout()
+
+	updated, _ := model.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "ollama/llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+			},
+		},
+	})
+	got := updated.(Model)
+
+	sidebarView := plain(got.sidebar.View())
+	if !strings.Contains(sidebarView, "ollama/llama3.2") {
+		t.Fatalf("expected qualified persisted usage label, got %q", sidebarView)
+	}
+	if strings.Contains(sidebarView, "ollama / ollama/llama3.2") {
+		t.Fatalf("expected sidebar to avoid duplicate provider label, got %q", sidebarView)
+	}
+}
+
+func TestChatUsageEventDoesNotOverwritePersistedUsageSummary(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 120
+	model.height = 32
+	model.sidebarVisible = true
+	model.recalcLayout()
+
+	updated, _ := model.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+			},
+		},
+	})
+	got := updated.(Model)
+
+	payload, _ := json.Marshal(client.UsagePayload{
+		PromptTokens:     12,
+		CompletionTokens: 8,
+		TotalTokens:      20,
+		ContextWindow:    8192,
+	})
+	updated, _ = got.Update(EventMsg{
+		Event: client.Event{Type: client.FrameEvent, Event: "chat.usage", Payload: payload, Seq: 1},
+	})
+	got = updated.(Model)
+
+	sidebarView := plain(got.sidebar.View())
+	if !strings.Contains(sidebarView, "session 50") || !strings.Contains(sidebarView, "week 90") {
+		t.Fatalf("expected persisted usage summary to remain, got %q", sidebarView)
+	}
+	if !strings.Contains(sidebarView, "20 / 8.2K") {
+		t.Fatalf("expected live context usage to update independently, got %q", sidebarView)
+	}
+}
+
+func TestStatusLoadedClearsSidebarPersistedUsageWhenSummaryMissing(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 120
+	model.height = 32
+	model.sidebarVisible = true
+	model.recalcLayout()
+
+	updated, _ := model.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+			},
+		},
+	})
+	got := updated.(Model)
+
+	updated, _ = got.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:          "ollama/llama3.2",
+			Session:        "tui:main",
+			PersistedUsage: nil,
+		},
+	})
+	got = updated.(Model)
+
+	sidebarView := plain(got.sidebar.View())
+	if !strings.Contains(sidebarView, "USAGE") {
+		t.Fatalf("expected usage section to remain visible, got %q", sidebarView)
+	}
+	if strings.Contains(sidebarView, "session 50") || strings.Contains(sidebarView, "week 90") {
+		t.Fatalf("expected prior persisted usage values to clear, got %q", sidebarView)
+	}
+}
+
+func TestPersistedUsageWarningIsDedupedUntilStateChanges(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 120
+	model.height = 32
+	model.sidebarVisible = true
+	model.messages.SetSize(120, 20)
+	model.recalcLayout()
+
+	warning := client.UsageAlert{
+		ProviderID:   "ollama",
+		ModelName:    "ollama/llama3.2",
+		BudgetStatus: "warning",
+		WarningLevel: "medium",
+		Message:      "Usage warning for ollama/llama3.2: medium budget threshold reached.",
+	}
+
+	updated, _ := model.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "ollama/llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				BudgetStatus:  "warning",
+				WarningLevel:  "medium",
+			},
+			UsageAlert: &warning,
+		},
+	})
+	got := updated.(Model)
+
+	view := plain(got.messages.View())
+	if strings.Count(view, warning.Message) != 1 {
+		t.Fatalf("expected first persisted usage warning message, got %q", view)
+	}
+
+	updated, _ = got.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "ollama/llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				BudgetStatus:  "warning",
+				WarningLevel:  "medium",
+			},
+			UsageAlert: &warning,
+		},
+	})
+	got = updated.(Model)
+	view = plain(got.messages.View())
+	if strings.Count(view, warning.Message) != 1 {
+		t.Fatalf("expected unchanged persisted usage warning to be deduped, got %q", view)
+	}
+
+	escalated := client.UsageAlert{
+		ProviderID:   "ollama",
+		ModelName:    "ollama/llama3.2",
+		BudgetStatus: "warning",
+		WarningLevel: "critical",
+		Message:      "Usage warning for ollama/llama3.2: critical budget threshold reached.",
+	}
+	updated, _ = got.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "ollama/llama3.2",
+				SessionTokens: 95,
+				TodayTokens:   95,
+				WeeklyTokens:  95,
+				BudgetStatus:  "warning",
+				WarningLevel:  "critical",
+			},
+			UsageAlert: &escalated,
+		},
+	})
+	got = updated.(Model)
+	view = plain(got.messages.View())
+	if strings.Count(view, warning.Message) != 1 || strings.Count(view, escalated.Message) != 1 {
+		t.Fatalf("expected escalated persisted usage warning to append once, got %q", view)
+	}
+}
+
+func TestClearCommandResetsPersistedUsageWarningLatch(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 120
+	model.height = 32
+	model.sidebarVisible = true
+	model.messages.SetSize(120, 20)
+	model.recalcLayout()
+
+	warning := client.UsageAlert{
+		ProviderID:   "ollama",
+		ModelName:    "ollama/llama3.2",
+		BudgetStatus: "warning",
+		WarningLevel: "medium",
+		Message:      "Usage warning for ollama/llama3.2: medium budget threshold reached.",
+	}
+	status := StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "ollama/llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				BudgetStatus:  "warning",
+				WarningLevel:  "medium",
+			},
+			UsageAlert: &warning,
+		},
+	}
+
+	updated, _ := model.Update(status)
+	got := updated.(Model)
+	if view := plain(got.messages.View()); strings.Count(view, warning.Message) != 1 {
+		t.Fatalf("expected initial persisted usage warning, got %q", view)
+	}
+
+	updated, _ = got.handleSlashCommand("/clear")
+	got = updated.(Model)
+	if view := plain(got.messages.View()); strings.Contains(view, warning.Message) {
+		t.Fatalf("expected clear to remove prior warning message, got %q", view)
+	}
+
+	updated, _ = got.Update(status)
+	got = updated.(Model)
+	if view := plain(got.messages.View()); strings.Count(view, warning.Message) != 1 {
+		t.Fatalf("expected cleared transcript to allow warning to reappear, got %q", view)
+	}
+}
+
+func TestPersistedUsageWarningFallsBackToSummaryWhenAlertPayloadMissing(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 120
+	model.height = 32
+	model.sidebarVisible = true
+	model.messages.SetSize(120, 20)
+	model.recalcLayout()
+
+	updated, _ := model.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "ollama/llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				BudgetStatus:  "warning",
+				WarningLevel:  "medium",
+			},
+		},
+	})
+	got := updated.(Model)
+
+	view := plain(got.messages.View())
+	if !strings.Contains(view, "Usage warning for ollama/llama3.2: medium budget threshold reached.") {
+		t.Fatalf("expected persisted usage summary to fall back to a warning notification, got %q", view)
+	}
+}
+
+func TestQuotaStateWarningIsDedupedUntilStateChanges(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 120
+	model.height = 32
+	model.sidebarVisible = true
+	model.messages.SetSize(120, 20)
+	model.recalcLayout()
+
+	expiredStatus := StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "ollama/llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				Quota: &client.QuotaSummary{
+					State: "expired",
+				},
+			},
+		},
+	}
+
+	updated, _ := model.Update(expiredStatus)
+	got := updated.(Model)
+	expiredMessage := "Quota status for ollama/llama3.2 expired."
+	view := plain(got.messages.View())
+	if strings.Count(view, expiredMessage) != 1 {
+		t.Fatalf("expected initial quota-expired warning, got %q", view)
+	}
+
+	updated, _ = got.Update(expiredStatus)
+	got = updated.(Model)
+	view = plain(got.messages.View())
+	if strings.Count(view, expiredMessage) != 1 {
+		t.Fatalf("expected unchanged quota-expired warning to be deduped, got %q", view)
+	}
+
+	staleStatus := StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:   "ollama/llama3.2",
+			Session: "tui:main",
+			PersistedUsage: &client.UsageSummary{
+				ProviderID:    "ollama",
+				ModelName:     "ollama/llama3.2",
+				SessionTokens: 50,
+				TodayTokens:   50,
+				WeeklyTokens:  90,
+				Quota: &client.QuotaSummary{
+					State: "stale",
+				},
+			},
+		},
+	}
+	updated, _ = got.Update(staleStatus)
+	got = updated.(Model)
+	staleMessage := "Quota status for ollama/llama3.2 is stale."
+	view = plain(got.messages.View())
+	if strings.Count(view, expiredMessage) != 1 || strings.Count(view, staleMessage) != 1 {
+		t.Fatalf("expected stale quota warning to append once on state change, got %q", view)
+	}
+}
+
+func TestClearResetsPersistedUsageWarningDeduper(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 120
+	model.height = 32
+	model.sidebarVisible = true
+	model.messages.SetSize(120, 20)
+	model.recalcLayout()
+
+	warning := client.UsageAlert{
+		ProviderID:   "ollama",
+		ModelName:    "ollama/llama3.2",
+		BudgetStatus: "warning",
+		WarningLevel: "medium",
+		Message:      "Usage warning for ollama/llama3.2: medium budget threshold reached.",
+	}
+
+	updated, _ := model.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:      "ollama/llama3.2",
+			Session:    "tui:main",
+			UsageAlert: &warning,
+		},
+	})
+	got := updated.(Model)
+
+	cleared, _ := got.handleSlashCommand("/clear")
+	got = cleared.(Model)
+
+	updated, _ = got.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{
+			Model:      "ollama/llama3.2",
+			Session:    "tui:main",
+			UsageAlert: &warning,
+		},
+	})
+	got = updated.(Model)
+
+	view := plain(got.messages.View())
+	if strings.Count(view, warning.Message) != 1 {
+		t.Fatalf("expected persisted usage warning to reappear after /clear, got %q", view)
+	}
+}
+
 func TestCopyShortcutUsesClipboardAndFlashesStatus(t *testing.T) {
 	model := New(app.Config{})
 	model.status.SetWidth(80)
@@ -1087,7 +1521,7 @@ func TestTranscriptFrameAddsSpacerBelowHeader(t *testing.T) {
 	headerRow := -1
 	contentRow := -1
 	for i, line := range lines {
-		if headerRow == -1 && strings.Contains(line, "▄▄   ▄▄") {
+		if headerRow == -1 && strings.Contains(line, "▄▄▄▄ ▄") {
 			headerRow = i
 		}
 		if contentRow == -1 && strings.Contains(line, "┃  USER") {
@@ -1369,7 +1803,7 @@ func TestHeaderArtIsCenteredAcrossViewport(t *testing.T) {
 	lines := strings.Split(plain(got.View().Content), "\n")
 	artLine := ""
 	for _, line := range lines {
-		if strings.Contains(line, "▄▄   ▄▄") {
+		if strings.Contains(line, "▄▄▄▄ ▄") {
 			artLine = line
 			break
 		}
@@ -1377,7 +1811,7 @@ func TestHeaderArtIsCenteredAcrossViewport(t *testing.T) {
 	if artLine == "" {
 		t.Fatalf("expected ascii header line in view %q", plain(got.View().Content))
 	}
-	if !strings.HasPrefix(strings.TrimSpace(artLine), "██") {
+	if !strings.HasPrefix(strings.TrimSpace(artLine), "▄▄▄▄") {
 		t.Fatalf("expected left-aligned header art, got %q", artLine)
 	}
 }

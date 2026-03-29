@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -45,35 +46,59 @@ func newModel() model {
 	asciiHeader := strings.Join(asciiHeaderLines, "\n")
 	beams := NewBeamsTextEffect(80, 8, asciiHeader)
 	ticker := NewTypewriterTicker(tickerMessages)
+	telegramInput := textinput.New()
+	telegramInput.Placeholder = filepath.Join(os.Getenv("HOME"), ".smolbot", "telegram.token")
+	telegramInput.CharLimit = 256
+	telegramInput.Width = 50
+	telegramInput.Validate = func(value string) error {
+		tokenFile := strings.TrimSpace(value)
+		if tokenFile == "" {
+			return nil
+		}
+		return validateTelegramTokenFile(tokenFile)
+	}
+	discordInput := textinput.New()
+	discordInput.Placeholder = filepath.Join(os.Getenv("HOME"), ".smolbot", "discord.token")
+	discordInput.CharLimit = 256
+	discordInput.Width = 50
+	discordInput.Validate = func(value string) error {
+		tokenFile := strings.TrimSpace(value)
+		if tokenFile == "" {
+			return nil
+		}
+		return validateDiscordTokenFile(tokenFile)
+	}
 
 	m := model{
-		ctx:              ctx,
-		cancel:           cancel,
-		spinner:          s,
-		step:             stepWelcome,
-		projectDir:       ".",
-		workspacePath:    workspacePath,
-		configPath:       configPath,
-		port:             18791,
-		ollamaURL:        "http://localhost:11434",
-		existingInstall:  exists,
-		existingVersion:  version,
-		daemonWasRunning: daemonRunning,
-		configExists:     configExists,
-		updateMode:       exists,
-		enableService:    true,
-		startNow:         true,
-		provider:         providerOllama,
-		hasGo:            hasGo,
-		hasGit:           hasGit,
-		selectedOption:   0,
-		providerIndex:    0,
-		tickerIndex:      0,
-		channelIndex:     0,
-		signalEnabled:    signalEnabled,
-		whatsappEnabled:  whatsappEnabled,
-		beams:            beams,
-		ticker:           ticker,
+		ctx:                ctx,
+		cancel:             cancel,
+		spinner:            s,
+		step:               stepWelcome,
+		projectDir:         ".",
+		workspacePath:      workspacePath,
+		configPath:         configPath,
+		port:               18791,
+		ollamaURL:          "http://localhost:11434",
+		existingInstall:    exists,
+		existingVersion:    version,
+		daemonWasRunning:   daemonRunning,
+		configExists:       configExists,
+		updateMode:         exists,
+		enableService:      true,
+		startNow:           true,
+		provider:           providerOllama,
+		hasGo:              hasGo,
+		hasGit:             hasGit,
+		selectedOption:     0,
+		providerIndex:      0,
+		tickerIndex:        0,
+		channelIndex:       0,
+		signalEnabled:      signalEnabled,
+		whatsappEnabled:    whatsappEnabled,
+		telegramTokenInput: telegramInput,
+		discordTokenInput:  discordInput,
+		beams:              beams,
+		ticker:             ticker,
 	}
 
 	// Create temp log file
@@ -130,6 +155,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleConfigurationKeys(msg)
 		case stepChannels:
 			return m.handleChannelsKeys(msg)
+		case stepTelegramSetup:
+			return m.handleTelegramSetupKeys(msg)
+		case stepDiscordSetup:
+			return m.handleDiscordSetupKeys(msg)
 		case stepWhatsAppSetup:
 			return m.handleWhatsAppSetupKeys(msg)
 		case stepService:
@@ -271,8 +300,9 @@ func (m model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
+		m.provider = providers[m.providerIndex]
 		m.step = stepConfiguration
-		if m.providerIndex == 0 {
+		if m.provider == providerOllama {
 			return m, tea.Batch(fetchOllamaModelsCmd(m.ollamaURL), tickCmd())
 		}
 		return m, nil
@@ -286,15 +316,20 @@ func (m model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) handleConfigurationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
-		if m.providerIndex == 0 && m.ollamaModelIndex > 0 {
+		if m.provider == providerOllama && m.ollamaModelIndex > 0 {
 			m.ollamaModelIndex--
 			m.selectedModel = m.ollamaModels[m.ollamaModelIndex]
 		}
 		return m, nil
 	case "down", "j":
-		if m.providerIndex == 0 && m.ollamaModelIndex < len(m.ollamaModels)-1 {
+		if m.provider == providerOllama && m.ollamaModelIndex < len(m.ollamaModels)-1 {
 			m.ollamaModelIndex++
 			m.selectedModel = m.ollamaModels[m.ollamaModelIndex]
+		}
+		return m, nil
+	case " ":
+		if m.provider == providerOllama {
+			m.quotaEnabled = !m.quotaEnabled
 		}
 		return m, nil
 	case "enter":
@@ -317,7 +352,7 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "down", "j":
-		if m.channelIndex < 1 {
+		if m.channelIndex < 3 {
 			m.channelIndex++
 		}
 		return m, nil
@@ -326,11 +361,21 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.signalEnabled = !m.signalEnabled
 		} else if m.channelIndex == 1 {
 			m.whatsappEnabled = !m.whatsappEnabled
+		} else if m.channelIndex == 2 {
+			m.telegramEnabled = !m.telegramEnabled
+		} else if m.channelIndex == 3 {
+			m.discordEnabled = !m.discordEnabled
 		}
 		return m, nil
 	case "enter":
 		signalEnabled = m.signalEnabled
 		whatsappEnabled = m.whatsappEnabled
+		if m.telegramEnabled {
+			return m.enterTelegramSetup()
+		}
+		if m.discordEnabled {
+			return m.enterDiscordSetup()
+		}
 		if m.whatsappEnabled {
 			m.step = stepWhatsAppSetup
 			m.whatsappStatus = "Connecting to WhatsApp..."
@@ -347,6 +392,124 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) enterTelegramSetup() (tea.Model, tea.Cmd) {
+	m.step = stepTelegramSetup
+	m.telegramTokenInput.Focus()
+	return m, nil
+}
+
+func (m model) enterDiscordSetup() (tea.Model, tea.Cmd) {
+	m.step = stepDiscordSetup
+	m.discordTokenInput.Focus()
+	return m, nil
+}
+
+func (m model) handleTelegramSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		tokenFile := strings.TrimSpace(m.telegramTokenInput.Value())
+		if tokenFile == "" {
+			m.telegramEnabled = false
+			m.telegramTokenFile = ""
+			m.telegramTokenInput.Err = nil
+			if m.whatsappEnabled {
+				m.step = stepWhatsAppSetup
+				m.whatsappStatus = "Connecting to WhatsApp..."
+				return m, startWhatsAppLinkCmd()
+			}
+			m.step = stepService
+			return m, nil
+		}
+		if err := validateTelegramTokenFile(tokenFile); err != nil {
+			m.telegramEnabled = false
+			m.telegramTokenFile = ""
+			m.telegramTokenInput.Err = err
+			return m, nil
+		}
+		m.telegramTokenFile = tokenFile
+		m.telegramEnabled = true
+		m.telegramTokenInput.Err = nil
+		if m.discordEnabled {
+			return m.enterDiscordSetup()
+		}
+		if m.whatsappEnabled {
+			m.step = stepWhatsAppSetup
+			m.whatsappStatus = "Connecting to WhatsApp..."
+			return m, startWhatsAppLinkCmd()
+		}
+		m.step = stepService
+		return m, nil
+	case "esc":
+		m.telegramEnabled = false
+		m.telegramTokenFile = ""
+		m.telegramTokenInput.Err = nil
+		if m.discordEnabled {
+			return m.enterDiscordSetup()
+		}
+		if m.whatsappEnabled {
+			m.step = stepWhatsAppSetup
+			m.whatsappStatus = "Connecting to WhatsApp..."
+			return m, startWhatsAppLinkCmd()
+		}
+		m.step = stepService
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.telegramTokenInput, cmd = m.telegramTokenInput.Update(msg)
+	return m, cmd
+}
+
+func (m model) handleDiscordSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		tokenFile := strings.TrimSpace(m.discordTokenInput.Value())
+		if tokenFile == "" {
+			m.discordEnabled = false
+			m.discordTokenFile = ""
+			m.discordTokenInput.Err = nil
+			if m.whatsappEnabled {
+				m.step = stepWhatsAppSetup
+				m.whatsappStatus = "Connecting to WhatsApp..."
+				return m, startWhatsAppLinkCmd()
+			}
+			m.step = stepService
+			return m, nil
+		}
+		if err := validateDiscordTokenFile(tokenFile); err != nil {
+			m.discordEnabled = false
+			m.discordTokenFile = ""
+			m.discordTokenInput.Err = err
+			return m, nil
+		}
+		m.discordTokenFile = tokenFile
+		m.discordEnabled = true
+		m.discordTokenInput.Err = nil
+		if m.whatsappEnabled {
+			m.step = stepWhatsAppSetup
+			m.whatsappStatus = "Connecting to WhatsApp..."
+			return m, startWhatsAppLinkCmd()
+		}
+		m.step = stepService
+		return m, nil
+	case "esc":
+		m.discordEnabled = false
+		m.discordTokenFile = ""
+		m.discordTokenInput.Err = nil
+		if m.whatsappEnabled {
+			m.step = stepWhatsAppSetup
+			m.whatsappStatus = "Connecting to WhatsApp..."
+			return m, startWhatsAppLinkCmd()
+		}
+		m.step = stepService
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.discordTokenInput, cmd = m.discordTokenInput.Update(msg)
+	return m, cmd
+}
+
 func whatsappPollCmd() tea.Cmd {
 	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
 		return whatsappPollMsg{}
@@ -354,9 +517,9 @@ func whatsappPollCmd() tea.Cmd {
 }
 
 type whatsappInitResult struct {
-	linker  *WhatsAppLinker
-	err     error
-	linked  bool
+	linker *WhatsAppLinker
+	err    error
+	linked bool
 }
 
 func startWhatsAppLinkCmd() tea.Cmd {
@@ -500,8 +663,19 @@ func (m model) handleUninstallKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleTaskComplete(msg taskCompleteMsg) (tea.Model, tea.Cmd) {
-	if msg.success {
-		m.tasks[msg.index].status = statusComplete
+	if msg.success || msg.skipped {
+		if msg.skipped {
+			m.tasks[msg.index].status = statusSkipped
+			if msg.err != nil {
+				m.tasks[msg.index].errorDetails = &errorInfo{
+					message: msg.err.Error(),
+					command: getLastCommand(),
+					logFile: m.logFile.Name(),
+				}
+			}
+		} else {
+			m.tasks[msg.index].status = statusComplete
+		}
 		m.currentTaskIndex++
 
 		if m.currentTaskIndex < len(m.tasks) {

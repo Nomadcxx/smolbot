@@ -63,6 +63,10 @@ func (m model) View() string {
 		mainContent = m.renderConfiguration()
 	case stepChannels:
 		mainContent = m.renderChannels()
+	case stepTelegramSetup:
+		mainContent = m.renderTelegramSetup()
+	case stepDiscordSetup:
+		mainContent = m.renderDiscordSetup()
 	case stepWhatsAppSetup:
 		mainContent = m.renderWhatsAppSetup()
 	case stepService:
@@ -133,6 +137,8 @@ func (m model) getHelpText() string {
 		return "↑/↓: Select model  •  Enter: Confirm  •  Esc: Back"
 	case stepChannels:
 		return "↑/↓: Navigate  •  Space: Toggle  •  Enter: Continue  •  Esc: Back"
+	case stepTelegramSetup:
+		return "Enter: Continue  •  Esc: Skip"
 	case stepWhatsAppSetup:
 		if m.whatsappDone {
 			return "Enter: Continue  •  Esc: Back"
@@ -305,6 +311,18 @@ func (m model) renderConfiguration() string {
 		} else {
 			b.WriteString("  No Ollama models detected\n")
 		}
+		b.WriteString("\n")
+		b.WriteString("Ollama Account Quota:\n\n")
+		quotaMarker := "○"
+		quotaStyle := lipgloss.NewStyle()
+		if m.quotaEnabled {
+			quotaMarker = "●"
+			quotaStyle = lipgloss.NewStyle().Foreground(SuccessColor).Bold(true)
+		}
+		b.WriteString(quotaStyle.Render(fmt.Sprintf("  %s Enable quota tracking", quotaMarker)))
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).
+			Render("    Uses browser cookies for auto-discovery (Chromium/Firefox)"))
 	}
 
 	return b.String()
@@ -349,8 +367,72 @@ func (m model) renderChannels() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Requires QR code scan"))
 	b.WriteString("\n\n")
 
+	// Telegram
+	telegramStyle := lipgloss.NewStyle()
+	telegramMarker := "○"
+	if m.channelIndex == 2 {
+		telegramMarker = "●"
+		telegramStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	}
+	telegramStatus := "[ ] Disabled"
+	if m.telegramEnabled {
+		telegramStatus = "[✓] Enabled"
+	}
+	b.WriteString(telegramStyle.Render(fmt.Sprintf("  %s Telegram Integration  %s", telegramMarker, telegramStatus)))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Uses a bot token file"))
+	b.WriteString("\n\n")
+
+	// Discord
+	discordStyle := lipgloss.NewStyle()
+	discordMarker := "○"
+	if m.channelIndex == 3 {
+		discordMarker = "●"
+		discordStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	}
+	discordStatus := "[ ] Disabled"
+	if m.discordEnabled {
+		discordStatus = "[✓] Enabled"
+	}
+	b.WriteString(discordStyle.Render(fmt.Sprintf("  %s Discord Integration   %s", discordMarker, discordStatus)))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Uses a bot token file"))
+	b.WriteString("\n\n")
+
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Note: Can be configured later"))
 
+	return b.String()
+}
+
+func (m model) renderTelegramSetup() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render("Telegram Setup"))
+	b.WriteString("\n\n")
+	b.WriteString("  Telegram reads its bot token from a file.\n")
+	b.WriteString("  Enter the token file path below.\n\n")
+	b.WriteString("  " + m.telegramTokenInput.View())
+	b.WriteString("\n\n")
+	if m.telegramTokenInput.Err != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  ✗ %s\n\n", m.telegramTokenInput.Err)))
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Leave it empty to skip Telegram."))
+	return b.String()
+}
+
+func (m model) renderDiscordSetup() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render("Discord Setup"))
+	b.WriteString("\n\n")
+	b.WriteString("  Discord reads its bot token from a file.\n")
+	b.WriteString("  Enter the token file path below.\n\n")
+	b.WriteString("  " + m.discordTokenInput.View())
+	b.WriteString("\n\n")
+	if m.discordTokenInput.Err != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  ✗ %s\n\n", m.discordTokenInput.Err)))
+	}
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Leave it empty to skip Discord."))
 	return b.String()
 }
 

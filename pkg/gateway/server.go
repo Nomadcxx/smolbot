@@ -20,6 +20,7 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/provider"
 	"github.com/Nomadcxx/smolbot/pkg/session"
 	"github.com/Nomadcxx/smolbot/pkg/skill"
+	"github.com/Nomadcxx/smolbot/pkg/usage"
 	"github.com/gorilla/websocket"
 )
 
@@ -32,12 +33,17 @@ type AgentProcessor interface {
 	CancelSession(sessionKey string)
 }
 
+type UsageSummaryReader interface {
+	CurrentProviderSummary(sessionKey, providerID, modelName string, now time.Time) (usage.ProviderSummary, error)
+}
+
 type ServerDeps struct {
 	Agent            AgentProcessor
 	Cron             CronLister
 	Sessions         *session.Store
 	Channels         *channel.Manager
 	Config           *config.Config
+	Usage            UsageSummaryReader
 	Skills           *skill.Registry
 	Version          string
 	StartedAt        time.Time
@@ -50,6 +56,7 @@ type Server struct {
 	sessions         *session.Store
 	channels         *channel.Manager
 	config           *config.Config
+	usage            UsageSummaryReader
 	skills           *skill.Registry
 	version          string
 	started          time.Time
@@ -118,6 +125,7 @@ func NewServer(deps ServerDeps) *Server {
 		sessions:         deps.Sessions,
 		channels:         deps.Channels,
 		config:           deps.Config,
+		usage:            deps.Usage,
 		skills:           deps.Skills,
 		version:          firstNonEmptyString(deps.Version, "dev"),
 		started:          started,
@@ -237,6 +245,19 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "compact.start", "compact.done", "context.compressed"},
 		}, nil
 	case "status":
+		params := struct {
+			Session string `json:"session"`
+		}{}
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &params); err != nil {
+				return nil, fmt.Errorf("parse status params: %w", err)
+			}
+		}
+		sessionKey := params.Session
+		if sessionKey == "" && client != nil {
+			sessionKey = client.sessionKey
+		}
+
 		var channels []map[string]string
 		if s.channels != nil {
 			for name, status := range s.channels.Statuses(ctx) {
@@ -246,8 +267,9 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 				})
 			}
 		}
-		return map[string]any{
+		payload := map[string]any{
 			"model":    s.currentModel(),
+			"provider": s.currentProvider(),
 			"uptime":   int(time.Since(s.started).Seconds()),
 			"channels": channels,
 			"usage": map[string]any{
@@ -256,7 +278,58 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 				"totalTokens":      s.lastUsage.TotalTokens,
 				"contextWindow":    s.contextWindowTokens(ctx),
 			},
-		}, nil
+		}
+		if sessionKey != "" {
+			payload["session"] = sessionKey
+		}
+		if s.usage != nil && sessionKey != "" {
+			providerID := s.currentProvider()
+			summary, err := s.usage.CurrentProviderSummary(
+				sessionKey,
+				providerID,
+				statusSummaryModel(providerID, s.currentModel()),
+				time.Now().UTC(),
+			)
+			if err == nil && summary.ProviderID != "" {
+				payload["persistedUsage"] = map[string]any{
+					"providerId":      summary.ProviderID,
+					"modelName":       summary.ModelName,
+					"sessionTokens":   summary.SessionTokens,
+					"todayTokens":     summary.TodayTokens,
+					"weeklyTokens":    summary.WeeklyTokens,
+					"sessionRequests": summary.SessionRequests,
+					"todayRequests":   summary.TodayRequests,
+					"weeklyRequests":  summary.WeeklyRequests,
+					"budgetStatus":    summary.BudgetStatus,
+					"warningLevel":    summary.WarningLevel,
+				}
+				if summary.Quota != nil {
+					payload["persistedUsage"].(map[string]any)["quota"] = map[string]any{
+						"providerId":           summary.Quota.ProviderID,
+						"accountName":          summary.Quota.AccountName,
+						"accountEmail":         summary.Quota.AccountEmail,
+						"planName":             summary.Quota.PlanName,
+						"sessionUsedPercent":   summary.Quota.SessionUsedPercent,
+						"sessionResetsAt":      timeToRFC3339(summary.Quota.SessionResetsAt),
+						"weeklyUsedPercent":    summary.Quota.WeeklyUsedPercent,
+						"weeklyResetsAt":       timeToRFC3339(summary.Quota.WeeklyResetsAt),
+						"notifyUsageLimits":    summary.Quota.NotifyUsageLimits,
+						"state":                summary.Quota.State,
+						"source":               summary.Quota.Source,
+						"fetchedAt":            summary.Quota.FetchedAt.UTC().Format(time.RFC3339),
+						"expiresAt":            summary.Quota.ExpiresAt.UTC().Format(time.RFC3339),
+						"identityState":        summary.Quota.IdentityState,
+						"identitySource":       summary.Quota.IdentitySource,
+						"identityAccountName":  summary.Quota.IdentityAccountName,
+						"identityAccountEmail": summary.Quota.IdentityAccountEmail,
+					}
+				}
+				if alert, ok := usageAlertPayload(summary); ok {
+					payload["usageAlert"] = alert
+				}
+			}
+		}
+		return payload, nil
 	case "cron.list":
 		jobs := make([]map[string]any, 0)
 		if s.cron != nil {
@@ -504,6 +577,13 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 	}
 }
 
+func timeToRFC3339(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
 func (s *Server) writeResponse(client *clientState, id string, payload any) error {
 	result, err := json.Marshal(payload)
 	if err != nil {
@@ -723,6 +803,44 @@ func normalizeOllamaModelID(model string) string {
 		return rest
 	}
 	return model
+}
+
+func statusSummaryModel(providerID, model string) string {
+	if providerID == "ollama" {
+		return normalizeOllamaModelID(model)
+	}
+	return model
+}
+
+func usageAlertPayload(summary usage.ProviderSummary) (map[string]any, bool) {
+	if strings.TrimSpace(summary.WarningLevel) == "" {
+		return nil, false
+	}
+	return map[string]any{
+		"providerId":   summary.ProviderID,
+		"modelName":    summary.ModelName,
+		"budgetStatus": summary.BudgetStatus,
+		"warningLevel": summary.WarningLevel,
+		"message":      usageAlertMessage(summary.ProviderID, summary.ModelName, summary.WarningLevel),
+	}, true
+}
+
+func usageAlertMessage(providerID, modelName, warningLevel string) string {
+	label := strings.TrimSpace(modelName)
+	providerID = strings.TrimSpace(providerID)
+	if label == "" {
+		label = providerID
+	} else if providerID != "" && !strings.HasPrefix(label, providerID+"/") {
+		label = providerID + "/" + label
+	}
+	if label == "" {
+		label = "usage"
+	}
+	level := strings.TrimSpace(warningLevel)
+	if level == "" {
+		return "Usage warning for " + label + "."
+	}
+	return fmt.Sprintf("Usage warning for %s: %s budget threshold reached.", label, level)
 }
 
 func firstNonEmptyString(values ...string) string {

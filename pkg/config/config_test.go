@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"os"
+	"reflect"
 	"testing"
 )
 
@@ -36,11 +38,26 @@ func TestConfigRoundTrip(t *testing.T) {
 				"deviceName": "smolbot",
 				"storePath": "/tmp/nanobot-whatsapp.db",
 				"allowedChatIDs": ["example@s.whatsapp.net"]
+			},
+			"telegram": {
+				"enabled": true,
+				"tokenFile": "/tmp/nanobot-telegram.token",
+				"allowedChatIDs": ["123456789"]
+			},
+			"discord": {
+				"enabled": true,
+				"tokenFile": "/tmp/nanobot-discord.token",
+				"allowedChannelIDs": ["987654321"]
 			}
 		},
 		"gateway": {
 			"host": "127.0.0.1",
 			"port": 18790
+		},
+		"quota": {
+			"refreshIntervalMinutes": 15,
+			"browserCookieDiscoveryEnabled": false,
+			"ollamaCookieHeader": "session=abc123; cf_clearance=xyz"
 		},
 		"tools": {
 			"restrictToWorkspace": true,
@@ -81,6 +98,30 @@ func TestConfigRoundTrip(t *testing.T) {
 	if got := cfg.Channels.WhatsApp.AllowedChatIDs; len(got) != 1 || got[0] != "example@s.whatsapp.net" {
 		t.Errorf("whatsapp allowedChatIDs = %#v", got)
 	}
+	if !cfg.Channels.Telegram.Enabled || cfg.Channels.Telegram.TokenFile != "/tmp/nanobot-telegram.token" {
+		t.Errorf("telegram config = %+v", cfg.Channels.Telegram)
+	}
+	if got := cfg.Channels.Telegram.AllowedChatIDs; len(got) != 1 || got[0] != "123456789" {
+		t.Errorf("telegram allowedChatIDs = %#v", got)
+	}
+	if !cfg.Channels.Discord.Enabled || cfg.Channels.Discord.TokenFile != "/tmp/nanobot-discord.token" {
+		t.Errorf("discord config = %+v", cfg.Channels.Discord)
+	}
+	if got := cfg.Channels.Discord.AllowedChannelIDs; len(got) != 1 || got[0] != "987654321" {
+		t.Errorf("discord allowedChannelIDs = %#v", got)
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota"); !got.IsValid() {
+		t.Fatal("quota config field is missing")
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("RefreshIntervalMinutes"); !got.IsValid() || got.Int() != 15 {
+		t.Fatalf("quota refreshIntervalMinutes = %v, want 15", got)
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("BrowserCookieDiscoveryEnabled"); !got.IsValid() || got.Bool() {
+		t.Fatalf("quota browserCookieDiscoveryEnabled = %v, want false", got)
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("OllamaCookieHeader"); !got.IsValid() || got.String() != "session=abc123; cf_clearance=xyz" {
+		t.Fatalf("quota ollamaCookieHeader = %v, want configured header", got)
+	}
 	if !cfg.Tools.RestrictToWorkspace {
 		t.Error("restrictToWorkspace should be true")
 	}
@@ -90,7 +131,7 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 }
 
-func TestConfigDefaults(t *testing.T) {
+func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Agents.Defaults.MaxTokens != 8192 {
 		t.Errorf("default maxTokens = %d, want 8192", cfg.Agents.Defaults.MaxTokens)
@@ -110,8 +151,101 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.Channels.Signal.CLIPath == "" || cfg.Channels.Signal.DataDir == "" {
 		t.Fatalf("signal defaults = %+v, want non-empty paths", cfg.Channels.Signal)
 	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota"); !got.IsValid() {
+		t.Fatal("quota defaults are missing")
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("RefreshIntervalMinutes"); !got.IsValid() || got.Int() != 60 {
+		t.Fatalf("quota refreshIntervalMinutes = %v, want 60", got)
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("BrowserCookieDiscoveryEnabled"); !got.IsValid() || !got.Bool() {
+		t.Fatalf("quota browserCookieDiscoveryEnabled = %v, want true", got)
+	}
+	if got := reflect.ValueOf(cfg).FieldByName("Quota").FieldByName("OllamaCookieHeader"); !got.IsValid() || got.String() != "" {
+		t.Fatalf("quota ollamaCookieHeader = %v, want empty by default", got)
+	}
 	if cfg.Channels.WhatsApp.DeviceName == "" || cfg.Channels.WhatsApp.StorePath == "" {
 		t.Fatalf("whatsapp defaults = %+v, want non-empty settings", cfg.Channels.WhatsApp)
+	}
+	if cfg.Channels.Telegram.Enabled {
+		t.Fatalf("telegram defaults = %+v, want disabled", cfg.Channels.Telegram)
+	}
+	if cfg.Channels.Telegram.TokenFile != "" {
+		t.Fatalf("telegram defaults = %+v, want empty token file", cfg.Channels.Telegram)
+	}
+	if cfg.Channels.Discord.Enabled {
+		t.Fatalf("discord defaults = %+v, want disabled", cfg.Channels.Discord)
+	}
+	if cfg.Channels.Discord.TokenFile != "" || cfg.Channels.Discord.BotToken != "" {
+		t.Fatalf("discord defaults = %+v, want empty token settings", cfg.Channels.Discord)
+	}
+	if len(cfg.Channels.Discord.AllowedChannelIDs) != 0 {
+		t.Fatalf("discord defaults = %+v, want no allowlist", cfg.Channels.Discord)
+	}
+}
+
+func TestLoadTelegramConfig(t *testing.T) {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	input := `{
+		"channels": {
+			"telegram": {
+				"enabled": true,
+				"tokenFile": "/tmp/load-telegram.token",
+				"allowedChatIDs": ["42"]
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Channels.Telegram.Enabled {
+		t.Fatal("telegram should be enabled after loading config")
+	}
+	if cfg.Channels.Telegram.TokenFile != "/tmp/load-telegram.token" {
+		t.Fatalf("telegram tokenFile = %q, want %q", cfg.Channels.Telegram.TokenFile, "/tmp/load-telegram.token")
+	}
+	if got := cfg.Channels.Telegram.AllowedChatIDs; len(got) != 1 || got[0] != "42" {
+		t.Fatalf("telegram allowedChatIDs = %#v", got)
+	}
+}
+
+func TestLoadDiscordConfig(t *testing.T) {
+	t.Helper()
+
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	input := `{
+		"channels": {
+			"discord": {
+				"enabled": true,
+				"botToken": "bot-token",
+				"allowedChannelIDs": ["42", "  43 "]
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Channels.Discord.Enabled {
+		t.Fatal("discord should be enabled after loading config")
+	}
+	if cfg.Channels.Discord.BotToken != "bot-token" {
+		t.Fatalf("discord botToken = %q, want %q", cfg.Channels.Discord.BotToken, "bot-token")
+	}
+	if got := cfg.Channels.Discord.AllowedChannelIDs; len(got) != 2 || got[0] != "42" || got[1] != "  43 " {
+		t.Fatalf("discord allowedChannelIDs = %#v", got)
 	}
 }
 
@@ -126,6 +260,19 @@ func TestPaths(t *testing.T) {
 	if p.SessionsDB() != "/home/test/.smolbot/sessions.db" {
 		t.Errorf("SessionsDB = %q", p.SessionsDB())
 	}
+	if p.UsageDB() != "/home/test/.smolbot/usage.db" {
+		t.Errorf("UsageDB = %q", p.UsageDB())
+	}
+	if got := reflect.ValueOf(p).MethodByName("OllamaCookieJar"); !got.IsValid() {
+		t.Fatal("OllamaCookieJar path helper is missing")
+	} else if got.Call(nil)[0].String() != "/home/test/.smolbot/ollama_cookies.json" {
+		t.Errorf("OllamaCookieJar = %q", got.Call(nil)[0].String())
+	}
+	if got := reflect.ValueOf(p).MethodByName("OllamaQuotaCache"); !got.IsValid() {
+		t.Fatal("OllamaQuotaCache path helper is missing")
+	} else if got.Call(nil)[0].String() != "/home/test/.smolbot/ollama_quota.db" {
+		t.Errorf("OllamaQuotaCache = %q", got.Call(nil)[0].String())
+	}
 	if p.JobsFile() != "/home/test/.smolbot/jobs.json" {
 		t.Errorf("JobsFile = %q", p.JobsFile())
 	}
@@ -138,5 +285,201 @@ func TestDefaultPaths(t *testing.T) {
 	p := DefaultPaths()
 	if p.root == "" {
 		t.Error("root should not be empty")
+	}
+}
+
+func TestProviderQuotaConfigHelpers(t *testing.T) {
+	t.Run("Provider returns correct config", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: true, BrowserCookieDiscoveryEnabled: true, CookieHeader: "foo=bar"},
+			},
+		}
+		p := q.Provider("ollama")
+		if !p.Enabled {
+			t.Error("ollama provider should be enabled")
+		}
+		if p.CookieHeader != "foo=bar" {
+			t.Errorf("cookieHeader = %q, want foo=bar", p.CookieHeader)
+		}
+	})
+
+	t.Run("Provider returns empty for unknown", func(t *testing.T) {
+		q := QuotaConfig{Providers: map[string]ProviderQuotaConfig{}}
+		p := q.Provider("unknown")
+		if p.Enabled {
+			t.Error("unknown provider should not be enabled")
+		}
+	})
+
+	t.Run("Provider returns empty when no providers", func(t *testing.T) {
+		q := QuotaConfig{}
+		p := q.Provider("ollama")
+		if p.Enabled {
+			t.Error("should return empty config when no providers")
+		}
+	})
+
+	t.Run("HasEnabledProvider returns true when enabled", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: true},
+			},
+		}
+		if !q.HasEnabledProvider("ollama") {
+			t.Error("HasEnabledProvider(ollama) should be true")
+		}
+	})
+
+	t.Run("HasEnabledProvider returns false when disabled", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: false},
+			},
+		}
+		if q.HasEnabledProvider("ollama") {
+			t.Error("HasEnabledProvider(ollama) should be false")
+		}
+	})
+
+	t.Run("HasEnabledProvider returns false for unknown", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: true},
+			},
+		}
+		if q.HasEnabledProvider("openai") {
+			t.Error("HasEnabledProvider(unknown) should be false")
+		}
+	})
+
+	t.Run("HasAnyEnabledProvider returns true when any enabled", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: true},
+				"openai": {Enabled: false},
+			},
+		}
+		if !q.HasAnyEnabledProvider() {
+			t.Error("HasAnyEnabledProvider should be true")
+		}
+	})
+
+	t.Run("HasAnyEnabledProvider returns false when none enabled", func(t *testing.T) {
+		q := QuotaConfig{
+			Providers: map[string]ProviderQuotaConfig{
+				"ollama": {Enabled: false},
+				"openai": {Enabled: false},
+			},
+		}
+		if q.HasAnyEnabledProvider() {
+			t.Error("HasAnyEnabledProvider should be false")
+		}
+	})
+}
+
+func TestQuotaConfigMigratesOllamaFromDefaults(t *testing.T) {
+	t.Run("migrates when default provider is ollama", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Agents.Defaults.Provider = "ollama"
+		normalizeQuotaConfig(&cfg)
+		if !cfg.Quota.HasEnabledProvider("ollama") {
+			t.Error("should migrate ollama when default provider is ollama")
+		}
+	})
+
+	t.Run("migrates when default model starts with ollama/", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Agents.Defaults.Model = "ollama/llama3"
+		normalizeQuotaConfig(&cfg)
+		if !cfg.Quota.HasEnabledProvider("ollama") {
+			t.Error("should migrate ollama when model starts with ollama/")
+		}
+	})
+
+	t.Run("does not migrate when refresh interval is zero", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Agents.Defaults.Provider = "ollama"
+		cfg.Quota.RefreshIntervalMinutes = 0
+		normalizeQuotaConfig(&cfg)
+		if cfg.Quota.HasEnabledProvider("ollama") {
+			t.Error("should not migrate when refresh interval is 0")
+		}
+	})
+
+	t.Run("does not overwrite existing provider config", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Agents.Defaults.Provider = "ollama"
+		cfg.Quota.RefreshIntervalMinutes = 30
+		cfg.Quota.Providers = map[string]ProviderQuotaConfig{
+			"ollama": {Enabled: false},
+		}
+		normalizeQuotaConfig(&cfg)
+		if cfg.Quota.HasEnabledProvider("ollama") {
+			t.Error("should not overwrite existing explicit config")
+		}
+	})
+
+	t.Run("loads provider-scoped quota config", func(t *testing.T) {
+		input := `{
+			"quota": {
+				"refreshIntervalMinutes": 30,
+				"providers": {
+					"ollama": {
+						"enabled": true,
+						"browserCookieDiscoveryEnabled": false,
+						"cookieHeader": "session=abc"
+					}
+				}
+			}
+		}`
+		var cfg Config
+		if err := json.Unmarshal([]byte(input), &cfg); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		normalizeQuotaConfig(&cfg)
+		p := cfg.Quota.Provider("ollama")
+		if !p.Enabled {
+			t.Error("ollama should be enabled")
+		}
+		if p.CookieHeader != "session=abc" {
+			t.Errorf("cookieHeader = %q, want session=abc", p.CookieHeader)
+		}
+		if p.BrowserCookieDiscoveryEnabled {
+			t.Error("browserCookieDiscoveryEnabled should be false")
+		}
+	})
+}
+
+func TestLoadMigratesLegacyOllamaQuota(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	input := `{
+		"agents": {
+			"defaults": {
+				"provider": "ollama",
+				"model": "llama3"
+			}
+		},
+		"quota": {
+			"refreshIntervalMinutes": 45,
+			"browserCookieDiscoveryEnabled": false,
+			"ollamaCookieHeader": "legacy=header"
+		}
+	}`
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Quota.HasEnabledProvider("ollama") {
+		t.Fatal("ollama quota should be migrated")
+	}
+	p := cfg.Quota.Provider("ollama")
+	if p.CookieHeader != "legacy=header" {
+		t.Errorf("cookieHeader = %q, want legacy=header", p.CookieHeader)
 	}
 }

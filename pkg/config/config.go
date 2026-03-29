@@ -13,6 +13,7 @@ type Config struct {
 	Agents    AgentsConfig              `json:"agents"`
 	Providers map[string]ProviderConfig `json:"providers"`
 	Channels  ChannelsConfig            `json:"channels"`
+	Quota     QuotaConfig               `json:"quota"`
 	Gateway   GatewayConfig             `json:"gateway"`
 	Tools     ToolsConfig               `json:"tools"`
 }
@@ -50,6 +51,8 @@ type ChannelsConfig struct {
 	SendToolHints bool                  `json:"sendToolHints"`
 	Signal        SignalChannelConfig   `json:"signal"`
 	WhatsApp      WhatsAppChannelConfig `json:"whatsapp"`
+	Telegram      TelegramChannelConfig `json:"telegram"`
+	Discord       DiscordChannelConfig  `json:"discord"`
 }
 
 type SignalChannelConfig struct {
@@ -66,10 +69,69 @@ type WhatsAppChannelConfig struct {
 	AllowedChatIDs []string `json:"allowedChatIDs,omitempty"`
 }
 
+type TelegramChannelConfig struct {
+	Enabled        bool     `json:"enabled"`
+	BotToken       string   `json:"botToken,omitempty"`
+	TokenFile      string   `json:"tokenFile,omitempty"`
+	AllowedChatIDs []string `json:"allowedChatIDs,omitempty"`
+}
+
+type DiscordChannelConfig struct {
+	Enabled           bool     `json:"enabled"`
+	BotToken          string   `json:"botToken,omitempty"`
+	TokenFile         string   `json:"tokenFile,omitempty"`
+	AllowedChannelIDs []string `json:"allowedChannelIDs,omitempty"`
+}
+
 type GatewayConfig struct {
 	Host      string          `json:"host"`
 	Port      int             `json:"port"`
 	Heartbeat HeartbeatConfig `json:"heartbeat"`
+}
+
+type QuotaConfig struct {
+	RefreshIntervalMinutes int                      `json:"refreshIntervalMinutes"`
+	BrowserCookieDiscoveryEnabled bool               `json:"browserCookieDiscoveryEnabled"`
+	OllamaCookieHeader     string                   `json:"ollamaCookieHeader,omitempty"`
+	Providers              map[string]ProviderQuotaConfig `json:"providers,omitempty"`
+}
+
+type ProviderQuotaConfig struct {
+	Enabled                       bool   `json:"enabled"`
+	BrowserCookieDiscoveryEnabled  bool   `json:"browserCookieDiscoveryEnabled"`
+	CookieHeader                  string `json:"cookieHeader,omitempty"`
+}
+
+func (q QuotaConfig) Provider(name string) ProviderQuotaConfig {
+	if q.Providers == nil {
+		return ProviderQuotaConfig{}
+	}
+	if p, ok := q.Providers[name]; ok {
+		return p
+	}
+	return ProviderQuotaConfig{}
+}
+
+func (q QuotaConfig) HasEnabledProvider(name string) bool {
+	if q.Providers == nil {
+		return false
+	}
+	if p, ok := q.Providers[name]; ok && p.Enabled {
+		return true
+	}
+	return false
+}
+
+func (q QuotaConfig) HasAnyEnabledProvider() bool {
+	if q.Providers == nil {
+		return false
+	}
+	for _, p := range q.Providers {
+		if p.Enabled {
+			return true
+		}
+	}
+	return false
 }
 
 type HeartbeatConfig struct {
@@ -139,6 +201,12 @@ func DefaultConfig() Config {
 				DeviceName: "smolbot",
 				StorePath:  filepath.Join(home, ".smolbot", "whatsapp.db"),
 			},
+			Telegram: TelegramChannelConfig{},
+			Discord:  DiscordChannelConfig{},
+		},
+		Quota: QuotaConfig{
+			RefreshIntervalMinutes:        60,
+			BrowserCookieDiscoveryEnabled: true,
 		},
 		Gateway: GatewayConfig{
 			Host: "127.0.0.1",
@@ -176,5 +244,37 @@ func Load(path string) (*Config, error) {
 		cfg.Agents.Defaults.Workspace = filepath.Join(home, cfg.Agents.Defaults.Workspace[2:])
 	}
 
+	normalizeQuotaConfig(&cfg)
+
 	return &cfg, nil
+}
+
+func normalizeQuotaConfig(cfg *Config) {
+	if cfg.Quota.Providers == nil {
+		cfg.Quota.Providers = make(map[string]ProviderQuotaConfig)
+	}
+
+	if _, exists := cfg.Quota.Providers["ollama"]; !exists && shouldMigrateOllamaQuota(cfg) {
+		cfg.Quota.Providers["ollama"] = ProviderQuotaConfig{
+			Enabled:                        true,
+			BrowserCookieDiscoveryEnabled:  cfg.Quota.BrowserCookieDiscoveryEnabled,
+			CookieHeader:                   cfg.Quota.OllamaCookieHeader,
+		}
+	}
+}
+
+func shouldMigrateOllamaQuota(cfg *Config) bool {
+	if cfg.Quota.RefreshIntervalMinutes <= 0 {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Agents.Defaults.Provider), "ollama") {
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(cfg.Agents.Defaults.Model), "ollama/") {
+		return true
+	}
+	if _, ok := cfg.Providers["ollama"]; ok {
+		return true
+	}
+	return false
 }

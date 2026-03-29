@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/Nomadcxx/smolbot/pkg/gateway"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
+	"github.com/gorilla/websocket"
 )
 
 func TestModelsSetSwitchUpdatesAgentLoopModel(t *testing.T) {
@@ -214,4 +217,44 @@ func (p *spyProvider) ChatStream(_ context.Context, _ provider.ChatRequest) (*pr
 		func() (*provider.StreamDelta, error) { return nil, fmt.Errorf("stream done") },
 		func() error { return nil },
 	), nil
+}
+
+func dialWebsocketGateway(t *testing.T, rawURL string) *websocket.Conn {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(rawURL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	return conn
+}
+
+func writeFrameGateway(t *testing.T, conn *websocket.Conn, req gateway.RequestFrame) {
+	t.Helper()
+	data, err := gateway.EncodeRequest(req)
+	if err != nil {
+		t.Fatalf("EncodeRequest: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		t.Fatalf("WriteMessage: %v", err)
+	}
+}
+
+func readResponseFrameGateway(t *testing.T, conn *websocket.Conn, id string) *gateway.DecodedFrame {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	_ = conn.SetReadDeadline(deadline)
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		frame, err := gateway.DecodeFrame(data)
+		if err != nil {
+			t.Fatalf("DecodeFrame: %v", err)
+		}
+		if frame.Kind == gateway.FrameResponse && frame.Response.ID == id {
+			return frame
+		}
+	}
 }
