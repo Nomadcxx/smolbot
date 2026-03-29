@@ -7,11 +7,11 @@ import (
 
 // OAuthConfig holds OAuth provider configuration
 type OAuthConfig struct {
-	BaseURL   string   // e.g., "https://api.minimax.io"
+	BaseURL   string // e.g., "https://api.minimax.io"
 	ClientID  string
-	AuthURL   string   // e.g., "/oauth/code"
-	TokenURL  string   // e.g., "/oauth/token"
-	RevokeURL string   // e.g., "/oauth/revoke"
+	AuthURL   string // e.g., "/oauth/code"
+	TokenURL  string // e.g., "/oauth/token"
+	RevokeURL string // e.g., "/oauth/revoke"
 	Scopes    []string
 }
 
@@ -19,9 +19,14 @@ type OAuthConfig struct {
 type TokenInfo struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
-	ExpiresAt   time.Time `json:"expires_at"` // Unix timestamp ms
-	TokenType   string    `json:"token_type"`
-	Scope       string    `json:"scope"`
+	ExpiresAt    time.Time `json:"expires_at"` // Unix timestamp ms
+	TokenType    string    `json:"token_type"`
+	Scope        string    `json:"scope"`
+	ProviderID   string    `json:"providerId,omitempty"`
+	ProfileID    string    `json:"profileId,omitempty"`
+	AccountEmail string    `json:"accountEmail,omitempty"`
+	AccountName  string    `json:"accountName,omitempty"`
+	UpdatedAt    time.Time `json:"updatedAt,omitempty"`
 }
 
 // IsExpired returns true if the token is expired or will expire within 2 minutes

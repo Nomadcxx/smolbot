@@ -131,6 +131,38 @@ func TestConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestProviderConfigOAuthJSONRoundTrip(t *testing.T) {
+	input := ProviderConfig{
+		APIKey:    "sk-ant-xxx",
+		APIBase:   "https://api.minimax.io",
+		AuthType:  "oauth",
+		ProfileID: "profile-123",
+	}
+
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got ProviderConfig
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got.APIKey != input.APIKey {
+		t.Fatalf("APIKey = %q, want %q", got.APIKey, input.APIKey)
+	}
+	if got.APIBase != input.APIBase {
+		t.Fatalf("APIBase = %q, want %q", got.APIBase, input.APIBase)
+	}
+	if got.AuthType != input.AuthType {
+		t.Fatalf("AuthType = %q, want %q", got.AuthType, input.AuthType)
+	}
+	if got.ProfileID != input.ProfileID {
+		t.Fatalf("ProfileID = %q, want %q", got.ProfileID, input.ProfileID)
+	}
+}
+
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Agents.Defaults.MaxTokens != 8192 {
@@ -213,6 +245,36 @@ func TestLoadTelegramConfig(t *testing.T) {
 	}
 	if got := cfg.Channels.Telegram.AllowedChatIDs; len(got) != 1 || got[0] != "42" {
 		t.Fatalf("telegram allowedChatIDs = %#v", got)
+	}
+}
+
+func TestLoadAPIKeyOnlyConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	input := `{
+		"providers": {
+			"anthropic": {
+				"apiKey": "sk-ant-xxx"
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(input), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	provider := cfg.Providers["anthropic"]
+	if provider.APIKey != "sk-ant-xxx" {
+		t.Fatalf("anthropic apiKey = %q, want %q", provider.APIKey, "sk-ant-xxx")
+	}
+	if provider.AuthType != "" {
+		t.Fatalf("anthropic authType = %q, want empty", provider.AuthType)
+	}
+	if provider.ProfileID != "" {
+		t.Fatalf("anthropic profileId = %q, want empty", provider.ProfileID)
 	}
 }
 
