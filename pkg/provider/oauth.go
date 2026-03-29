@@ -41,6 +41,8 @@ type OAuthProvider interface {
 	RefreshToken(ctx context.Context) (*TokenInfo, error)
 	RevokeToken(ctx context.Context) error
 	GetAuthConfig() OAuthConfig
+	GetToken() *TokenInfo
+	SetToken(*TokenInfo)
 }
 
 // AuthType distinguishes key-based vs OAuth vs token-based auth

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,22 +13,30 @@ import (
 type ProviderFactory func(config.ProviderConfig) Provider
 
 type Registry struct {
-	cfg       *config.Config
-	factories map[string]ProviderFactory
-	cache     map[string]Provider
-	mu        sync.Mutex
+	cfg           *config.Config
+	store         config.OAuthTokenStore
+	factories     map[string]ProviderFactory
+	cache         map[string]Provider
+	oauthFactories map[string]func(cfg OAuthConfig) OAuthProvider
+	mu            sync.Mutex
 }
 
 func NewRegistry(cfg *config.Config) *Registry {
 	return &Registry{
-		cfg:       cfg,
-		factories: make(map[string]ProviderFactory),
-		cache:     make(map[string]Provider),
+		cfg:           cfg,
+		factories:     make(map[string]ProviderFactory),
+		cache:         make(map[string]Provider),
+		oauthFactories: make(map[string]func(cfg OAuthConfig) OAuthProvider),
 	}
 }
 
 func NewRegistryWithDefaults(cfg *config.Config) *Registry {
+	return NewRegistryWithOAuthStore(cfg, nil)
+}
+
+func NewRegistryWithOAuthStore(cfg *config.Config, store config.OAuthTokenStore) *Registry {
 	r := NewRegistry(cfg)
+	r.store = store
 
 	r.RegisterFactory("openai", func(pc config.ProviderConfig) Provider {
 		return NewOpenAIProvider("openai", pc.APIKey, pc.APIBase, pc.ExtraHeaders)
@@ -41,23 +50,27 @@ func NewRegistryWithDefaults(cfg *config.Config) *Registry {
 
 	openAICompatible := []string{
 		"deepseek", "groq", "ollama", "openrouter", "vllm",
-		"minimax", "gemini", "moonshot", "aihubmix", "siliconflow",
+		"gemini", "moonshot", "aihubmix", "siliconflow",
 		"volcengine", "byteplus", "dashscope", "zhipu",
 	}
 	for _, name := range openAICompatible {
 		providerName := name
-		defaultBase := ""
-		if providerName == "minimax" {
-			defaultBase = "https://api.minimax.io/v1"
-		}
 		r.RegisterFactory(providerName, func(pc config.ProviderConfig) Provider {
-			apiBase := pc.APIBase
-			if apiBase == "" {
-				apiBase = defaultBase
-			}
-			return NewOpenAIProvider(providerName, pc.APIKey, apiBase, pc.ExtraHeaders)
+			return NewOpenAIProvider(providerName, pc.APIKey, pc.APIBase, pc.ExtraHeaders)
 		})
 	}
+
+	r.RegisterFactory("minimax", func(pc config.ProviderConfig) Provider {
+		apiBase := pc.APIBase
+		if apiBase == "" {
+			apiBase = "https://api.minimax.io/v1"
+		}
+		return NewOpenAIProvider("minimax", pc.APIKey, apiBase, pc.ExtraHeaders)
+	})
+
+	r.RegisterOAuthFactory("minimax-portal", func(cfg OAuthConfig) OAuthProvider {
+		return NewMiniMaxOAuthProvider("minimax-portal", WithMiniMaxOAuthBaseURL(cfg.BaseURL))
+	})
 
 	return r
 }
@@ -66,14 +79,70 @@ func (r *Registry) RegisterFactory(name string, factory ProviderFactory) {
 	r.factories[name] = factory
 }
 
+func (r *Registry) RegisterOAuthFactory(name string, factory func(cfg OAuthConfig) OAuthProvider) {
+	r.oauthFactories[name] = factory
+}
+
 func (r *Registry) ForModel(model string) (Provider, error) {
+	return r.ForModelWithCtx(context.Background(), model)
+}
+
+func (r *Registry) ForModelWithCtx(ctx context.Context, model string) (Provider, error) {
 	resolved := r.resolveProvider(model)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if provider, ok := r.cache[resolved.cacheKey]; ok {
+	cacheKey := resolved.cacheKey
+	if resolved.isOAuth {
+		cacheKey = fmt.Sprintf("%s:%s", resolved.factoryKey, resolved.profileID)
+	}
+
+	if provider, ok := r.cache[cacheKey]; ok {
+		if oauth, ok := provider.(OAuthProvider); ok && oauth.AuthType() == AuthTypeOAuth {
+			if token := oauth.GetToken(); token != nil && token.IsExpired() {
+				if _, err := oauth.RefreshToken(ctx); err == nil {
+					if r.store != nil {
+						r.store.Save(oauth.Name(), oauth.GetToken().ProfileID, &config.TokenStoreEntry{
+							AccessToken:  oauth.GetToken().AccessToken,
+							RefreshToken: oauth.GetToken().RefreshToken,
+							ExpiresAt:    oauth.GetToken().ExpiresAt,
+							TokenType:    oauth.GetToken().TokenType,
+							Scope:        oauth.GetToken().Scope,
+							ProviderID:   oauth.GetToken().ProviderID,
+							ProfileID:   oauth.GetToken().ProfileID,
+						})
+					}
+				}
+			}
+		}
 		return provider, nil
+	}
+
+	if resolved.isOAuth {
+		if factory, ok := r.oauthFactories[resolved.factoryKey]; ok {
+			oauthProvider := factory(resolved.oauthConfig)
+			if r.store != nil {
+				profileID := resolved.profileID
+				if profileID == "" {
+					profileID = "default"
+				}
+				if entry, ok, _ := r.store.Load(oauthProvider.Name(), profileID); ok {
+					oauthProvider.SetToken(&TokenInfo{
+						AccessToken:  entry.AccessToken,
+						RefreshToken: entry.RefreshToken,
+						ExpiresAt:    entry.ExpiresAt,
+						TokenType:    entry.TokenType,
+						Scope:        entry.Scope,
+						ProviderID:   entry.ProviderID,
+						ProfileID:    entry.ProfileID,
+					})
+				}
+			}
+			r.cache[cacheKey] = oauthProvider
+			return oauthProvider, nil
+		}
+		return nil, fmt.Errorf("no OAuth factory for %q", resolved.factoryKey)
 	}
 
 	factory, ok := r.factories[resolved.factoryKey]
@@ -85,7 +154,7 @@ func (r *Registry) ForModel(model string) (Provider, error) {
 	}
 
 	provider := factory(resolved.providerConfig)
-	r.cache[resolved.cacheKey] = provider
+	r.cache[cacheKey] = provider
 	return provider, nil
 }
 
@@ -111,6 +180,16 @@ func (r *Registry) resolveProvider(model string) resolvedProvider {
 	providerConfig, hasConfig := r.cfg.Providers[name]
 	factoryKey := name
 	cacheKey := name
+
+	if hasConfig && providerConfig.AuthType == "oauth" {
+		return resolvedProvider{
+			cacheKey:    fmt.Sprintf("%s:%s", factoryKey, providerConfig.ProfileID),
+			factoryKey:  name,
+			isOAuth:     true,
+			oauthConfig: OAuthConfig{BaseURL: providerConfig.APIBase},
+			profileID:   providerConfig.ProfileID,
+		}
+	}
 
 	switch name {
 	case "anthropic", "azure_openai":
@@ -147,6 +226,9 @@ type resolvedProvider struct {
 	cacheKey       string
 	factoryKey     string
 	providerConfig config.ProviderConfig
+	isOAuth        bool
+	oauthConfig    OAuthConfig
+	profileID      string
 }
 
 func detectProviderName(model, fallback string, providers map[string]config.ProviderConfig, factories map[string]ProviderFactory) string {
