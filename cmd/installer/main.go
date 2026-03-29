@@ -301,6 +301,47 @@ func (m model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		m.provider = providers[m.providerIndex]
+		m.inputs = nil
+		m.focusedInput = 0
+		switch m.provider {
+		case providerOpenAI, providerAnthropic, providerMiniMax:
+			inp := textinput.New()
+			inp.Placeholder = "sk-..."
+			inp.EchoMode = textinput.EchoPassword
+			inp.CharLimit = 256
+			inp.Width = 50
+			inp.Focus()
+			m.inputs = []textinput.Model{inp}
+			m.selectedModel = defaultModelFor(m.provider)
+		case providerAzure:
+			keyInp := textinput.New()
+			keyInp.Placeholder = "Azure API key"
+			keyInp.EchoMode = textinput.EchoPassword
+			keyInp.CharLimit = 256
+			keyInp.Width = 50
+			keyInp.Focus()
+			epInp := textinput.New()
+			epInp.Placeholder = "https://YOUR_RESOURCE.openai.azure.com/"
+			epInp.CharLimit = 256
+			epInp.Width = 50
+			m.inputs = []textinput.Model{keyInp, epInp}
+			m.selectedModel = defaultModelFor(m.provider)
+		case providerCustom:
+			epInp := textinput.New()
+			epInp.Placeholder = "https://api.example.com/v1"
+			epInp.CharLimit = 256
+			epInp.Width = 50
+			epInp.Focus()
+			keyInp := textinput.New()
+			keyInp.Placeholder = "API key (optional)"
+			keyInp.EchoMode = textinput.EchoPassword
+			keyInp.CharLimit = 256
+			keyInp.Width = 50
+			m.inputs = []textinput.Model{epInp, keyInp}
+			m.selectedModel = defaultModelFor(m.provider)
+		case providerMiniMaxOAuth:
+			m.selectedModel = defaultModelFor(m.provider)
+		}
 		m.step = stepConfiguration
 		if m.provider == providerOllama {
 			return m, tea.Batch(fetchOllamaModelsCmd(m.ollamaURL), tickCmd())
@@ -314,6 +355,32 @@ func (m model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleConfigurationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Non-Ollama providers with text inputs: route keys to the focused input
+	if len(m.inputs) > 0 {
+		switch msg.String() {
+		case "enter":
+			if m.validateConfiguration() {
+				m.step = stepChannels
+			}
+			return m, nil
+		case "esc":
+			m.step = stepProvider
+			return m, nil
+		case "tab":
+			if len(m.inputs) > 1 {
+				m.inputs[m.focusedInput].Blur()
+				m.focusedInput = (m.focusedInput + 1) % len(m.inputs)
+				m.inputs[m.focusedInput].Focus()
+			}
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.inputs[m.focusedInput], cmd = m.inputs[m.focusedInput].Update(msg)
+			m.syncAPIFieldsFromInputs()
+			return m, cmd
+		}
+	}
+
 	switch msg.String() {
 	case "up", "k":
 		if m.provider == providerOllama && m.ollamaModelIndex > 0 {
@@ -342,6 +409,29 @@ func (m model) handleConfigurationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m *model) syncAPIFieldsFromInputs() {
+	switch m.provider {
+	case providerOpenAI, providerAnthropic, providerMiniMax:
+		if len(m.inputs) > 0 {
+			m.apiKey = strings.TrimSpace(m.inputs[0].Value())
+		}
+	case providerAzure:
+		if len(m.inputs) > 0 {
+			m.apiKey = strings.TrimSpace(m.inputs[0].Value())
+		}
+		if len(m.inputs) > 1 {
+			m.apiEndpoint = strings.TrimSpace(m.inputs[1].Value())
+		}
+	case providerCustom:
+		if len(m.inputs) > 0 {
+			m.apiEndpoint = strings.TrimSpace(m.inputs[0].Value())
+		}
+		if len(m.inputs) > 1 {
+			m.apiKey = strings.TrimSpace(m.inputs[1].Value())
+		}
+	}
 }
 
 func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

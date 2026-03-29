@@ -214,3 +214,22 @@ func (m *model) validateConfiguration() bool {
 	}
 	return true
 }
+
+func defaultModelFor(provider string) string {
+	switch provider {
+	case providerOpenAI:
+		return "gpt-4o"
+	case providerAnthropic:
+		return "claude-opus-4-6"
+	case providerAzure:
+		return "gpt-4o"
+	case providerMiniMax:
+		return "MiniMax-M2.7"
+	case providerMiniMaxOAuth:
+		return "minimax-portal/MiniMax-M2.7"
+	case providerCustom:
+		return "gpt-4o"
+	default:
+		return ""
+	}
+}

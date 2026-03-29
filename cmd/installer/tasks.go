@@ -409,7 +409,6 @@ func setupSystemd(m *model) error {
 		return fmt.Errorf("create systemd dir: %w", err)
 	}
 	currentPath := os.Getenv("PATH")
-
 	serviceContent := fmt.Sprintf(`[Unit]
 Description=smolbot - AI coding assistant
 After=network.target

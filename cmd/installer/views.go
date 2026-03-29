@@ -285,11 +285,11 @@ func (m model) renderConfiguration() string {
 	b.WriteString(headerStyle.Render("Configuration"))
 	b.WriteString("\n\n")
 
-	providerNames := []string{"Ollama", "OpenAI", "Anthropic", "Azure OpenAI", "Custom"}
+	providerNames := []string{"Ollama", "OpenAI", "Anthropic", "Azure OpenAI", "MiniMax", "MiniMax OAuth", "Custom"}
 	b.WriteString(fmt.Sprintf("Provider: %s\n\n", providerNames[m.providerIndex]))
 
-	switch m.providerIndex {
-	case 0: // Ollama
+	switch m.provider {
+	case providerOllama:
 		b.WriteString("Select Default Model:\n\n")
 		if m.ollamaDetecting {
 			b.WriteString("  " + m.spinner.View() + " Detecting Ollama models...\n")
@@ -325,6 +325,59 @@ func (m model) renderConfiguration() string {
 		b.WriteString("\n")
 		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).
 			Render("    Uses browser cookies for auto-discovery (Chromium/Firefox)"))
+
+	case providerOpenAI, providerAnthropic, providerMiniMax:
+		b.WriteString("API Key:\n\n")
+		if len(m.inputs) > 0 {
+			b.WriteString("  " + m.inputs[0].View())
+		}
+		b.WriteString("\n\n")
+		if m.apiKey == "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Enter your API key to continue"))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ✓ API key set — press Enter to continue"))
+		}
+
+	case providerAzure:
+		b.WriteString("API Key:\n\n")
+		if len(m.inputs) > 0 {
+			b.WriteString("  " + m.inputs[0].View())
+		}
+		b.WriteString("\n\n")
+		b.WriteString("Endpoint URL:\n\n")
+		if len(m.inputs) > 1 {
+			b.WriteString("  " + m.inputs[1].View())
+		}
+		b.WriteString("\n\n")
+		if m.apiKey == "" || m.apiEndpoint == "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Tab to switch fields — Enter to continue"))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ✓ Configuration complete — press Enter to continue"))
+		}
+
+	case providerMiniMaxOAuth:
+		b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ✓ No API key required"))
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Sign in via browser during first use"))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Press Enter to continue"))
+
+	case providerCustom:
+		b.WriteString("Endpoint URL:\n\n")
+		if len(m.inputs) > 0 {
+			b.WriteString("  " + m.inputs[0].View())
+		}
+		b.WriteString("\n\n")
+		b.WriteString("API Key (optional):\n\n")
+		if len(m.inputs) > 1 {
+			b.WriteString("  " + m.inputs[1].View())
+		}
+		b.WriteString("\n\n")
+		if m.apiEndpoint == "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Tab to switch fields — Enter to continue"))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ✓ Endpoint configured — press Enter to continue"))
+		}
 	}
 
 	return b.String()
