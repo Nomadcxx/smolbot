@@ -29,6 +29,7 @@ type tokenStore struct {
 	pathFn  func() string
 	mu      sync.RWMutex
 	entries map[string]map[string]TokenStoreEntry
+	loaded  bool
 }
 
 type OAuthTokenStore interface {
@@ -52,24 +53,6 @@ func NewOAuthTokenStore(paths *Paths) OAuthTokenStore {
 
 func (s *tokenStore) path() string {
 	return s.pathFn()
-}
-
-func (s *tokenStore) loadAll() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	p := s.path()
-	data, err := os.ReadFile(p)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if len(data) == 0 {
-		return nil
-	}
-	return json.Unmarshal(data, &s.entries)
 }
 
 func (s *tokenStore) Save(provider, profileID string, entry *TokenStoreEntry) error {
@@ -156,23 +139,23 @@ func (s *tokenStore) Clear(provider, profileID string) error {
 }
 
 func (s *tokenStore) loadAllLocked() error {
-	if s.entries != nil {
+	if s.loaded {
 		return nil
 	}
-	s.entries = make(map[string]map[string]TokenStoreEntry)
 	p := s.path()
 	data, err := os.ReadFile(p)
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.loaded = true
 			return nil
 		}
 		return err
 	}
-	if len(data) == 0 {
-		return nil
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &s.entries); err != nil {
+			return err
+		}
 	}
-	if err := json.Unmarshal(data, &s.entries); err != nil {
-		return err
-	}
+	s.loaded = true
 	return nil
 }

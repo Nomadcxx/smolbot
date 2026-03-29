@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"reflect"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,7 +14,7 @@ type OAuthProviderFilter struct {
 	MinimaxPortalIsOAuth bool
 }
 
-func NewModels(providerConfig any, models []client.ModelInfo, current string) ModelsModel {
+func NewModels(providerConfig *cfgpkg.Config, models []client.ModelInfo, current string) ModelsModel {
 	m := ModelsModel{models: models, current: current}
 	for _, model := range models {
 		if model.ID == current {
@@ -31,15 +30,8 @@ func NewModels(providerConfig any, models []client.ModelInfo, current string) Mo
 	return m
 }
 
-func buildOAuthFilter(providerConfig any) OAuthProviderFilter {
-	if providerConfig == nil {
-		return OAuthProviderFilter{}
-	}
-	cfg, ok := providerConfig.(*cfgpkg.Config)
-	if !ok {
-		return OAuthProviderFilter{}
-	}
-	if cfg.Providers == nil {
+func buildOAuthFilter(cfg *cfgpkg.Config) OAuthProviderFilter {
+	if cfg == nil || cfg.Providers == nil {
 		return OAuthProviderFilter{}
 	}
 	portal, ok := cfg.Providers["minimax-portal"]
@@ -354,23 +346,6 @@ func isSelectableModel(model client.ModelInfo) bool {
 	return model.Source != "config"
 }
 
-func optionalModelDescription(value any) string {
-	v := reflect.ValueOf(value)
-	if !v.IsValid() {
-		return ""
-	}
-	if v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return ""
-		}
-		v = v.Elem()
-	}
-	if v.Kind() != reflect.Struct {
-		return ""
-	}
-	field := v.FieldByName("Description")
-	if !field.IsValid() || field.Kind() != reflect.String {
-		return ""
-	}
-	return field.String()
+func optionalModelDescription(model client.ModelInfo) string {
+	return model.Description
 }

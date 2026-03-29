@@ -79,8 +79,6 @@ func TestMiniMaxOAuth_PollToken_StateMismatchRejected(t *testing.T) {
 
 func TestMiniMaxOAuth_ExchangeCode_SetsTokenCorrectly(t *testing.T) {
 	p := NewMiniMaxOAuthProvider("minimax-portal")
-
-	callCount := 0
 	p.SetHTTPClient(&mockHTTPClient{
 		resp: &http.Response{
 			StatusCode: 200,
@@ -119,7 +117,6 @@ func TestMiniMaxOAuth_ExchangeCode_SetsTokenCorrectly(t *testing.T) {
 	if token.ExpiresAt.Before(time.Now()) {
 		t.Error("ExpiresAt should be in the future")
 	}
-	_ = callCount
 }
 
 func TestMiniMaxOAuth_RefreshToken_PostsExpectedForm(t *testing.T) {
@@ -130,7 +127,6 @@ func TestMiniMaxOAuth_RefreshToken_PostsExpectedForm(t *testing.T) {
 		ExpiresAt:    time.Now().Add(-1 * time.Hour),
 	}
 
-	bodyCapture := &strings.Builder{}
 	p.SetHTTPClient(&mockHTTPClient{
 		resp: &http.Response{
 			StatusCode: 200,
@@ -150,7 +146,6 @@ func TestMiniMaxOAuth_RefreshToken_PostsExpectedForm(t *testing.T) {
 		t.Errorf("RefreshToken = %q, want %q", newToken.RefreshToken, "new-refresh")
 	}
 
-	_ = bodyCapture
 }
 
 func TestMiniMaxOAuth_RefreshToken_NoRefreshTokenError(t *testing.T) {
@@ -222,7 +217,7 @@ func TestMiniMaxOAuth_Chat_RefreshOnExpiry(t *testing.T) {
 }
 
 func TestGeneratePKCE_VerifierAndChallenge(t *testing.T) {
-	pkce, err := generatePKCE()
+	pkce, err := GeneratePKCE()
 	if err != nil {
 		t.Fatalf("generatePKCE failed: %v", err)
 	}
@@ -230,16 +225,19 @@ func TestGeneratePKCE_VerifierAndChallenge(t *testing.T) {
 	if pkce.Verifier == "" {
 		t.Error("Verifier should not be empty")
 	}
-	if len(pkce.Verifier) < 32 {
-		t.Errorf("Verifier length = %d, expected at least 32", len(pkce.Verifier))
+	if len(pkce.Verifier) < 43 {
+		t.Errorf("Verifier length = %d, expected at least 43 (RFC 7636)", len(pkce.Verifier))
 	}
 	if pkce.Challenge == "" {
 		t.Error("Challenge should not be empty")
 	}
+	if pkce.Method != "S256" {
+		t.Errorf("Method = %q, want S256", pkce.Method)
+	}
 }
 
 func TestGenerateState_IsNotEmpty(t *testing.T) {
-	state, err := generateState()
+	state, err := generateRandomString(16)
 	if err != nil {
 		t.Fatalf("generateState failed: %v", err)
 	}

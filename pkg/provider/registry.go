@@ -175,7 +175,7 @@ func (r *Registry) resolveProvider(model string) resolvedProvider {
 	if r.cfg != nil {
 		fallback = r.cfg.Agents.Defaults.Provider
 	}
-	name := detectProviderName(model, fallback, r.cfg.Providers, r.factories)
+	name := detectProviderName(model, fallback, r.cfg.Providers, r.factories, r.oauthFactories)
 
 	providerConfig, hasConfig := r.cfg.Providers[name]
 	factoryKey := name
@@ -231,7 +231,7 @@ type resolvedProvider struct {
 	profileID      string
 }
 
-func detectProviderName(model, fallback string, providers map[string]config.ProviderConfig, factories map[string]ProviderFactory) string {
+func detectProviderName(model, fallback string, providers map[string]config.ProviderConfig, factories map[string]ProviderFactory, oauthFactories map[string]func(cfg OAuthConfig) OAuthProvider) string {
 	lowerModel := strings.ToLower(strings.TrimSpace(model))
 
 	if strings.HasPrefix(lowerModel, "claude-") || strings.HasPrefix(lowerModel, "anthropic/") {
@@ -255,6 +255,12 @@ func detectProviderName(model, fallback string, providers map[string]config.Prov
 		if name == "anthropic" || name == "azure_openai" || name == "openai" {
 			continue
 		}
+		if _, ok := factories[name]; ok {
+			continue
+		}
+		names = append(names, name)
+	}
+	for name := range oauthFactories {
 		if _, ok := factories[name]; ok {
 			continue
 		}

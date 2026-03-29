@@ -268,14 +268,10 @@ func TestModelsModelOAuthFilterHidesMinimaxWhenPortalIsOAuth(t *testing.T) {
 }
 
 func TestOptionalModelDescription(t *testing.T) {
-	type describedModel struct {
-		Description string
-	}
-
-	if got := optionalModelDescription(describedModel{Description: "High reasoning"}); got != "High reasoning" {
+	if got := optionalModelDescription(client.ModelInfo{ID: "test", Description: "High reasoning"}); got != "High reasoning" {
 		t.Fatalf("expected description field to be used, got %q", got)
 	}
 	if got := optionalModelDescription(client.ModelInfo{ID: "fast"}); got != "" {
-		t.Fatalf("expected client model info to have no optional description, got %q", got)
+		t.Fatalf("expected empty description for model without one, got %q", got)
 	}
 }

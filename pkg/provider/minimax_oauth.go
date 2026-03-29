@@ -2,17 +2,17 @@ package provider
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
+
+const maxResponseBody = 1 << 20 // 1 MB
 
 const minimaxOAuthGlobalBase = "https://api.minimax.io"
 
@@ -28,6 +28,7 @@ var defaultMiniMaxOAuthConfig = OAuthConfig{
 type MiniMaxOAuthProvider struct {
 	config     OAuthConfig
 	token      *TokenInfo
+	mu         sync.Mutex
 	provider   string
 	httpClient HTTPClient
 }
@@ -73,35 +74,16 @@ func (p *MiniMaxOAuthProvider) Name() string    { return p.provider }
 func (p *MiniMaxOAuthProvider) AuthType() AuthType { return AuthTypeOAuth }
 func (p *MiniMaxOAuthProvider) GetAuthConfig() OAuthConfig { return p.config }
 
-func (p *MiniMaxOAuthProvider) SetToken(t *TokenInfo) { p.token = t }
-func (p *MiniMaxOAuthProvider) GetToken() *TokenInfo { return p.token }
-
-type pkceChallenge struct {
-	Verifier  string
-	Challenge string
+func (p *MiniMaxOAuthProvider) SetToken(t *TokenInfo) {
+	p.mu.Lock()
+	p.token = t
+	p.mu.Unlock()
 }
 
-func generatePKCE() (*pkceChallenge, error) {
-	verifierBytes := make([]byte, 32)
-	if _, err := rand.Read(verifierBytes); err != nil {
-		return nil, fmt.Errorf("rand read: %w", err)
-	}
-	verifier := base64.RawURLEncoding.EncodeToString(verifierBytes)
-
-	h := sha256.New()
-	h.Write([]byte(verifier))
-	sha := h.Sum(nil)
-	challenge := base64.RawURLEncoding.EncodeToString(sha)
-
-	return &pkceChallenge{Verifier: verifier, Challenge: challenge}, nil
-}
-
-func generateState() (string, error) {
-	stateBytes := make([]byte, 16)
-	if _, err := rand.Read(stateBytes); err != nil {
-		return "", fmt.Errorf("rand read: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(stateBytes), nil
+func (p *MiniMaxOAuthProvider) GetToken() *TokenInfo {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.token
 }
 
 type DeviceCodeResponse struct {
@@ -127,11 +109,11 @@ type TokenResponse struct {
 }
 
 func (p *MiniMaxOAuthProvider) InitiateAuth(ctx context.Context) (*DeviceCodeResponse, string, error) {
-	pkce, err := generatePKCE()
+	pkce, err := GeneratePKCE()
 	if err != nil {
 		return nil, "", fmt.Errorf("generate PKCE: %w", err)
 	}
-	state, err := generateState()
+	state, err := generateRandomString(16)
 	if err != nil {
 		return nil, "", fmt.Errorf("generate state: %w", err)
 	}
@@ -157,7 +139,7 @@ func (p *MiniMaxOAuthProvider) InitiateAuth(ctx context.Context) (*DeviceCodeRes
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
 		return nil, "", fmt.Errorf("read auth response: %w", err)
 	}
@@ -186,11 +168,13 @@ func (p *MiniMaxOAuthProvider) PollForToken(ctx context.Context, dc *DeviceCodeR
 		return nil, fmt.Errorf("state mismatch: expected %q, got %q", state, dc.State)
 	}
 
-	expiresAt := time.Now().Add(time.Duration(dc.ExpiresIn) * time.Second)
 	interval := time.Duration(dc.Interval) * time.Second
 	if interval < 5*time.Second {
 		interval = 5 * time.Second
 	}
+
+	deadline := time.NewTimer(time.Duration(dc.ExpiresIn) * time.Second)
+	defer deadline.Stop()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -199,10 +183,17 @@ func (p *MiniMaxOAuthProvider) PollForToken(ctx context.Context, dc *DeviceCodeR
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-deadline.C:
+			return nil, fmt.Errorf("device code expired")
 		case <-ticker.C:
 			token, err := p.exchangeDeviceCode(ctx, dc.DeviceCode, dc.Verifier)
 			if err != nil {
 				if strings.Contains(err.Error(), "authorization_pending") {
+					continue
+				}
+				if strings.Contains(err.Error(), "slow_down") {
+					interval += 5 * time.Second
+					ticker.Reset(interval)
 					continue
 				}
 				if strings.Contains(err.Error(), "expired") {
@@ -210,10 +201,10 @@ func (p *MiniMaxOAuthProvider) PollForToken(ctx context.Context, dc *DeviceCodeR
 				}
 				return nil, err
 			}
+			p.mu.Lock()
 			p.token = token
+			p.mu.Unlock()
 			return token, nil
-		case <-time.After(time.Until(expiresAt)):
-			return nil, fmt.Errorf("device code expired")
 		}
 	}
 }
@@ -238,25 +229,25 @@ func (p *MiniMaxOAuthProvider) exchangeDeviceCode(ctx context.Context, deviceCod
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
 		return nil, fmt.Errorf("read token response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var tokenResp TokenResponse
+		if json.Unmarshal(body, &tokenResp) == nil && tokenResp.Error != "" {
+			if tokenResp.Error == "authorization_pending" || tokenResp.Error == "slow_down" {
+				return nil, fmt.Errorf("%s", tokenResp.Error)
+			}
+			return nil, fmt.Errorf("%s: %s", tokenResp.Error, tokenResp.ErrorDesc)
+		}
+		return nil, fmt.Errorf("token request failed: %d %s", resp.StatusCode, string(body))
 	}
 
 	var tokenResp TokenResponse
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
 		return nil, fmt.Errorf("decode token response: %w", err)
-	}
-
-	if tokenResp.Error != "" {
-		if tokenResp.Error == "authorization_pending" || tokenResp.Error == "slow_down" {
-			return nil, fmt.Errorf("%s", tokenResp.Error)
-		}
-		return nil, fmt.Errorf("%s: %s", tokenResp.Error, tokenResp.ErrorDesc)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token request failed: %d %s", resp.StatusCode, string(body))
 	}
 
 	return &TokenInfo{
@@ -270,14 +261,17 @@ func (p *MiniMaxOAuthProvider) exchangeDeviceCode(ctx context.Context, deviceCod
 }
 
 func (p *MiniMaxOAuthProvider) RefreshToken(ctx context.Context) (*TokenInfo, error) {
-	if p.token == nil || p.token.RefreshToken == "" {
+	p.mu.Lock()
+	tok := p.token
+	p.mu.Unlock()
+	if tok == nil || tok.RefreshToken == "" {
 		return nil, fmt.Errorf("no refresh token available")
 	}
 
 	data := url.Values{}
 	data.Set("client_id", p.config.ClientID)
 	data.Set("grant_type", "refresh_token")
-	data.Set("refresh_token", p.token.RefreshToken)
+	data.Set("refresh_token", tok.RefreshToken)
 
 	tokenURL := p.config.BaseURL + p.config.TokenURL
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
@@ -292,7 +286,7 @@ func (p *MiniMaxOAuthProvider) RefreshToken(ctx context.Context) (*TokenInfo, er
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
 		return nil, fmt.Errorf("read refresh response: %w", err)
 	}
@@ -315,20 +309,25 @@ func (p *MiniMaxOAuthProvider) RefreshToken(ctx context.Context) (*TokenInfo, er
 		ProviderID:   p.provider,
 	}
 	if newToken.RefreshToken == "" {
-		newToken.RefreshToken = p.token.RefreshToken
+		newToken.RefreshToken = tok.RefreshToken
 	}
+	p.mu.Lock()
 	p.token = newToken
+	p.mu.Unlock()
 	return newToken, nil
 }
 
 func (p *MiniMaxOAuthProvider) RevokeToken(ctx context.Context) error {
-	if p.token == nil {
+	p.mu.Lock()
+	tok := p.token
+	p.mu.Unlock()
+	if tok == nil {
 		return nil
 	}
 
 	data := url.Values{}
 	data.Set("client_id", p.config.ClientID)
-	data.Set("token", p.token.AccessToken)
+	data.Set("token", tok.AccessToken)
 
 	revokeURL := p.config.BaseURL + p.config.RevokeURL
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, revokeURL, strings.NewReader(data.Encode()))
@@ -343,34 +342,48 @@ func (p *MiniMaxOAuthProvider) RevokeToken(ctx context.Context) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+		return fmt.Errorf("revoke request failed: %d %s", resp.StatusCode, string(body))
+	}
+
+	p.mu.Lock()
 	p.token = nil
+	p.mu.Unlock()
 	return nil
 }
 
-func (p *MiniMaxOAuthProvider) Chat(ctx context.Context, req ChatRequest) (*Response, error) {
-	if p.token == nil || p.token.IsExpired() {
-		if p.token != nil && p.token.RefreshToken != "" {
-			if _, err := p.RefreshToken(ctx); err != nil {
+func (p *MiniMaxOAuthProvider) ensureValidToken(ctx context.Context) (*TokenInfo, error) {
+	p.mu.Lock()
+	tok := p.token
+	p.mu.Unlock()
+	if tok == nil || tok.IsExpired() {
+		if tok != nil && tok.RefreshToken != "" {
+			refreshed, err := p.RefreshToken(ctx)
+			if err != nil {
 				return nil, fmt.Errorf("token expired and refresh failed: %w", err)
 			}
-		} else {
-			return nil, fmt.Errorf("no OAuth token available")
+			return refreshed, nil
 		}
+		return nil, fmt.Errorf("no OAuth token available")
 	}
-	openai := NewOpenAIProvider(p.provider, p.token.AccessToken, p.config.BaseURL, nil)
+	return tok, nil
+}
+
+func (p *MiniMaxOAuthProvider) Chat(ctx context.Context, req ChatRequest) (*Response, error) {
+	tok, err := p.ensureValidToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	openai := NewOpenAIProvider(p.provider, tok.AccessToken, p.config.BaseURL, nil)
 	return openai.Chat(ctx, req)
 }
 
 func (p *MiniMaxOAuthProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stream, error) {
-	if p.token == nil || p.token.IsExpired() {
-		if p.token != nil && p.token.RefreshToken != "" {
-			if _, err := p.RefreshToken(ctx); err != nil {
-				return nil, fmt.Errorf("token expired and refresh failed: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("no OAuth token available")
-		}
+	tok, err := p.ensureValidToken(ctx)
+	if err != nil {
+		return nil, err
 	}
-	openai := NewOpenAIProvider(p.provider, p.token.AccessToken, p.config.BaseURL, nil)
+	openai := NewOpenAIProvider(p.provider, tok.AccessToken, p.config.BaseURL, nil)
 	return openai.ChatStream(ctx, req)
 }

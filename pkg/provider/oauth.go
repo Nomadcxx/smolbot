@@ -19,7 +19,7 @@ type OAuthConfig struct {
 type TokenInfo struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at"` // Unix timestamp ms
+	ExpiresAt    time.Time `json:"expires_at"`
 	TokenType    string    `json:"token_type"`
 	Scope        string    `json:"scope"`
 	ProviderID   string    `json:"providerId,omitempty"`
