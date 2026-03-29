@@ -1211,14 +1211,7 @@ func shouldEnableOllamaQuota(cfg *config.Config, store *usage.Store) bool {
 	if cfg.Quota.RefreshIntervalMinutes <= 0 {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(cfg.Agents.Defaults.Provider), "ollama") {
-		return true
-	}
-	if strings.HasPrefix(strings.TrimSpace(cfg.Agents.Defaults.Model), "ollama/") {
-		return true
-	}
-	_, ok := cfg.Providers["ollama"]
-	return ok
+	return cfg.Quota.HasEnabledProvider("ollama")
 }
 
 func newOllamaQuotaRunner(cfg *config.Config, paths *config.Paths, store *usage.Store) func(context.Context) error {
@@ -1229,18 +1222,32 @@ func newOllamaQuotaRunner(cfg *config.Config, paths *config.Paths, store *usage.
 		Signer:       usage.NewOllamaKeySigner(""),
 		CookieLoader: cookieLoader,
 	}
+	providerCfg := config.ProviderQuotaConfig{}
+	if cfg != nil {
+		providerCfg = cfg.Quota.Provider("ollama")
+	}
 
 	return func(ctx context.Context) error {
 		if cfg != nil {
-			if strings.TrimSpace(cfg.Quota.OllamaCookieHeader) != "" {
-				if err := usage.WriteOllamaCookieHeader(cookiePath, cfg.Quota.OllamaCookieHeader); err != nil {
+			cookieHeader := strings.TrimSpace(providerCfg.CookieHeader)
+			if cookieHeader == "" {
+				cookieHeader = strings.TrimSpace(cfg.Quota.OllamaCookieHeader)
+			}
+			if cookieHeader != "" {
+				if err := usage.WriteOllamaCookieHeader(cookiePath, cookieHeader); err != nil {
 					log.Printf("[runtime] ollama cookie header override failed: %v", err)
 				}
-			} else if cfg.Quota.BrowserCookieDiscoveryEnabled {
-				cookies, err := cookieLoader.Load()
-				if err != nil || len(cookies) == 0 {
-					if _, importErr := usage.ImportOllamaCookiesFromLinuxBrowsers("", cookiePath); importErr != nil {
-						log.Printf("[runtime] ollama cookie import skipped: %v", importErr)
+			} else {
+				browserDiscovery := providerCfg.BrowserCookieDiscoveryEnabled
+				if !browserDiscovery {
+					browserDiscovery = cfg.Quota.BrowserCookieDiscoveryEnabled
+				}
+				if browserDiscovery {
+					cookies, err := cookieLoader.Load()
+					if err != nil || len(cookies) == 0 {
+						if _, importErr := usage.ImportOllamaCookiesFromLinuxBrowsers("", cookiePath); importErr != nil {
+							log.Printf("[runtime] ollama cookie import skipped: %v", importErr)
+						}
 					}
 				}
 			}

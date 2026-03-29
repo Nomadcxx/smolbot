@@ -112,6 +112,99 @@ func TestBuildRuntimeConfiguresOllamaQuotaRunner(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeUsesProviderScopedQuotaConfig(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "ollama/llama3.2"
+	cfg.Agents.Defaults.Provider = "ollama"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = freePort(t)
+	cfg.Quota.RefreshIntervalMinutes = 45
+	cfg.Quota.Providers = map[string]config.ProviderQuotaConfig{
+		"ollama": {Enabled: true, BrowserCookieDiscoveryEnabled: false, CookieHeader: "test=cookie"},
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       cfg.Gateway.Port,
+	}, runtimeDeps{})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	defer app.Close()
+
+	if app.runQuota == nil {
+		t.Fatal("expected quota runner when provider-scoped quota is enabled")
+	}
+	if app.quotaEvery != 45*time.Minute {
+		t.Fatalf("quotaEvery = %s, want %s", app.quotaEvery, 45*time.Minute)
+	}
+}
+
+func TestBuildRuntimeNoQuotaRunnerWhenProviderDisabled(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "ollama/llama3.2"
+	cfg.Agents.Defaults.Provider = "ollama"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = freePort(t)
+	cfg.Quota.RefreshIntervalMinutes = 60
+	cfg.Quota.Providers = map[string]config.ProviderQuotaConfig{
+		"ollama": {Enabled: false},
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       cfg.Gateway.Port,
+	}, runtimeDeps{})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	defer app.Close()
+
+	if app.runQuota != nil {
+		t.Fatal("expected no quota runner when provider-scoped quota is disabled")
+	}
+}
+
+func TestBuildRuntimeNoQuotaRunnerWhenNoProviderQuota(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-4"
+	cfg.Agents.Defaults.Provider = "openai"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = freePort(t)
+	cfg.Quota.RefreshIntervalMinutes = 60
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       cfg.Gateway.Port,
+	}, runtimeDeps{})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	defer app.Close()
+
+	if app.runQuota != nil {
+		t.Fatal("expected no quota runner when no ollama provider quota configured")
+	}
+}
+
 func TestLaunchDaemonRunsCronAndHeartbeatLoops(t *testing.T) {
 	orig := launchRuntimeDeps
 	defer func() { launchRuntimeDeps = orig }()
