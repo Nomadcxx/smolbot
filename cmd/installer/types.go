@@ -20,6 +20,7 @@ const (
 	stepPrerequisites
 	stepProvider
 	stepConfiguration
+	stepMiniMaxOAuth
 	stepChannels
 	stepTelegramSetup
 	stepDiscordSetup
@@ -165,6 +166,11 @@ type model struct {
 	telegramTokenInput textinput.Model
 	discordTokenFile   string
 	discordTokenInput  textinput.Model
+
+	// MiniMax OAuth state
+	oauthDC    *deviceCodeResponse
+	oauthToken *oauthToken
+	oauthError string
 
 	// WhatsApp setup state
 	whatsappQRCode string

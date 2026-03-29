@@ -61,6 +61,8 @@ func (m model) View() string {
 		mainContent = m.renderProvider()
 	case stepConfiguration:
 		mainContent = m.renderConfiguration()
+	case stepMiniMaxOAuth:
+		mainContent = m.renderMiniMaxOAuth()
 	case stepChannels:
 		mainContent = m.renderChannels()
 	case stepTelegramSetup:
@@ -134,7 +136,9 @@ func (m model) getHelpText() string {
 	case stepProvider:
 		return "↑/↓: Navigate  •  Enter: Select  •  Esc: Back"
 	case stepConfiguration:
-		return "↑/↓: Select model  •  Enter: Confirm  •  Esc: Back"
+		return "↑/↓: Select model  •  Tab: Switch field  •  Enter: Confirm  •  Esc: Back"
+	case stepMiniMaxOAuth:
+		return "Esc: Cancel"
 	case stepChannels:
 		return "↑/↓: Navigate  •  Space: Toggle  •  Enter: Continue  •  Esc: Back"
 	case stepTelegramSetup:
@@ -380,6 +384,49 @@ func (m model) renderConfiguration() string {
 		}
 	}
 
+	return b.String()
+}
+
+// MiniMax OAuth device-code flow screen
+func (m model) renderMiniMaxOAuth() string {
+	var b strings.Builder
+	b.WriteString(headerStyle.Render("MiniMax OAuth Sign-In"))
+	b.WriteString("\n\n")
+
+	if m.oauthError != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("  ✗ " + m.oauthError))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Press Enter to retry  •  Esc to go back"))
+		return b.String()
+	}
+
+	if m.oauthToken != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("  ✓ Signed in successfully!"))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Token saved.  Press Enter to continue."))
+		return b.String()
+	}
+
+	if m.oauthDC == nil {
+		b.WriteString("  " + m.spinner.View() + " Connecting to MiniMax...")
+		return b.String()
+	}
+
+	b.WriteString("  Your browser should open automatically.\n")
+	b.WriteString("  If it doesn't, visit:\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("  " + m.oauthDC.VerificationURI))
+	b.WriteString("\n\n")
+	b.WriteString("  Enter this code when prompted:\n\n")
+	b.WriteString(lipgloss.NewStyle().
+		Foreground(Primary).Bold(true).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(Primary).
+		Padding(0, 1).
+		Render(m.oauthDC.UserCode))
+	b.WriteString("\n\n")
+	b.WriteString("  " + m.spinner.View() + " Waiting for authorization...")
+	b.WriteString("\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Esc to cancel"))
 	return b.String()
 }
 

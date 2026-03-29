@@ -134,6 +134,32 @@ func tickerCmd() tea.Cmd {
 
 type tickerMsg struct{}
 
+type miniMaxOAuthInitMsg struct {
+	dc  *deviceCodeResponse
+	err error
+}
+
+type miniMaxOAuthDoneMsg struct {
+	token *oauthToken
+	err   error
+}
+
+func startMiniMaxOAuthCmd() tea.Cmd {
+	return func() tea.Msg {
+		dc, err := initiateDeviceCodeAuth()
+		return miniMaxOAuthInitMsg{dc: dc, err: err}
+	}
+}
+
+func pollMiniMaxOAuthCmd(dc *deviceCodeResponse) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		tok, err := pollForToken(ctx, dc)
+		return miniMaxOAuthDoneMsg{token: tok, err: err}
+	}
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -153,6 +179,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleProviderKeys(msg)
 		case stepConfiguration:
 			return m.handleConfigurationKeys(msg)
+		case stepMiniMaxOAuth:
+			return m.handleMiniMaxOAuthKeys(msg)
 		case stepChannels:
 			return m.handleChannelsKeys(msg)
 		case stepTelegramSetup:
@@ -192,6 +220,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickerMsg:
 		// Ticker messages cycle handled internally by TypewriterTicker
 		return m, tickerCmd()
+
+	case miniMaxOAuthInitMsg:
+		if msg.err != nil {
+			m.oauthError = msg.err.Error()
+			return m, nil
+		}
+		m.oauthDC = msg.dc
+		openBrowser(msg.dc.VerificationURI)
+		return m, pollMiniMaxOAuthCmd(msg.dc)
+
+	case miniMaxOAuthDoneMsg:
+		if msg.err != nil {
+			m.oauthError = msg.err.Error()
+			return m, nil
+		}
+		m.oauthToken = msg.token
+		home, _ := os.UserHomeDir()
+		_ = saveOAuthToken(filepath.Join(home, ".smolbot"), msg.token)
+		m.step = stepChannels
+		return m, nil
 
 	case whatsappInitResult:
 		if msg.err != nil {
@@ -341,6 +389,11 @@ func (m model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedModel = defaultModelFor(m.provider)
 		case providerMiniMaxOAuth:
 			m.selectedModel = defaultModelFor(m.provider)
+			m.oauthDC = nil
+			m.oauthToken = nil
+			m.oauthError = ""
+			m.step = stepMiniMaxOAuth
+			return m, startMiniMaxOAuthCmd()
 		}
 		m.step = stepConfiguration
 		if m.provider == providerOllama {
@@ -406,6 +459,30 @@ func (m model) handleConfigurationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "esc":
 		m.step = stepProvider
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) handleMiniMaxOAuthKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.step = stepProvider
+		m.oauthDC = nil
+		m.oauthToken = nil
+		m.oauthError = ""
+		return m, nil
+	case "enter":
+		if m.oauthError != "" {
+			// Retry
+			m.oauthDC = nil
+			m.oauthToken = nil
+			m.oauthError = ""
+			return m, startMiniMaxOAuthCmd()
+		}
+		if m.oauthToken != nil {
+			m.step = stepChannels
+		}
 		return m, nil
 	}
 	return m, nil
