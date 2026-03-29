@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/internal/theme"
+	cfgpkg "github.com/Nomadcxx/smolbot/pkg/config"
 	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 )
 
@@ -15,7 +16,7 @@ func TestModelsModelShowsCurrentModel(t *testing.T) {
 		t.Fatal("expected nord theme to be available")
 	}
 
-	model := NewModels([]client.ModelInfo{
+	model := NewModels(nil, []client.ModelInfo{
 		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic", Selectable: true},
 		{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
 	}, "gpt-5")
@@ -37,7 +38,7 @@ func TestModelsModelGroupsByProvider(t *testing.T) {
 		t.Fatal("expected nord theme to be available")
 	}
 
-	model := NewModels([]client.ModelInfo{
+	model := NewModels(nil, []client.ModelInfo{
 		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic", Selectable: true},
 		{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
 		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Selectable: true},
@@ -62,7 +63,7 @@ func TestModelsModelGroupsByProvider(t *testing.T) {
 }
 
 func TestModelsModelSkipsInfoOnlyRowsWhenChoosing(t *testing.T) {
-	model := NewModels([]client.ModelInfo{
+	model := NewModels(nil, []client.ModelInfo{
 		{ID: "openrouter", Name: "OpenRouter", Provider: "openrouter", Description: "Configured provider", Source: "config", Selectable: false},
 		{ID: "openrouter/auto", Name: "Auto", Provider: "openrouter", Selectable: true},
 	}, "openrouter/auto")
@@ -91,7 +92,7 @@ func TestModelsModelSpaceMarksPendingSelectionAndEnterConfirmsIt(t *testing.T) {
 		t.Fatal("expected nord theme to be available")
 	}
 
-	model := NewModels([]client.ModelInfo{
+	model := NewModels(nil, []client.ModelInfo{
 		{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
 		{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet", Provider: "anthropic", Selectable: true},
 	}, "gpt-5")
@@ -123,7 +124,7 @@ func TestModelsModelSpaceMarksPendingSelectionAndEnterConfirmsIt(t *testing.T) {
 }
 
 func TestModelsModelAllowsLegacyRowsWithoutSelectableMetadata(t *testing.T) {
-	model := NewModels([]client.ModelInfo{
+	model := NewModels(nil, []client.ModelInfo{
 		{ID: "gpt-5", Name: "GPT-5", Provider: "openai"},
 	}, "gpt-5")
 
@@ -146,7 +147,7 @@ func TestModelsModelFilterNarrowsByProviderAndModel(t *testing.T) {
 		t.Fatal("expected nord theme to be available")
 	}
 
-	model := NewModels([]client.ModelInfo{
+	model := NewModels(nil, []client.ModelInfo{
 		{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
 		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Selectable: true},
 		{ID: "claude-opus", Name: "Claude Opus", Provider: "anthropic", Selectable: true},
@@ -190,7 +191,7 @@ func TestModelsModelShowsOverflowCues(t *testing.T) {
 		})
 	}
 
-	model := NewModels(models, "model-a")
+	model := NewModels(nil, models, "model-a")
 	view := model.View()
 	if !strings.Contains(view, "▼ more below") {
 		t.Fatalf("expected lower overflow cue, got %q", view)
@@ -211,7 +212,7 @@ func TestModelsModelSeparatesMinimaxAndMinimaxPortal(t *testing.T) {
 		t.Fatal("expected nord theme to be available")
 	}
 
-	model := NewModels([]client.ModelInfo{
+	model := NewModels(nil, []client.ModelInfo{
 		{ID: "minimax/M2.7", Name: "MiniMax M2.7", Provider: "minimax", Selectable: true},
 		{ID: "minimax-portal/MiniMax-M2.7", Name: "MiniMax M2.7 (OAuth)", Provider: "minimax-portal", Selectable: true},
 	}, "minimax-portal/MiniMax-M2.7")
@@ -232,6 +233,37 @@ func TestModelsModelSeparatesMinimaxAndMinimaxPortal(t *testing.T) {
 	}
 	if minimaxIdx > minimaxPortalIdx {
 		t.Fatalf("minimax should appear before minimax-portal alphabetically")
+	}
+}
+
+func TestModelsModelOAuthFilterHidesMinimaxWhenPortalIsOAuth(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be available")
+	}
+
+	oauthConfig := &cfgpkg.Config{
+		Providers: map[string]cfgpkg.ProviderConfig{
+			"minimax-portal": {AuthType: "oauth", ProfileID: "minimax-portal:default"},
+		},
+	}
+
+	models := []client.ModelInfo{
+		{ID: "minimax/M2.7", Name: "MiniMax M2.7", Provider: "minimax", Selectable: true},
+		{ID: "minimax-portal/MiniMax-M2.7", Name: "MiniMax M2.7 (OAuth)", Provider: "minimax-portal", Selectable: true},
+		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic", Selectable: true},
+	}
+
+	model := NewModels(oauthConfig, models, "claude-sonnet")
+
+	view := model.View()
+	if !strings.Contains(view, "Provider: minimax") {
+		t.Fatalf("expected minimax provider group to be hidden when minimax-portal has OAuth, got %q", view)
+	}
+	if !strings.Contains(view, "Provider: minimax-portal") {
+		t.Fatalf("expected minimax-portal provider group to remain visible, got %q", view)
+	}
+	if !strings.Contains(view, "Claude Sonnet") {
+		t.Fatalf("expected anthropic models to remain visible, got %q", view)
 	}
 }
 

@@ -549,7 +549,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if current == "" {
 			current = m.app.Model
 		}
-		m.dialog = modelsDialog{dialogcmp.NewModels(msg.Models, current)}
+		m.dialog = modelsDialog{dialogcmp.NewModels(m.providerConfig, msg.Models, current)}
 		return m, nil
 	case SkillsLoadedMsg:
 		m.dialog = skillsDialog{dialogcmp.NewSkills(msg.Skills)}

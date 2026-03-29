@@ -8,7 +8,46 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/internal/theme"
+	cfgpkg "github.com/Nomadcxx/smolbot/pkg/config"
 )
+
+type OAuthProviderFilter struct {
+	MinimaxPortalIsOAuth bool
+}
+
+func NewModels(providerConfig any, models []client.ModelInfo, current string) ModelsModel {
+	m := ModelsModel{models: models, current: current}
+	for _, model := range models {
+		if model.ID == current {
+			m.currentProvider = model.Provider
+			break
+		}
+	}
+	m.oauthFilter = buildOAuthFilter(providerConfig)
+	m.applyFilter()
+	if idx := m.indexOfSelectableID(current); idx >= 0 {
+		m.cursor = idx
+	}
+	return m
+}
+
+func buildOAuthFilter(providerConfig any) OAuthProviderFilter {
+	if providerConfig == nil {
+		return OAuthProviderFilter{}
+	}
+	cfg, ok := providerConfig.(*cfgpkg.Config)
+	if !ok {
+		return OAuthProviderFilter{}
+	}
+	if cfg.Providers == nil {
+		return OAuthProviderFilter{}
+	}
+	portal, ok := cfg.Providers["minimax-portal"]
+	if !ok {
+		return OAuthProviderFilter{}
+	}
+	return OAuthProviderFilter{MinimaxPortalIsOAuth: portal.AuthType == "oauth"}
+}
 
 type ModelChosenMsg struct {
 	ID string
@@ -23,21 +62,7 @@ type ModelsModel struct {
 	current         string
 	currentProvider string
 	pending         string
-}
-
-func NewModels(models []client.ModelInfo, current string) ModelsModel {
-	m := ModelsModel{models: models, current: current}
-	for _, model := range models {
-		if model.ID == current {
-			m.currentProvider = model.Provider
-			break
-		}
-	}
-	m.applyFilter()
-	if idx := m.indexOfSelectableID(current); idx >= 0 {
-		m.cursor = idx
-	}
-	return m
+	oauthFilter     OAuthProviderFilter
 }
 
 func (m ModelsModel) Update(msg tea.Msg) (ModelsModel, tea.Cmd) {
@@ -134,9 +159,13 @@ func (m *ModelsModel) applyFilter() {
 	focusedID := m.focusedModelID()
 	filtered := make([]client.ModelInfo, 0, len(m.models))
 	for _, model := range m.models {
-		if matchesQuery(m.filter, model.ID, model.Name, model.Provider, optionalModelDescription(model)) {
-			filtered = append(filtered, model)
+		if !matchesQuery(m.filter, model.ID, model.Name, model.Provider, optionalModelDescription(model)) {
+			continue
 		}
+		if m.oauthFilter.MinimaxPortalIsOAuth && model.Provider == "minimax" {
+			continue
+		}
+		filtered = append(filtered, model)
 	}
 	m.rows = buildModelRows(filtered, m.currentProvider)
 	m.selectable = m.selectable[:0]
