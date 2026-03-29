@@ -38,6 +38,12 @@ type OAuthTokenStore interface {
 }
 
 func NewOAuthTokenStore(paths *Paths) OAuthTokenStore {
+	if err := os.MkdirAll(paths.Root(), 0700); err != nil {
+		return &tokenStore{
+			pathFn:  func() string { return filepath.Join(paths.Root(), "oauth_tokens.json") },
+			entries: make(map[string]map[string]TokenStoreEntry),
+		}
+	}
 	return &tokenStore{
 		pathFn:  func() string { return filepath.Join(paths.Root(), "oauth_tokens.json") },
 		entries: make(map[string]map[string]TokenStoreEntry),

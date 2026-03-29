@@ -319,7 +319,7 @@ func writeConfig(m *model) error {
 	case providerMiniMaxOAuth:
 		providers["minimax-portal"] = map[string]interface{}{
 			"authType":  "oauth",
-			"profileId": "minimax-portal",
+			"profileId": "minimax-portal:default",
 			"apiBase":   "https://api.minimax.io",
 		}
 	case providerCustom:
