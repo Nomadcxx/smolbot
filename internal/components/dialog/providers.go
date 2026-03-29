@@ -15,14 +15,9 @@ type ProviderInfo struct {
 	Type      string
 	APIBase   string
 	HasAuth   bool
+	IsOAuth   bool
 	IsActive  bool
 	IsPartial bool
-}
-
-type ProvidersModel struct {
-	rows           []providerRenderRow
-	activeProvider string
-	activeModel    string
 }
 
 type providerRenderRow struct {
@@ -31,8 +26,15 @@ type providerRenderRow struct {
 	label     string
 	value     string
 	hasAuth   bool
+	isOAuth   bool
 	isActive  bool
 	isPartial bool
+}
+
+type ProvidersModel struct {
+	rows           []providerRenderRow
+	activeProvider string
+	activeModel    string
 }
 
 func NewProviders(info []ProviderInfo, activeProvider, activeModel string) ProvidersModel {
@@ -69,35 +71,39 @@ func buildProviderInfoList(models []client.ModelInfo, currentModel, activeProvid
 	}
 
 	providerTypes := map[string]string{
-		"openai":       "OpenAI Compatible",
-		"anthropic":    "Anthropic",
-		"azure_openai": "Azure OpenAI",
-		"ollama":       "Ollama",
-		"deepseek":     "DeepSeek",
-		"groq":         "Groq",
-		"minimax":      "MiniMax",
-		"gemini":       "Google Gemini",
-		"moonshot":     "Moonshot",
-		"openrouter":   "OpenRouter",
-		"vllm":          "vLLM",
+		"openai":          "OpenAI Compatible",
+		"anthropic":       "Anthropic",
+		"azure_openai":    "Azure OpenAI",
+		"ollama":          "Ollama",
+		"deepseek":        "DeepSeek",
+		"groq":            "Groq",
+		"minimax":         "MiniMax",
+		"minimax-portal":  "MiniMax OAuth",
+		"gemini":          "Google Gemini",
+		"moonshot":        "Moonshot",
+		"openrouter":      "OpenRouter",
+		"vllm":            "vLLM",
 	}
 
 	if activeProvider != "" {
 		hasAuth := false
 		apiBase := ""
+		isOAuth := false
 		providerType := providerTypes[activeProvider]
 		if providerType == "" {
 			providerType = "OpenAI Compatible"
 		}
 		if pc, ok := configuredProviders[activeProvider]; ok {
-			hasAuth = pc.APIKey != ""
+			hasAuth = pc.APIKey != "" || pc.AuthType == "oauth"
 			apiBase = pc.APIBase
+			isOAuth = pc.AuthType == "oauth"
 		}
 		infoList = append(infoList, ProviderInfo{
 			Name:     activeProvider,
 			Type:     providerType,
 			APIBase:  apiBase,
 			HasAuth:  hasAuth,
+			IsOAuth:  isOAuth,
 			IsActive: true,
 		})
 	}
@@ -110,12 +116,15 @@ func buildProviderInfoList(models []client.ModelInfo, currentModel, activeProvid
 		if providerType == "" {
 			providerType = "OpenAI Compatible"
 		}
-		isPartial := pc.APIKey == "" && pc.APIBase == ""
+		hasAuth := pc.APIKey != "" || pc.AuthType == "oauth"
+		isOAuth := pc.AuthType == "oauth"
+		isPartial := !hasAuth && pc.APIBase == ""
 		infoList = append(infoList, ProviderInfo{
 			Name:      name,
 			Type:      providerType,
 			APIBase:   pc.APIBase,
-			HasAuth:   pc.APIKey != "",
+			HasAuth:   hasAuth,
+			IsOAuth:   isOAuth,
 			IsActive:  false,
 			IsPartial: isPartial,
 		})
@@ -149,6 +158,7 @@ func buildProviderRows(info []ProviderInfo, activeProvider, activeModel string) 
 				label:    "Provider",
 				value:    p.Name,
 				hasAuth:  p.HasAuth,
+				isOAuth:  p.IsOAuth,
 				isActive: true,
 			})
 			rows = append(rows, providerRenderRow{
@@ -169,8 +179,10 @@ func buildProviderRows(info []ProviderInfo, activeProvider, activeModel string) 
 				})
 			}
 			authStatus := "Not configured"
-			if p.HasAuth {
-				authStatus = "Configured"
+			if p.IsOAuth {
+				authStatus = "OAuth"
+			} else if p.HasAuth {
+				authStatus = "API Key"
 			}
 			rows = append(rows, providerRenderRow{
 				kind:  "info",
@@ -200,14 +212,17 @@ func buildProviderRows(info []ProviderInfo, activeProvider, activeModel string) 
 		})
 		for _, p := range configuredProviders {
 			authStatus := "Not configured"
-			if p.HasAuth {
-				authStatus = "API Key set"
+			if p.IsOAuth {
+				authStatus = "OAuth"
+			} else if p.HasAuth {
+				authStatus = "API Key"
 			}
 			rows = append(rows, providerRenderRow{
-				kind:     "provider",
-				label:    p.Name,
-				value:    p.Type,
+				kind:      "provider",
+				label:     p.Name,
+				value:     p.Type,
 				hasAuth:  p.HasAuth,
+				isOAuth:  p.IsOAuth,
 				isPartial: p.IsPartial,
 			})
 			if p.APIBase != "" {
@@ -319,11 +334,16 @@ func (m ProvidersModel) renderRow(row providerRenderRow, t *theme.Theme) []strin
 			providerStyle = providerStyle.Foreground(t.Success).Bold(true)
 		} else if row.isPartial {
 			providerStyle = providerStyle.Foreground(t.Warning)
+		} else if row.isOAuth {
+			providerStyle = providerStyle.Foreground(t.Primary).Bold(true)
 		}
 
 		valueStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
 		if row.hasAuth {
 			valueStyle = valueStyle.Foreground(t.Success)
+		}
+		if row.isOAuth {
+			valueStyle = valueStyle.Foreground(t.Primary)
 		}
 
 		return []string{providerStyle.Render(label), valueStyle.Render("  " + value)}
