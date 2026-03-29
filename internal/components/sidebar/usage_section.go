@@ -30,7 +30,7 @@ func (s UsageSection) Render(width, _ int, t *theme.Theme) string {
 	label := usageLabel(provider, model)
 
 	lines := []string{
-		renderValue(label, width, t, func(th *theme.Theme) color.Color { return th.Accent }),
+		renderValue(label, width, t, func(th *theme.Theme) color.Color { return th.Secondary }),
 		styleLine("Observed", width, t, func(th *theme.Theme) color.Color { return th.Accent }),
 		styleLine(fmt.Sprintf("session %s", formatTokens(s.summary.SessionTokens)), width, t, func(th *theme.Theme) color.Color { return th.Text }),
 		styleLine(fmt.Sprintf("today %s", formatTokens(s.summary.TodayTokens)), width, t, func(th *theme.Theme) color.Color { return th.TextMuted }),
@@ -112,9 +112,25 @@ func usageQuotaLines(summary *client.UsageSummary, width int, t *theme.Theme) []
 	if plan := strings.TrimSpace(quota.PlanName); plan != "" {
 		lines = append(lines, styleLine(plan, width, t, func(th *theme.Theme) color.Color { return th.Text }))
 	}
-	lines = append(lines, styleLine(fmt.Sprintf("session %.1f%%", quota.SessionUsedPercent), width, t, func(th *theme.Theme) color.Color { return th.TextMuted }))
-	lines = append(lines, styleLine(fmt.Sprintf("week %.1f%%", quota.WeeklyUsedPercent), width, t, func(th *theme.Theme) color.Color { return th.TextMuted }))
+	lines = append(lines, styleLine(fmt.Sprintf("session %.1f%%", quota.SessionUsedPercent), width, t, severityColor(quota.SessionUsedPercent)))
+	lines = append(lines, styleLine(fmt.Sprintf("week %.1f%%", quota.WeeklyUsedPercent), width, t, severityColor(quota.WeeklyUsedPercent)))
 	return lines
+}
+
+func severityColor(pct float64) func(*theme.Theme) color.Color {
+	return func(th *theme.Theme) color.Color {
+		if th == nil {
+			return nil
+		}
+		switch {
+		case pct >= 80:
+			return th.Error
+		case pct >= 60:
+			return th.Warning
+		default:
+			return th.TextMuted
+		}
+	}
 }
 
 func usageRequestLine(summary *client.UsageSummary) string {

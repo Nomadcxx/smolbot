@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"image/color"
 	"os"
 	"strings"
 	"testing"
@@ -174,6 +175,47 @@ func TestUsageSectionRendersEmptyState(t *testing.T) {
 	got := plain(section.Render(28, 0, theme.Current()))
 	if got != "—" {
 		t.Fatalf("expected empty usage state, got %q", got)
+	}
+}
+
+func TestSeverityColorReturnsCorrectColor(t *testing.T) {
+	th := theme.Current()
+	cases := []struct {
+		pct      float64
+		wantFunc func(*theme.Theme) color.Color
+	}{
+		{50.0, func(th *theme.Theme) color.Color { return th.TextMuted }},
+		{59.9, func(th *theme.Theme) color.Color { return th.TextMuted }},
+		{60.0, func(th *theme.Theme) color.Color { return th.Warning }},
+		{70.0, func(th *theme.Theme) color.Color { return th.Warning }},
+		{79.9, func(th *theme.Theme) color.Color { return th.Warning }},
+		{80.0, func(th *theme.Theme) color.Color { return th.Error }},
+		{95.0, func(th *theme.Theme) color.Color { return th.Error }},
+	}
+	for _, tc := range cases {
+		fn := severityColor(tc.pct)
+		got := fn(th)
+		want := tc.wantFunc(th)
+		if got != want {
+			t.Errorf("severityColor(%f) = %v, want %v", tc.pct, got, want)
+		}
+	}
+}
+
+func TestUsageSectionHidesQuotaWhenNil(t *testing.T) {
+	section := UsageSection{
+		summary: &client.UsageSummary{
+			ProviderID:    "ollama",
+			ModelName:     "llama3.2",
+			SessionTokens: 50,
+			TodayTokens:   50,
+			WeeklyTokens:  90,
+		},
+	}
+
+	got := plain(section.Render(28, 0, theme.Current()))
+	if strings.Contains(got, "Quota") {
+		t.Fatalf("expected no Quota block when summary.Quota is nil, got %q", got)
 	}
 }
 
