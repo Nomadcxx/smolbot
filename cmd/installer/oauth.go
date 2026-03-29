@@ -108,7 +108,12 @@ func pollForToken(ctx context.Context, dc *deviceCodeResponse) (*oauthToken, err
 		interval = 5 * time.Second
 	}
 
-	deadline := time.NewTimer(time.Duration(dc.ExpiresIn) * time.Second)
+	expiresIn := dc.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 300 // MiniMax may omit this field; default to 5 minutes
+	}
+
+	deadline := time.NewTimer(time.Duration(expiresIn) * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -131,7 +136,8 @@ func pollForToken(ctx context.Context, dc *deviceCodeResponse) (*oauthToken, err
 					ticker.Reset(interval)
 					continue
 				}
-				if strings.Contains(msg, "expired") {
+				// RFC 8628 expiry error codes — match exactly, not substring
+				if msg == "expired_token" || msg == "device_code_expired" || msg == "device_flow_expired" {
 					return nil, fmt.Errorf("device code expired")
 				}
 				return nil, err
