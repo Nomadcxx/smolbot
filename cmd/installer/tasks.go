@@ -319,9 +319,19 @@ func writeConfig(m *model) error {
 			"apiKey": m.apiKey,
 		}
 	case providerAzure:
-		providers["azure"] = map[string]interface{}{
+		providers["azure_openai"] = map[string]interface{}{
 			"apiKey":   m.apiKey,
 			"endpoint": m.apiEndpoint,
+		}
+	case providerMiniMax:
+		providers["minimax"] = map[string]interface{}{
+			"apiKey": m.apiKey,
+		}
+	case providerMiniMaxOAuth:
+		providers["minimax-portal"] = map[string]interface{}{
+			"authType":  "oauth",
+			"profileId": "minimax-portal:default",
+			"apiBase":   "https://api.minimax.io",
 		}
 	case providerCustom:
 		providers["custom"] = map[string]interface{}{

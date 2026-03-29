@@ -199,9 +199,12 @@ func (m *model) validateConfiguration() bool {
 	case providerOllama:
 		// Ollama just needs a model selected
 		return m.selectedModel != "" || len(m.ollamaModels) > 0
-	case providerOpenAI, providerAnthropic:
+	case providerOpenAI, providerAnthropic, providerMiniMax:
 		// These need an API key
 		return m.apiKey != ""
+	case providerMiniMaxOAuth:
+		// OAuth uses browser-based sign-in
+		return true
 	case providerAzure:
 		// Azure needs endpoint and key
 		return m.apiKey != "" && m.apiEndpoint != ""

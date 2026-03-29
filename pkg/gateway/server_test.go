@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -298,54 +299,6 @@ func TestServerMethods(t *testing.T) {
 	})
 }
 
-func TestModelSetUpdatesGatewayConfigAndStatus(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Agents.Defaults.Model = "gpt-test"
-	cfg.Agents.Defaults.Provider = "openai"
-
-	server := NewServer(ServerDeps{
-		Config:  cfg,
-		Version: "test",
-	})
-
-	httpServer := httptest.NewServer(server.Handler())
-	defer httpServer.Close()
-	conn := dialWebsocket(t, httpServer.URL+"/ws")
-	defer conn.Close()
-
-	writeFrame(t, conn, RequestFrame{
-		ID:     "1",
-		Method: "models.set",
-		Params: json.RawMessage(`{"model":"claude-test"}`),
-	})
-	frame := readResponseFrame(t, conn, "1")
-	if frame.Response.Error != nil {
-		t.Fatalf("unexpected set error %#v", frame.Response.Error)
-	}
-	var payload struct {
-		Previous string `json:"previous"`
-	}
-	if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
-		t.Fatalf("unmarshal models.set payload: %v", err)
-	}
-	if payload.Previous != "gpt-test" {
-		t.Fatalf("expected previous model gpt-test, got %q", payload.Previous)
-	}
-	if cfg.Agents.Defaults.Model != "claude-test" {
-		t.Fatalf("expected model update, got %q", cfg.Agents.Defaults.Model)
-	}
-
-	writeFrame(t, conn, RequestFrame{ID: "2", Method: "status"})
-	frame = readResponseFrame(t, conn, "2")
-	if frame.Response.Error != nil {
-		t.Fatalf("unexpected status error %#v", frame.Response.Error)
-	}
-	if !strings.Contains(string(frame.Response.Result), `"model":"claude-test"`) {
-		t.Fatalf("expected status to report updated model, got %s", frame.Response.Result)
-	}
-}
-
-
 func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Agents.Defaults.Model = "ollama/llama3.2"
@@ -504,6 +457,212 @@ func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
 	}
 	if !strings.Contains(decoded.UsageAlert.Message, "llama3.2") {
 		t.Fatalf("expected usage alert message to include model label, got %#v", decoded.UsageAlert)
+	}
+}
+
+func TestModelSetUpdatesGatewayConfigAndStatus(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+
+	server := NewServer(ServerDeps{
+		Config:  cfg,
+		Version: "test",
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "1",
+		Method: "models.set",
+		Params: json.RawMessage(`{"model":"claude-test"}`),
+	})
+	frame := readResponseFrame(t, conn, "1")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected set error %#v", frame.Response.Error)
+	}
+	var payload struct {
+		Current  string `json:"current"`
+		Previous string `json:"previous"`
+	}
+	if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
+		t.Fatalf("unmarshal models.set payload: %v", err)
+	}
+	if payload.Current != "claude-test" {
+		t.Fatalf("expected current model claude-test, got %q", payload.Current)
+	}
+	if payload.Previous != "gpt-test" {
+		t.Fatalf("expected previous model gpt-test, got %q", payload.Previous)
+	}
+	if cfg.Agents.Defaults.Model != "claude-test" {
+		t.Fatalf("expected model update, got %q", cfg.Agents.Defaults.Model)
+	}
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "1b",
+		Method: "models.set",
+		Params: json.RawMessage(`{"id":"legacy-model"}`),
+	})
+	frame = readResponseFrame(t, conn, "1b")
+	if frame.Response.Error == nil {
+		t.Fatalf("expected legacy id payload to be rejected, got %#v", frame)
+	}
+
+	writeFrame(t, conn, RequestFrame{ID: "2", Method: "status"})
+	frame = readResponseFrame(t, conn, "2")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected status error %#v", frame.Response.Error)
+	}
+	if !strings.Contains(string(frame.Response.Result), `"model":"claude-test"`) {
+		t.Fatalf("expected status to report updated model, got %s", frame.Response.Result)
+	}
+}
+
+func TestModelsListReturnsRichDiscoveryPayload(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-5"
+	cfg.Agents.Defaults.Provider = "openai"
+	cfg.Providers = map[string]config.ProviderConfig{
+		"openai":     {APIKey: "sk-openai"},
+		"openrouter": {APIKey: "sk-openrouter", APIBase: "https://openrouter.ai/api/v1"},
+	}
+
+	server := NewServer(ServerDeps{
+		Config:  cfg,
+		Version: "test",
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{ID: "models", Method: "models.list"})
+	frame := readResponseFrame(t, conn, "models")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected models.list error %#v", frame.Response.Error)
+	}
+
+	var payload struct {
+		Models  []provider.ModelInfo `json:"models"`
+		Current string               `json:"current"`
+	}
+	if err := json.Unmarshal(frame.Response.Result, &payload); err != nil {
+		t.Fatalf("unmarshal models.list payload: %v", err)
+	}
+	if payload.Current != "gpt-5" {
+		t.Fatalf("current = %q, want gpt-5", payload.Current)
+	}
+	if len(payload.Models) != 3 {
+		t.Fatalf("len(models) = %d, want 3", len(payload.Models))
+	}
+
+	foundOpenRouter := false
+	foundCurrent := false
+	for _, model := range payload.Models {
+		if model.Provider != "openrouter" {
+			if model.Provider == "openai" && model.ID == "gpt-5" {
+				foundCurrent = true
+			}
+			continue
+		}
+		foundOpenRouter = true
+		if model.ID != "openrouter" {
+			t.Fatalf("openrouter id = %q, want openrouter", model.ID)
+		}
+		if model.Name != "OpenRouter" {
+			t.Fatalf("openrouter name = %q, want OpenRouter", model.Name)
+		}
+		if model.Source != "config" {
+			t.Fatalf("openrouter source = %q, want config", model.Source)
+		}
+		if model.Selectable {
+			t.Fatal("expected openrouter provider-backed row to be info-only")
+		}
+		if model.Capability != "openai-compatible" {
+			t.Fatalf("openrouter capability = %q, want openai-compatible", model.Capability)
+		}
+		if model.Description == "" {
+			t.Fatal("expected openrouter description to be populated")
+		}
+	}
+	if !foundOpenRouter {
+		t.Fatalf("expected openrouter model entry, got %#v", payload.Models)
+	}
+	if !foundCurrent {
+		t.Fatalf("expected current openai model row, got %#v", payload.Models)
+	}
+}
+
+func TestModelSetCallbackFailureDoesNotMutateConfig(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+
+	server := NewServer(ServerDeps{
+		Config:  cfg,
+		Version: "test",
+		SetModelCallback: func(string) (string, error) {
+			return "", errors.New("switch failed")
+		},
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "1",
+		Method: "models.set",
+		Params: json.RawMessage(`{"model":"claude-test"}`),
+	})
+	frame := readResponseFrame(t, conn, "1")
+	if frame.Response.Error == nil {
+		t.Fatalf("expected models.set error, got %#v", frame)
+	}
+	if cfg.Agents.Defaults.Model != "gpt-test" {
+		t.Fatalf("model mutated to %q on callback failure, want gpt-test", cfg.Agents.Defaults.Model)
+	}
+}
+
+func TestModelSetTrimsWhitespaceBeforeCallbackAndPersistence(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Provider = "openai"
+
+	var callbackModel string
+	server := NewServer(ServerDeps{
+		Config:  cfg,
+		Version: "test",
+		SetModelCallback: func(model string) (string, error) {
+			callbackModel = model
+			return model, nil
+		},
+	})
+
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "1",
+		Method: "models.set",
+		Params: json.RawMessage(`{"model":"  claude-test  "}`),
+	})
+	frame := readResponseFrame(t, conn, "1")
+	if frame.Response.Error != nil {
+		t.Fatalf("unexpected set error %#v", frame.Response.Error)
+	}
+	if callbackModel != "claude-test" {
+		t.Fatalf("callback model = %q, want trimmed claude-test", callbackModel)
+	}
+	if cfg.Agents.Defaults.Model != "claude-test" {
+		t.Fatalf("persisted model = %q, want trimmed claude-test", cfg.Agents.Defaults.Model)
 	}
 }
 

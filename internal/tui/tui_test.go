@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -16,25 +18,28 @@ import (
 	"github.com/Nomadcxx/smolbot/internal/theme"
 	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 	cfgpkg "github.com/Nomadcxx/smolbot/pkg/config"
+	"github.com/gorilla/websocket"
 )
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 type fakeClient struct {
-	sessions   []client.SessionInfo
-	models     []client.ModelInfo
-	skills     []client.SkillInfo
-	mcps       []client.MCPServerInfo
-	jobs       []client.CronJob
-	current    string
-	status     client.StatusPayload
-	statuses   map[string]client.StatusPayload
-	compact    client.CompactResult
-	chatRun    string
-	aborts     []abortCall
-	modelErr   error
-	resetErr   error
-	compactErr error
+	sessions       []client.SessionInfo
+	models         []client.ModelInfo
+	skills         []client.SkillInfo
+	mcps           []client.MCPServerInfo
+	jobs           []client.CronJob
+	current        string
+	status         client.StatusPayload
+	statuses       map[string]client.StatusPayload
+	compact        client.CompactResult
+	chatRun        string
+	aborts         []abortCall
+	modelErr       error
+	resetErr       error
+	compactErr     error
+	modelSets      []string
+	modelSetResult string
 }
 
 type abortCall struct {
@@ -67,10 +72,12 @@ func (f *fakeClient) ModelsList() ([]client.ModelInfo, string, error) {
 	return f.models, f.current, nil
 }
 func (f *fakeClient) ModelsSet(id string) (string, error) {
+	f.modelSets = append(f.modelSets, id)
 	if f.modelErr != nil {
 		return "", f.modelErr
 	}
-	if f.current != "" {
+	if f.modelSetResult != "" {
+		f.current = f.modelSetResult
 		return f.current, nil
 	}
 	f.current = id
@@ -230,20 +237,29 @@ func TestHandleSlashCommandProvidersShowsCurrentProviderConfig(t *testing.T) {
 	}
 
 	view := plain(got.dialog.View())
-	if !strings.Contains(view, "Current model: gpt-5") {
-		t.Fatalf("expected current model line, got %q", view)
+	if !strings.Contains(view, "Active") {
+		t.Fatalf("expected Active section header, got %q", view)
 	}
-	if !strings.Contains(view, "Current provider: openai") {
-		t.Fatalf("expected current provider line, got %q", view)
+	if !strings.Contains(view, "Provider (active)") {
+		t.Fatalf("expected active provider marker, got %q", view)
 	}
-	if !strings.Contains(view, "API base URL: https://api.openai.example/v1") {
-		t.Fatalf("expected provider API base URL, got %q", view)
+	if !strings.Contains(view, "openai") {
+		t.Fatalf("expected active provider name, got %q", view)
 	}
-	if !strings.Contains(view, "Available providers: anthropic, openai") {
-		t.Fatalf("expected available providers list, got %q", view)
+	if !strings.Contains(view, "Model:") || !strings.Contains(view, "gpt-5") {
+		t.Fatalf("expected current model field, got %q", view)
 	}
-	if !strings.Contains(view, "Context window: 200K") {
-		t.Fatalf("expected context window line, got %q", view)
+	if !strings.Contains(view, "API Base:") || !strings.Contains(view, "https://api.openai.example/v1") {
+		t.Fatalf("expected API base field for active provider, got %q", view)
+	}
+	if !strings.Contains(view, "Configured") {
+		t.Fatalf("expected Configured section header, got %q", view)
+	}
+	if !strings.Contains(view, "anthropic") {
+		t.Fatalf("expected configured provider name, got %q", view)
+	}
+	if !strings.Contains(view, "Anthropic") {
+		t.Fatalf("expected anthropic provider type, got %q", view)
 	}
 }
 
@@ -1302,7 +1318,8 @@ func TestSyncStatusUsesCurrentSession(t *testing.T) {
 
 func TestModelSetUsesNormalizedGatewayCurrent(t *testing.T) {
 	model := New(app.Config{})
-	model.client = &fakeClient{current: "ollama/qwen3:8b"}
+	fake := &fakeClient{modelSetResult: "ollama/qwen3:8b"}
+	model.client = fake
 
 	updated, cmd := model.handleSlashCommand("/model ollama_chat/qwen3:8b")
 	got := updated.(Model)
@@ -1312,6 +1329,98 @@ func TestModelSetUsesNormalizedGatewayCurrent(t *testing.T) {
 
 	if got.app.Model != "ollama/qwen3:8b" {
 		t.Fatalf("expected normalized gateway model id, got %q", got.app.Model)
+	}
+	if len(fake.modelSets) != 1 || fake.modelSets[0] != "ollama_chat/qwen3:8b" {
+		t.Fatalf("expected gateway client to receive requested model, got %#v", fake.modelSets)
+	}
+}
+
+func TestModelSlashCommandUsesRealClientModelsSetContract(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	received := make(chan json.RawMessage, 1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("Upgrade: %v", err)
+		}
+		defer conn.Close()
+
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("Read hello: %v", err)
+		}
+		var hello client.Request
+		if err := json.Unmarshal(raw, &hello); err != nil {
+			t.Fatalf("Unmarshal hello: %v", err)
+		}
+		if err := conn.WriteJSON(client.Response{
+			Type:    client.FrameRes,
+			ID:      hello.ID,
+			OK:      true,
+			Payload: json.RawMessage(`{"server":"smolbot","version":"test","protocol":1,"methods":["models.set"],"events":[]}`),
+		}); err != nil {
+			t.Fatalf("Write hello response: %v", err)
+		}
+
+		_, raw, err = conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("Read models.set: %v", err)
+		}
+		var wire struct {
+			ID     string          `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatalf("Unmarshal models.set: %v", err)
+		}
+		received <- append([]byte(nil), wire.Params...)
+		if wire.Method != "models.set" {
+			t.Fatalf("expected models.set request, got %#v", wire)
+		}
+		if err := conn.WriteJSON(client.Response{
+			Type:    client.FrameRes,
+			ID:      wire.ID,
+			OK:      true,
+			Payload: json.RawMessage(`{"current":"ollama/qwen3:8b","previous":"gpt-test"}`),
+		}); err != nil {
+			t.Fatalf("Write models.set response: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	cl := client.New("ws" + strings.TrimPrefix(srv.URL, "http") + "/ws")
+	if _, err := cl.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer cl.Close()
+
+	model := New(app.Config{})
+	model.client = cl
+
+	updated, cmd := model.handleSlashCommand("/model ollama_chat/qwen3:8b")
+	got := updated.(Model)
+	msg := cmd()
+	updated, _ = got.Update(msg)
+	got = updated.(Model)
+
+	if got.app.Model != "ollama/qwen3:8b" {
+		t.Fatalf("expected normalized gateway current model, got %q", got.app.Model)
+	}
+
+	var params struct {
+		Model string `json:"model"`
+		ID    string `json:"id"`
+	}
+	if err := json.Unmarshal(<-received, &params); err != nil {
+		t.Fatalf("Unmarshal params: %v", err)
+	}
+	if params.Model != "ollama_chat/qwen3:8b" {
+		t.Fatalf("expected canonical model field, got %#v", params)
+	}
+	if params.ID != "" {
+		t.Fatalf("unexpected legacy id field in params: %#v", params)
 	}
 }
 
@@ -1721,6 +1830,106 @@ func TestModelDialogShowsCurrentModel(t *testing.T) {
 	}
 	if !strings.Contains(view, "openai") || !strings.Contains(view, "current") {
 		t.Fatalf("expected model dialog to show provider and current marker, got %q", view)
+	}
+}
+
+func TestModelDialogSpaceMarksPendingAndEnterSavesIt(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	fake := &fakeClient{
+		models: []client.ModelInfo{
+			{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
+			{ID: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet", Provider: "anthropic", Selectable: true},
+		},
+		current: "gpt-5",
+	}
+	model.client = fake
+
+	_, cmd := model.handleSlashCommand("/model")
+	updated, _ := model.Update(cmd())
+	got := updated.(Model)
+
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	got = updated.(Model)
+	updated, pendingCmd := got.Update(tea.KeyPressMsg(tea.Key{Code: ' ', Text: " "}))
+	got = updated.(Model)
+	if pendingCmd != nil {
+		t.Fatal("expected space to mark a pending selection without saving")
+	}
+
+	view := plain(got.View().Content)
+	if !strings.Contains(view, "pending") {
+		t.Fatalf("expected pending marker in model dialog, got %q", view)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+	got = updated.(Model)
+	updated, chooseCmd := got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	got = updated.(Model)
+	if chooseCmd == nil {
+		t.Fatal("expected enter to confirm the pending selection")
+	}
+
+	updated, saveCmd := got.Update(chooseCmd())
+	got = updated.(Model)
+	if saveCmd == nil {
+		t.Fatal("expected model choice to trigger gateway save")
+	}
+	updated, _ = got.Update(saveCmd())
+	got = updated.(Model)
+
+	if got.app.Model != "claude-3-7-sonnet" {
+		t.Fatalf("expected app model to update from pending selection, got %q", got.app.Model)
+	}
+	if len(fake.modelSets) != 1 || fake.modelSets[0] != "claude-3-7-sonnet" {
+		t.Fatalf("expected pending model to be saved, got %#v", fake.modelSets)
+	}
+	if got.dialog != nil {
+		t.Fatal("expected model dialog to close after saving")
+	}
+}
+
+func TestModelDialogEnterUsesFocusedSelectionWithoutPending(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	fake := &fakeClient{
+		models: []client.ModelInfo{
+			{ID: "openrouter", Name: "OpenRouter", Provider: "openrouter", Description: "Configured provider", Source: "config", Selectable: false},
+			{ID: "openrouter/auto", Name: "Auto", Provider: "openrouter", Selectable: true},
+		},
+		current: "openrouter/auto",
+	}
+	model.client = fake
+
+	_, cmd := model.handleSlashCommand("/model")
+	updated, _ := model.Update(cmd())
+	got := updated.(Model)
+
+	view := plain(got.View().Content)
+	if !strings.Contains(strings.ToLower(view), "configured provider") {
+		t.Fatalf("expected provider info row to stay visible, got %q", view)
+	}
+
+	updated, chooseCmd := got.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	got = updated.(Model)
+	if chooseCmd == nil {
+		t.Fatal("expected enter to save the focused selectable model")
+	}
+	updated, saveCmd := got.Update(chooseCmd())
+	got = updated.(Model)
+	if saveCmd == nil {
+		t.Fatal("expected chosen model to trigger gateway save")
+	}
+	updated, _ = got.Update(saveCmd())
+	got = updated.(Model)
+
+	if got.app.Model != "openrouter/auto" {
+		t.Fatalf("expected enter to save the selectable model, got %q", got.app.Model)
+	}
+	if len(fake.modelSets) != 1 || fake.modelSets[0] != "openrouter/auto" {
+		t.Fatalf("expected selectable model to be sent to gateway, got %#v", fake.modelSets)
 	}
 }
 

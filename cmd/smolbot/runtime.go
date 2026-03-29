@@ -77,7 +77,7 @@ type runtimeDeps struct {
 	HeartbeatEnabled  bool
 	QuotaRun          func(context.Context) error
 	QuotaInterval     time.Duration
-	SetModelCallback  func(model string) error
+	SetModelCallback  func(model string) (string, error)
 }
 
 type runtimeApp struct {
@@ -104,6 +104,54 @@ type runtimeApp struct {
 
 type runtimeSpawner struct {
 	loop *agent.AgentLoop
+}
+
+type modelRoutingProvider struct {
+	cfg      *config.Config
+	resolver interface {
+		ForModel(model string) (provider.Provider, error)
+	}
+}
+
+func (p *modelRoutingProvider) Chat(ctx context.Context, req provider.ChatRequest) (*provider.Response, error) {
+	resolved, err := p.resolve(req.Model)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Chat(ctx, req)
+}
+
+func (p *modelRoutingProvider) ChatStream(ctx context.Context, req provider.ChatRequest) (*provider.Stream, error) {
+	resolved, err := p.resolve(req.Model)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.ChatStream(ctx, req)
+}
+
+func (p *modelRoutingProvider) Name() string {
+	return p.NameForModel("")
+}
+
+func (p *modelRoutingProvider) NameForModel(model string) string {
+	resolved, err := p.resolve(model)
+	if err != nil || resolved == nil {
+		if p.cfg != nil {
+			return p.cfg.Agents.Defaults.Provider
+		}
+		return ""
+	}
+	return resolved.Name()
+}
+
+func (p *modelRoutingProvider) resolve(model string) (provider.Provider, error) {
+	if p == nil || p.resolver == nil {
+		return nil, fmt.Errorf("provider resolver unavailable")
+	}
+	if strings.TrimSpace(model) == "" && p.cfg != nil {
+		model = p.cfg.Agents.Defaults.Model
+	}
+	return p.resolver.ForModel(model)
 }
 
 type mcpDiscoveryManager interface {
@@ -581,15 +629,21 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		return nil, err
 	}
 
+	providerRegistry := deps.ProviderRegistry
+	if providerRegistry == nil && deps.Provider == nil {
+		providerRegistry = provider.NewRegistryWithDefaults(cfg)
+	}
+
 	runtimeProvider := deps.Provider
-	if runtimeProvider == nil {
-		registry := provider.NewRegistryWithDefaults(cfg)
-		runtimeProvider, err = registry.ForModel(cfg.Agents.Defaults.Model)
-		if err != nil {
-			_ = usageStore.Close()
-			_ = sessions.Close()
-			return nil, err
+	if providerRegistry != nil {
+		runtimeProvider = &modelRoutingProvider{
+			cfg:      cfg,
+			resolver: providerRegistry,
 		}
+	} else if runtimeProvider == nil {
+		_ = usageStore.Close()
+		_ = sessions.Close()
+		return nil, fmt.Errorf("provider unavailable")
 	}
 
 	channels := channel.NewManager()
@@ -657,7 +711,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		Model:        cfg.Agents.Defaults.Model,
 		SystemPrompt: buildHeartbeatDecisionPrompt(paths.Workspace(), skills),
 	}
-	heartbeatEvaluator := agent.NewEvaluator(agent.ProviderDecisionProvider{
+	heartbeatEvaluator := agent.NewEvaluator(&agent.ProviderDecisionProvider{
 		Provider:     runtimeProvider,
 		Model:        cfg.Agents.Defaults.Model,
 		SystemPrompt: buildBackgroundDeliveryPrompt(paths.Workspace(), skills),
@@ -680,6 +734,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		channels:   channels,
 		tools:      tools,
 		agent:      loop,
+		providerRegistry: providerRegistry,
 		cron:       cronService,
 		heartbeat:  heartbeatService,
 		runCron:    cronService.RunDue,
@@ -696,10 +751,10 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 			Usage:     usageStore,
 			Version:   version,
 			StartedAt: time.Now(),
-			SetModelCallback: func(model string) error {
+			SetModelCallback: func(model string) (string, error) {
 				loop.SetActiveModel(model)
 				heartbeatService.SetActiveModel(model)
-				return nil
+				return loop.EffectiveModel(), nil
 			},
 		}),
 	}

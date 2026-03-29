@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	clientproto "github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	"github.com/Nomadcxx/smolbot/pkg/config"
@@ -47,7 +48,7 @@ type ServerDeps struct {
 	Skills           *skill.Registry
 	Version          string
 	StartedAt        time.Time
-	SetModelCallback func(model string) error
+	SetModelCallback func(model string) (string, error)
 }
 
 type Server struct {
@@ -60,7 +61,7 @@ type Server struct {
 	skills           *skill.Registry
 	version          string
 	started          time.Time
-	setModelCallback func(model string) error
+	setModelCallback func(model string) (string, error)
 
 	upgrader          websocket.Upgrader
 	connectedClients  atomic.Int64
@@ -437,16 +438,8 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		if err != nil {
 			return nil, fmt.Errorf("get available models: %w", err)
 		}
-		modelList := make([]map[string]any, len(models))
-		for i, m := range models {
-			modelList[i] = map[string]any{
-				"id":       m.ID,
-				"name":     m.Name,
-				"provider": m.Provider,
-			}
-		}
 		return map[string]any{
-			"models":  modelList,
+			"models":  models,
 			"current": s.currentModel(),
 		}, nil
 	case "compact":
@@ -556,22 +549,32 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		}
 		return map[string]any{"servers": servers}, nil
 	case "models.set":
-		params := struct {
-			Model string `json:"model"`
-		}{}
+		params := clientproto.ModelsSetParams{}
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return nil, fmt.Errorf("parse models.set params: %w", err)
 		}
-		previous := s.currentModel()
-		if s.config != nil {
-			s.config.Agents.Defaults.Model = params.Model
+		model := strings.TrimSpace(params.Model)
+		if model == "" {
+			return nil, fmt.Errorf("parse models.set params: missing model")
 		}
+		previous := s.currentModel()
+		current := model
 		if s.setModelCallback != nil {
-			if err := s.setModelCallback(params.Model); err != nil {
+			resolved, err := s.setModelCallback(model)
+			if err != nil {
 				return nil, err
 			}
+			if strings.TrimSpace(resolved) != "" {
+				current = resolved
+			}
 		}
-		return map[string]any{"previous": previous}, nil
+		if s.config != nil {
+			s.config.Agents.Defaults.Model = current
+		}
+		return map[string]any{
+			"current":  current,
+			"previous": previous,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown method %q", req.Method)
 	}

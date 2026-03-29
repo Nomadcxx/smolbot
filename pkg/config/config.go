@@ -43,6 +43,8 @@ type AgentDefaults struct {
 type ProviderConfig struct {
 	APIKey       string            `json:"apiKey,omitempty"`
 	APIBase      string            `json:"apiBase,omitempty"`
+	AuthType     string            `json:"authType,omitempty"`
+	ProfileID    string            `json:"profileId,omitempty"`
 	ExtraHeaders map[string]string `json:"extraHeaders,omitempty"`
 }
 

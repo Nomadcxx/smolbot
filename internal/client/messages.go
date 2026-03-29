@@ -1,6 +1,9 @@
 package client
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 func (c *Client) ChatSend(session, message string) (string, error) {
 	return c.SendAsync("chat.send", ChatSendParams{
@@ -72,18 +75,19 @@ func (c *Client) ModelsList() ([]ModelInfo, string, error) {
 }
 
 func (c *Client) ModelsSet(model string) (string, error) {
-	res, err := c.sendRequest("models.set", map[string]string{"model": model})
+	res, err := c.sendRequest("models.set", ModelsSetParams{Model: model})
 	if err != nil {
 		return "", err
 	}
 
-	var payload struct {
-		Previous string `json:"previous"`
-	}
+	var payload ModelsSetPayload
 	if err := json.Unmarshal(res.Payload, &payload); err != nil {
 		return "", err
 	}
-	return payload.Previous, nil
+	if payload.Current == "" {
+		return "", fmt.Errorf("models.set: missing current model in response")
+	}
+	return payload.Current, nil
 }
 
 func (c *Client) Status(session string) (StatusPayload, error) {

@@ -28,6 +28,10 @@ type memoryRunner interface {
 	MaybeConsolidate(ctx context.Context, sessionKey string) error
 }
 
+type modelNamedProvider interface {
+	NameForModel(model string) string
+}
+
 type LoopDeps struct {
 	Provider      provider.Provider
 	Tools         *tool.Registry
@@ -147,7 +151,8 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 
 	for i := 0; i < maxIterations; i++ {
 		iterationStart := time.Now()
-		sanitized := provider.SanitizeMessages(conversation, a.provider.Name())
+		activeProviderName := providerNameForModel(a.provider, activeModel)
+		sanitized := provider.SanitizeMessages(conversation, activeProviderName)
 		stream, err := a.provider.ChatStream(runCtx, provider.ChatRequest{
 			Model:           activeModel,
 			Messages:        sanitized,
@@ -159,12 +164,11 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 		if err != nil {
 			return "", err
 		}
-
 		resp, err := a.consumeStream(stream, cb, suppressFinalResponse)
 		if err != nil {
 			return "", err
 		}
-		a.recordUsage(req.SessionKey, activeModel, sanitized, resp, time.Since(iterationStart))
+		a.recordUsage(req.SessionKey, activeProviderName, activeModel, sanitized, resp, time.Since(iterationStart))
 		if resp.FinishReason == "error" {
 			emit(cb, Event{Type: EventError, Content: "provider returned error finish"})
 			return "", errors.New("provider returned error finish")
@@ -273,8 +277,8 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	return finalResponse, nil
 }
 
-func (a *AgentLoop) recordUsage(sessionKey, modelName string, sanitized []provider.Message, resp *provider.Response, duration time.Duration) {
-	if a == nil || a.usageRecorder == nil || a.config == nil || a.provider == nil || resp == nil {
+func (a *AgentLoop) recordUsage(sessionKey, providerName, modelName string, sanitized []provider.Message, resp *provider.Response, duration time.Duration) {
+	if a == nil || a.usageRecorder == nil || a.config == nil || resp == nil {
 		return
 	}
 
@@ -285,7 +289,7 @@ func (a *AgentLoop) recordUsage(sessionKey, modelName string, sanitized []provid
 
 	record := usage.CompletionRecord{
 		SessionKey:  sessionKey,
-		ProviderID:  a.provider.Name(),
+		ProviderID:  providerName,
 		ModelName:   modelName,
 		RequestType: "chat",
 		Status:      "success",
@@ -327,6 +331,16 @@ func (a *AgentLoop) recordUsage(sessionKey, modelName string, sanitized []provid
 	if err := a.usageRecorder.RecordCompletion(context.Background(), record); err != nil {
 		log.Printf("[agent] usage record failed: %v", err)
 	}
+}
+
+func providerNameForModel(p provider.Provider, model string) string {
+	if named, ok := p.(modelNamedProvider); ok {
+		return named.NameForModel(model)
+	}
+	if p == nil {
+		return ""
+	}
+	return p.Name()
 }
 
 func (a *AgentLoop) handleSlashCommand(ctx context.Context, req Request) (string, error) {
