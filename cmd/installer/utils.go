@@ -202,6 +202,9 @@ func (m *model) validateConfiguration() bool {
 	case providerOpenAI, providerAnthropic, providerMiniMax:
 		// These need an API key
 		return m.apiKey != ""
+	case providerMiniMaxOAuth:
+		// OAuth uses browser-based sign-in
+		return true
 	case providerAzure:
 		// Azure needs endpoint and key
 		return m.apiKey != "" && m.apiEndpoint != ""

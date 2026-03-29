@@ -254,7 +254,8 @@ func (m model) renderProvider() string {
 		{"OpenAI", "GPT-4, GPT-3.5 (requires API key)"},
 		{"Anthropic", "Claude models (requires API key)"},
 		{"Azure OpenAI", "Enterprise OpenAI (requires endpoint + key)"},
-		{"MiniMax", "MiniMax Moonshot AI (requires API key)"},
+		{"MiniMax", "MiniMax API key authentication"},
+		{"MiniMax OAuth", "MiniMax OAuth sign-in (browser-based)"},
 		{"Custom", "OpenAI-compatible endpoint"},
 	}
 

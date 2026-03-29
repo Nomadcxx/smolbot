@@ -32,12 +32,13 @@ const (
 
 // Provider types
 const (
-	providerOllama    = "ollama"
-	providerOpenAI    = "openai"
-	providerAnthropic = "anthropic"
-	providerAzure     = "azure_openai"
-	providerMiniMax   = "minimax"
-	providerCustom    = "custom"
+	providerOllama       = "ollama"
+	providerOpenAI       = "openai"
+	providerAnthropic    = "anthropic"
+	providerAzure        = "azure_openai"
+	providerMiniMax      = "minimax"
+	providerMiniMaxOAuth = "minimax-portal"
+	providerCustom       = "custom"
 )
 
 var providers = []string{
@@ -46,6 +47,7 @@ var providers = []string{
 	providerAnthropic,
 	providerAzure,
 	providerMiniMax,
+	providerMiniMaxOAuth,
 	providerCustom,
 }
 
