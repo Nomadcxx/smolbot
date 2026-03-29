@@ -210,6 +210,22 @@ func collectOnboardConfigFromIO(ctx context.Context, opts rootOptions, in io.Rea
 	}
 	cfg.Agents.Defaults.Model = modelName
 
+	if strings.EqualFold(strings.TrimSpace(providerName), "ollama") {
+		quotaEnabled, err := promptWithDefault(reader, out, "Enable quota setup", "y")
+		if err != nil {
+			return nil, err
+		}
+		if isYes(quotaEnabled) {
+			cfg.Quota.RefreshIntervalMinutes = 60
+			cfg.Quota.Providers = map[string]config.ProviderQuotaConfig{
+				"ollama": {
+					Enabled:                        true,
+					BrowserCookieDiscoveryEnabled:  true,
+				},
+			}
+		}
+	}
+
 	providerCfg := cfg.Providers[providerName]
 	apiKey, err := promptWithDefault(reader, out, "API key", providerCfg.APIKey)
 	if err != nil {

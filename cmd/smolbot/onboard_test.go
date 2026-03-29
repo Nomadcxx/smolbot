@@ -214,3 +214,65 @@ func TestDefaultSoulTemplateProvidesStructuredGuidance(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectOnboardConfigEnablesOllamaQuota(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "nanobot-workspace")
+	input := strings.NewReader(strings.Join([]string{
+		"ollama",
+		"llama3.2",
+		"y",
+		"",
+		workspace,
+		"18790",
+		"n",
+		"n",
+		"n",
+		"",
+	}, "\n"))
+	var out bytes.Buffer
+
+	cfg, err := collectOnboardConfigFromIO(context.Background(), rootOptions{}, input, &out)
+	if err != nil {
+		t.Fatalf("collectOnboardConfigFromIO: %v", err)
+	}
+	if cfg.Agents.Defaults.Provider != "ollama" {
+		t.Fatalf("provider = %q, want ollama", cfg.Agents.Defaults.Provider)
+	}
+	if !cfg.Quota.HasEnabledProvider("ollama") {
+		t.Fatal("expected ollama quota to be enabled")
+	}
+	if cfg.Quota.RefreshIntervalMinutes != 60 {
+		t.Fatalf("refreshIntervalMinutes = %d, want 60", cfg.Quota.RefreshIntervalMinutes)
+	}
+	p := cfg.Quota.Provider("ollama")
+	if !p.BrowserCookieDiscoveryEnabled {
+		t.Fatal("expected browser cookie discovery to be enabled by default")
+	}
+}
+
+func TestCollectOnboardConfigSkipsQuotaForNonOllama(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "nanobot-workspace")
+	input := strings.NewReader(strings.Join([]string{
+		"openai",
+		"gpt-4",
+		"sk-test",
+		workspace,
+		"18790",
+		"n",
+		"n",
+		"n",
+		"",
+	}, "\n"))
+	var out bytes.Buffer
+
+	cfg, err := collectOnboardConfigFromIO(context.Background(), rootOptions{}, input, &out)
+	if err != nil {
+		t.Fatalf("collectOnboardConfigFromIO: %v", err)
+	}
+	if cfg.Quota.HasEnabledProvider("ollama") {
+		t.Fatal("expected no ollama quota for openai provider")
+	}
+	if !strings.Contains(out.String(), "API key") {
+		t.Fatalf("expected API key prompt in output, got %q", out.String())
+	}
+}
