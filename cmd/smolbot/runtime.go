@@ -1254,11 +1254,7 @@ func newOllamaQuotaRunner(cfg *config.Config, paths *config.Paths, store *usage.
 					log.Printf("[runtime] ollama cookie header override failed: %v", err)
 				}
 			} else {
-				browserDiscovery := providerCfg.BrowserCookieDiscoveryEnabled
-				if !browserDiscovery {
-					browserDiscovery = cfg.Quota.BrowserCookieDiscoveryEnabled
-				}
-				if browserDiscovery {
+				if providerCfg.BrowserCookieDiscoveryEnabled {
 					cookies, err := cookieLoader.Load()
 					if err != nil || len(cookies) == 0 {
 						if _, importErr := usage.ImportOllamaCookiesFromLinuxBrowsers("", cookiePath); importErr != nil {

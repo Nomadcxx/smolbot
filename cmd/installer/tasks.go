@@ -298,8 +298,7 @@ func writeConfig(m *model) error {
 		}
 		if m.quotaEnabled {
 			config["quota"] = map[string]interface{}{
-				"refreshIntervalMinutes":        60,
-				"browserCookieDiscoveryEnabled": true,
+				"refreshIntervalMinutes": 60,
 				"providers": map[string]interface{}{
 					"ollama": map[string]interface{}{
 						"enabled":                       true,

@@ -300,8 +300,9 @@ func (m model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
+		m.provider = providers[m.providerIndex]
 		m.step = stepConfiguration
-		if m.providerIndex == 0 {
+		if m.provider == providerOllama {
 			return m, tea.Batch(fetchOllamaModelsCmd(m.ollamaURL), tickCmd())
 		}
 		return m, nil
@@ -315,19 +316,19 @@ func (m model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) handleConfigurationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
-		if m.providerIndex == 0 && m.ollamaModelIndex > 0 {
+		if m.provider == providerOllama && m.ollamaModelIndex > 0 {
 			m.ollamaModelIndex--
 			m.selectedModel = m.ollamaModels[m.ollamaModelIndex]
 		}
 		return m, nil
 	case "down", "j":
-		if m.providerIndex == 0 && m.ollamaModelIndex < len(m.ollamaModels)-1 {
+		if m.provider == providerOllama && m.ollamaModelIndex < len(m.ollamaModels)-1 {
 			m.ollamaModelIndex++
 			m.selectedModel = m.ollamaModels[m.ollamaModelIndex]
 		}
 		return m, nil
 	case " ":
-		if m.providerIndex == 0 {
+		if m.provider == providerOllama {
 			m.quotaEnabled = !m.quotaEnabled
 		}
 		return m, nil
