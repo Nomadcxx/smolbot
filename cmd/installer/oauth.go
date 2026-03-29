@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,25 +20,30 @@ import (
 )
 
 const (
-	minimaxOAuthClientID = "78257093-7e40-4613-99e0-527b14b39113"
-	minimaxOAuthBaseURL  = "https://api.minimax.io"
+	minimaxOAuthClientID  = "78257093-7e40-4613-99e0-527b14b39113"
+	minimaxOAuthBaseURL   = "https://api.minimax.io"
 	minimaxOAuthProfileID = "minimax-portal:default"
 
 	oauthMaxBody = 1 << 20 // 1 MB
 )
 
-type deviceCodeResponse struct {
-	UserCode        string `json:"user_code"`
-	DeviceCode      string `json:"device_code"`
-	VerificationURI string `json:"verification_uri"`
-	ExpiresIn       int    `json:"expires_in"`
-	Interval        int    `json:"interval"`
-	Error           string `json:"error,omitempty"`
-	ErrorDesc       string `json:"error_description,omitempty"`
+// oauthFlowState holds in-flight state between the init and callback phases.
+type oauthFlowState struct {
+	verifier    string
+	redirectURI string
+	state       string
+	codeCh      chan string
+	errCh       chan error
+	srv         *http.Server
+}
 
-	// not from JSON — set locally
-	codeVerifier string
-	state        string
+// Close shuts down the callback HTTP server.
+func (f *oauthFlowState) Close() {
+	if f.srv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = f.srv.Shutdown(ctx)
+	}
 }
 
 type oauthToken struct {
@@ -48,18 +54,73 @@ type oauthToken struct {
 	Scope        string    `json:"scope"`
 }
 
-// initiateDeviceCodeAuth POSTs to the MiniMax device-code endpoint and
-// returns the code the user must enter at the verification URI.
-func initiateDeviceCodeAuth() (*deviceCodeResponse, error) {
+// initiateAuthFlow starts a localhost callback server, posts to MiniMax's
+// /oauth/code endpoint (with redirect_uri), and opens the browser.
+// The returned oauthFlowState must be passed to waitForAuthCode.
+func initiateAuthFlow() (string, *oauthFlowState, error) {
+	// PKCE
 	verifier, challenge, err := generateOAuthPKCE()
 	if err != nil {
-		return nil, fmt.Errorf("generate PKCE: %w", err)
+		return "", nil, fmt.Errorf("generate PKCE: %w", err)
 	}
 	state, err := generateOAuthRandom(16)
 	if err != nil {
-		return nil, fmt.Errorf("generate state: %w", err)
+		return "", nil, fmt.Errorf("generate state: %w", err)
 	}
 
+	// Start local callback server on a random port.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, fmt.Errorf("bind callback server: %w", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+
+	codeCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("state") != state {
+			errCh <- fmt.Errorf("state mismatch in callback")
+			http.Error(w, "state mismatch", http.StatusBadRequest)
+			return
+		}
+		if errParam := q.Get("error"); errParam != "" {
+			desc := q.Get("error_description")
+			if desc == "" {
+				desc = errParam
+			}
+			errCh <- fmt.Errorf("%s", desc)
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<html><body><h2>Authorization failed</h2><p>%s</p><p>You can close this tab.</p></body></html>`, desc)
+			return
+		}
+		code := q.Get("code")
+		if code == "" {
+			errCh <- fmt.Errorf("no code in callback (params: %s)", r.URL.RawQuery)
+			http.Error(w, "missing code", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><body><h2>Authorization successful</h2><p>You can close this tab and return to the installer.</p></body></html>`)
+		codeCh <- code
+	})
+
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(ln) //nolint:errcheck
+
+	flow := &oauthFlowState{
+		verifier:    verifier,
+		redirectURI: redirectURI,
+		state:       state,
+		codeCh:      codeCh,
+		errCh:       errCh,
+		srv:         srv,
+	}
+
+	// POST to /oauth/code to get the authorization URL.
 	form := url.Values{}
 	form.Set("client_id", minimaxOAuthClientID)
 	form.Set("response_type", "code")
@@ -67,92 +128,76 @@ func initiateDeviceCodeAuth() (*deviceCodeResponse, error) {
 	form.Set("code_challenge", challenge)
 	form.Set("code_challenge_method", "S256")
 	form.Set("state", state)
+	form.Set("redirect_uri", redirectURI)
 
 	req, err := http.NewRequest(http.MethodPost, minimaxOAuthBaseURL+"/oauth/code", strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, err
+		flow.Close()
+		return "", nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("auth request: %w", err)
+		flow.Close()
+		return "", nil, fmt.Errorf("auth request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, oauthMaxBody))
 	if err != nil {
-		return nil, fmt.Errorf("read auth response: %w", err)
+		flow.Close()
+		return "", nil, fmt.Errorf("read auth response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("auth request failed (%d): %s", resp.StatusCode, string(body))
+		flow.Close()
+		return "", nil, fmt.Errorf("auth request failed (%d): %s", resp.StatusCode, string(body))
 	}
 
-	var dc deviceCodeResponse
+	var dc struct {
+		VerificationURI string `json:"verification_uri"`
+		UserCode        string `json:"user_code"`
+		Error           string `json:"error,omitempty"`
+		ErrorDesc       string `json:"error_description,omitempty"`
+	}
 	if err := json.Unmarshal(body, &dc); err != nil {
-		return nil, fmt.Errorf("decode auth response: %w", err)
+		flow.Close()
+		return "", nil, fmt.Errorf("decode auth response: %w", err)
 	}
 	if dc.Error != "" {
-		return nil, fmt.Errorf("%s: %s", dc.Error, dc.ErrorDesc)
+		flow.Close()
+		return "", nil, fmt.Errorf("%s: %s", dc.Error, dc.ErrorDesc)
+	}
+	if dc.VerificationURI == "" {
+		flow.Close()
+		return "", nil, fmt.Errorf("no verification_uri in response: %s", string(body))
 	}
 
-	dc.codeVerifier = verifier
-	dc.state = state
-	return &dc, nil
+	openBrowser(dc.VerificationURI)
+	return dc.VerificationURI, flow, nil
 }
 
-// pollForToken blocks until MiniMax grants the token or the context is cancelled.
-func pollForToken(ctx context.Context, dc *deviceCodeResponse) (*oauthToken, error) {
-	interval := time.Duration(dc.Interval) * time.Second
-	if interval < 5*time.Second {
-		interval = 5 * time.Second
-	}
+// waitForAuthCode blocks until the callback arrives or ctx is cancelled.
+func waitForAuthCode(ctx context.Context, flow *oauthFlowState) (*oauthToken, error) {
+	defer flow.Close()
 
-	expiresIn := dc.ExpiresIn
-	if expiresIn <= 0 {
-		expiresIn = 300 // MiniMax may omit this field; default to 5 minutes
-	}
-
-	deadline := time.NewTimer(time.Duration(expiresIn) * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-deadline.C:
-			return nil, fmt.Errorf("device code expired")
-		case <-ticker.C:
-			tok, err := exchangeDeviceCode(ctx, dc.DeviceCode, dc.codeVerifier)
-			if err != nil {
-				msg := err.Error()
-				if strings.Contains(msg, "authorization_pending") {
-					continue
-				}
-				if strings.Contains(msg, "slow_down") {
-					interval += 5 * time.Second
-					ticker.Reset(interval)
-					continue
-				}
-				// RFC 8628 expiry error codes — match exactly, not substring
-				if msg == "expired_token" || msg == "device_code_expired" || msg == "device_flow_expired" {
-					return nil, fmt.Errorf("device code expired")
-				}
-				return nil, err
-			}
-			return tok, nil
-		}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case err := <-flow.errCh:
+		return nil, err
+	case code := <-flow.codeCh:
+		return exchangeAuthCode(ctx, code, flow.verifier, flow.redirectURI)
 	}
 }
 
-func exchangeDeviceCode(ctx context.Context, deviceCode, codeVerifier string) (*oauthToken, error) {
+func exchangeAuthCode(ctx context.Context, code, verifier, redirectURI string) (*oauthToken, error) {
 	form := url.Values{}
 	form.Set("client_id", minimaxOAuthClientID)
-	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-	form.Set("device_code", deviceCode)
-	form.Set("code_verifier", codeVerifier)
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", redirectURI)
+	form.Set("code_verifier", verifier)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, minimaxOAuthBaseURL+"/oauth/token", strings.NewReader(form.Encode()))
 	if err != nil {
@@ -170,16 +215,15 @@ func exchangeDeviceCode(ctx context.Context, deviceCode, codeVerifier string) (*
 	if err != nil {
 		return nil, fmt.Errorf("read token response: %w", err)
 	}
-
 	if resp.StatusCode != http.StatusOK {
 		var errResp struct {
 			Error     string `json:"error"`
 			ErrorDesc string `json:"error_description"`
 		}
 		if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-			return nil, fmt.Errorf("%s", errResp.Error)
+			return nil, fmt.Errorf("%s: %s", errResp.Error, errResp.ErrorDesc)
 		}
-		return nil, fmt.Errorf("token request failed (%d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("token exchange failed (%d): %s", resp.StatusCode, string(body))
 	}
 
 	var tr struct {
@@ -192,17 +236,24 @@ func exchangeDeviceCode(ctx context.Context, deviceCode, codeVerifier string) (*
 	if err := json.Unmarshal(body, &tr); err != nil {
 		return nil, fmt.Errorf("decode token response: %w", err)
 	}
+	if tr.AccessToken == "" {
+		return nil, fmt.Errorf("no access_token in response: %s", string(body))
+	}
 
+	expiresIn := tr.ExpiresIn
+	if expiresIn <= 0 {
+		expiresIn = 3600
+	}
 	return &oauthToken{
 		AccessToken:  tr.AccessToken,
 		RefreshToken: tr.RefreshToken,
-		ExpiresAt:    time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second),
+		ExpiresAt:    time.Now().Add(time.Duration(expiresIn) * time.Second),
 		TokenType:    tr.TokenType,
 		Scope:        tr.Scope,
 	}, nil
 }
 
-// saveOAuthToken writes the token to ~/.smolbot/oauth_tokens.json in the
+// saveOAuthToken writes the token to configDir/oauth_tokens.json in the
 // same format the runtime's token store expects.
 func saveOAuthToken(configDir string, tok *oauthToken) error {
 	if err := os.MkdirAll(configDir, 0700); err != nil {
@@ -222,7 +273,6 @@ func saveOAuthToken(configDir string, tok *oauthToken) error {
 		"updated_at":    time.Now(),
 	}
 
-	// Merge with any existing tokens
 	existing := map[string]map[string]any{}
 	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
 		_ = json.Unmarshal(data, &existing)

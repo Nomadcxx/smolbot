@@ -168,9 +168,10 @@ type model struct {
 	discordTokenInput  textinput.Model
 
 	// MiniMax OAuth state
-	oauthDC    *deviceCodeResponse
+	oauthFlow  *oauthFlowState
 	oauthToken *oauthToken
 	oauthError string
+	oauthURL   string
 
 	// WhatsApp setup state
 	whatsappQRCode string

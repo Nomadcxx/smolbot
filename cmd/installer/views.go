@@ -407,23 +407,16 @@ func (m model) renderMiniMaxOAuth() string {
 		return b.String()
 	}
 
-	if m.oauthDC == nil {
+	if m.oauthURL == "" {
 		b.WriteString("  " + m.spinner.View() + " Connecting to MiniMax...")
 		return b.String()
 	}
 
-	b.WriteString("  Your browser should open automatically.\n")
-	b.WriteString("  If it doesn't, visit:\n\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("  " + m.oauthDC.VerificationURI))
+	b.WriteString("  Your browser should have opened automatically.\n")
+	b.WriteString("  If it didn't, visit:\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("  " + m.oauthURL))
 	b.WriteString("\n\n")
-	b.WriteString("  Enter this code when prompted:\n\n")
-	b.WriteString(lipgloss.NewStyle().
-		Foreground(Primary).Bold(true).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(Primary).
-		Padding(0, 1).
-		Render(m.oauthDC.UserCode))
-	b.WriteString("\n\n")
+	b.WriteString("  Click Authorize on the MiniMax page.\n\n")
 	b.WriteString("  " + m.spinner.View() + " Waiting for authorization...")
 	b.WriteString("\n\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Esc to cancel"))
