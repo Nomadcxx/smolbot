@@ -206,6 +206,35 @@ func TestModelsModelShowsOverflowCues(t *testing.T) {
 	}
 }
 
+func TestModelsModelSeparatesMinimaxAndMinimaxPortal(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be available")
+	}
+
+	model := NewModels([]client.ModelInfo{
+		{ID: "minimax/M2.7", Name: "MiniMax M2.7", Provider: "minimax", Selectable: true},
+		{ID: "minimax-portal/MiniMax-M2.7", Name: "MiniMax M2.7 (OAuth)", Provider: "minimax-portal", Selectable: true},
+	}, "minimax-portal/MiniMax-M2.7")
+
+	view := model.View()
+
+	if !strings.Contains(view, "Provider: minimax") {
+		t.Fatalf("expected minimax provider group, got %q", view)
+	}
+	if !strings.Contains(view, "Provider: minimax-portal (current)") {
+		t.Fatalf("expected minimax-portal provider group with current marker, got %q", view)
+	}
+
+	minimaxIdx := strings.Index(view, "Provider: minimax")
+	minimaxPortalIdx := strings.Index(view, "Provider: minimax-portal")
+	if minimaxIdx == -1 || minimaxPortalIdx == -1 {
+		t.Fatalf("both providers should appear in view")
+	}
+	if minimaxIdx > minimaxPortalIdx {
+		t.Fatalf("minimax should appear before minimax-portal alphabetically")
+	}
+}
+
 func TestOptionalModelDescription(t *testing.T) {
 	type describedModel struct {
 		Description string
