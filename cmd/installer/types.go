@@ -147,6 +147,9 @@ type model struct {
 	configPath       string
 	port             int
 
+	// Quota configuration
+	quotaEnabled bool
+
 	// Channel configuration
 	signalEnabled      bool
 	whatsappEnabled    bool

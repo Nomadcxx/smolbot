@@ -326,6 +326,11 @@ func (m model) handleConfigurationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedModel = m.ollamaModels[m.ollamaModelIndex]
 		}
 		return m, nil
+	case " ":
+		if m.providerIndex == 0 {
+			m.quotaEnabled = !m.quotaEnabled
+		}
+		return m, nil
 	case "enter":
 		if m.validateConfiguration() {
 			m.step = stepChannels

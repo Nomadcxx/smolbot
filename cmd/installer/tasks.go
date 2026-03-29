@@ -296,6 +296,18 @@ func writeConfig(m *model) error {
 		providers["ollama"] = map[string]interface{}{
 			"apiBase": m.ollamaURL,
 		}
+		if m.quotaEnabled {
+			config["quota"] = map[string]interface{}{
+				"refreshIntervalMinutes":        60,
+				"browserCookieDiscoveryEnabled": true,
+				"providers": map[string]interface{}{
+					"ollama": map[string]interface{}{
+						"enabled":                       true,
+						"browserCookieDiscoveryEnabled": true,
+					},
+				},
+			}
+		}
 	case providerOpenAI:
 		providers["openai"] = map[string]interface{}{
 			"apiKey": m.apiKey,

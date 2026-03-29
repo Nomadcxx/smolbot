@@ -311,6 +311,18 @@ func (m model) renderConfiguration() string {
 		} else {
 			b.WriteString("  No Ollama models detected\n")
 		}
+		b.WriteString("\n")
+		b.WriteString("Ollama Account Quota:\n\n")
+		quotaMarker := "○"
+		quotaStyle := lipgloss.NewStyle()
+		if m.quotaEnabled {
+			quotaMarker = "●"
+			quotaStyle = lipgloss.NewStyle().Foreground(SuccessColor).Bold(true)
+		}
+		b.WriteString(quotaStyle.Render(fmt.Sprintf("  %s Enable quota tracking", quotaMarker)))
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).
+			Render("    Uses browser cookies for auto-discovery (Chromium/Firefox)"))
 	}
 
 	return b.String()
