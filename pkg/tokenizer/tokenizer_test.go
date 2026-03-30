@@ -78,3 +78,18 @@ func TestEstimateTokensFallback(t *testing.T) {
 		t.Errorf("EstimateTokens fallback = %d, want 2", n)
 	}
 }
+func TestNewForModelUsesCl100kForGPTModels(t *testing.T) {
+	tok := NewForModel("gpt-4o")
+	tokens := tok.EstimateTokens("Hello world")
+	if tokens < 2 || tokens > 4 {
+		t.Fatalf("expected 2-4 tokens for 'Hello world' with gpt-4o, got %d", tokens)
+	}
+}
+
+func TestNewForEmptyModelUsesCl100k(t *testing.T) {
+	tok := NewForModel("")
+	tokens := tok.EstimateTokens("Hello world")
+	if tokens < 2 || tokens > 4 {
+		t.Fatalf("expected 2-4 tokens for empty model (legacy), got %d", tokens)
+	}
+}

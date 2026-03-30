@@ -702,7 +702,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		Sessions:      sessions,
 		Config:        cfg,
 		Skills:        skills,
-		Tokenizer:     tokenizer.New(),
+		Tokenizer:     tokenizer.NewForModel(cfg.Agents.Defaults.Model),
 		UsageRecorder: usageStore,
 		Workspace:     paths.Workspace(),
 		MessageRouter: channels,

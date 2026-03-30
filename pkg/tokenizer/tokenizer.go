@@ -3,6 +3,7 @@ package tokenizer
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/Nomadcxx/smolbot/pkg/provider"
@@ -17,13 +18,32 @@ const (
 )
 
 type Tokenizer struct {
-	enc  *tiktoken.Tiktoken
-	once sync.Once
-	err  error
+	model string
+	enc   *tiktoken.Tiktoken
+	once  sync.Once
+	err   error
 }
 
 func New() *Tokenizer {
 	return &Tokenizer{}
+}
+
+func NewForModel(model string) *Tokenizer {
+	return &Tokenizer{model: model}
+}
+
+func encodingForModel(model string) string {
+	lower := strings.ToLower(model)
+	if idx := strings.LastIndex(lower, "/"); idx >= 0 {
+		lower = lower[idx+1:]
+	}
+	cl100kFamilies := []string{"gpt-", "claude", "o1", "o3", "o4", "chatgpt", "text-embedding"}
+	for _, prefix := range cl100kFamilies {
+		if strings.HasPrefix(lower, prefix) {
+			return "cl100k_base"
+		}
+	}
+	return ""
 }
 
 func (t *Tokenizer) EstimateTokens(text string) int {
@@ -71,7 +91,16 @@ func (t *Tokenizer) EstimatePromptTokens(messages []provider.Message) int {
 
 func (t *Tokenizer) init() {
 	t.once.Do(func() {
-		t.enc, t.err = tiktoken.GetEncoding("cl100k_base")
+		enc := encodingForModel(t.model)
+		if enc == "" {
+			if t.model == "" {
+				enc = "cl100k_base"
+			} else {
+				t.err = fmt.Errorf("no cl100k encoding for model %q", t.model)
+				return
+			}
+		}
+		t.enc, t.err = tiktoken.GetEncoding(enc)
 	})
 }
 
