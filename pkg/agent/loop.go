@@ -209,6 +209,17 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 					IsCronContext: req.IsCronContext,
 				})
 				if err != nil {
+					errMsg := provider.Message{
+						Role:       "tool",
+						Content:    fmt.Sprintf("error: %v", err),
+						ToolCallID: toolCall.ID,
+						Name:       toolCall.Function.Name,
+					}
+					conversation = append(conversation, errMsg)
+					newMessages = append(newMessages, errMsg)
+					if saveErr := a.sessions.SaveMessages(req.SessionKey, normalizeMessagesForSave(newMessages)); saveErr != nil {
+						return "", saveErr
+					}
 					return "", err
 				}
 

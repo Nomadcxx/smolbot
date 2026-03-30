@@ -895,6 +895,44 @@ func TestConsumeStreamNonContiguousToolCallIndices(t *testing.T) {
 	}
 }
 
+func TestToolExecutionErrorAddsToolResultMessage(t *testing.T) {
+	errTool := &fakeTool{name: "error_tool", err: errors.New("tool failed")}
+	fakeProvider := &fakeStreamProvider{
+		streams: []fakeStreamScript{
+			{
+				deltas: []*provider.StreamDelta{
+					{Content: "starting"},
+					{ToolCalls: []provider.ToolCall{{Index: 0, ID: "tc_err", Function: provider.FunctionCall{Name: "error_tool", Arguments: "{}"}}}},
+					{FinishReason: stringPtr("tool_calls")},
+				},
+			},
+		},
+	}
+	loop, store, _ := newTestAgentLoop(t, fakeProvider, errTool)
+	defer store.Close()
+
+	_, err := loop.ProcessDirect(context.Background(), Request{Content: "trigger error", SessionKey: "s_orphan"}, nil)
+	if err == nil {
+		t.Fatalf("expected error from tool")
+	}
+
+	msgs, err := store.GetHistory("s_orphan", 100)
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+
+	var hasToolResult bool
+	for _, msg := range msgs {
+		if msg.Role == "tool" && msg.ToolCallID == "tc_err" {
+			hasToolResult = true
+			break
+		}
+	}
+	if !hasToolResult {
+		t.Errorf("expected tool result message with ToolCallID tc_err after tool error")
+	}
+}
+
 func TestAnyToMessagesNonMapItemDoesNotPanic(t *testing.T) {
 	items := []any{"not a map", 42, nil}
 	msgs := anyToMessages(items)
