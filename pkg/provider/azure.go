@@ -103,6 +103,9 @@ func (p *AzureProvider) ChatStream(ctx context.Context, req ChatRequest) (*Strea
 					return nil, fmt.Errorf("decode azure stream chunk: %w", err)
 				}
 				if len(chunk.Choices) == 0 {
+					if chunk.Usage != nil {
+						return &StreamDelta{Usage: chunk.Usage}, nil
+					}
 					continue
 				}
 
@@ -143,6 +146,9 @@ func (p *AzureProvider) buildRequest(req ChatRequest, stream bool) azureRequest 
 		ToolChoice:          req.ToolChoice,
 		MaxCompletionTokens: req.MaxTokens,
 		Stream:              stream,
+	}
+	if stream {
+		wireReq.StreamOptions = &openAIStreamOpts{IncludeUsage: true}
 	}
 	if req.ReasoningEffort != "" {
 		wireReq.Reasoning = &openAIReasoning{Effort: req.ReasoningEffort}
@@ -216,6 +222,7 @@ type azureRequest struct {
 	Temperature         *float64         `json:"temperature,omitempty"`
 	Reasoning           *openAIReasoning `json:"reasoning,omitempty"`
 	Stream              bool             `json:"stream,omitempty"`
+	StreamOptions       *openAIStreamOpts `json:"stream_options,omitempty"`
 }
 
 func isAzureReasoningModel(model string) bool {

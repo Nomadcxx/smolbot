@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -128,5 +130,85 @@ func TestAzureProviderName(t *testing.T) {
 	p := NewAzureProvider("key", "https://mydeployment.openai.azure.com")
 	if p.Name() != "azure_openai" {
 		t.Fatalf("Name = %q, want azure_openai", p.Name())
+	}
+}
+
+func TestAzureStreamingReturnsUsage(t *testing.T) {
+	streamChunks := []string{
+		`data: {"id":"1","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}`,
+		`data: {"id":"1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: {"id":"1","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}}`,
+		`data: [DONE]`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, chunk := range streamChunks {
+			fmt.Fprintln(w, chunk)
+		}
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	defer server.Close()
+
+	p := NewAzureProvider("key", server.URL)
+	p.sleep = func(context.Context, int) error { return nil }
+
+	stream, err := p.ChatStream(context.Background(), ChatRequest{
+		Model:    "gpt-4",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	defer stream.Close()
+
+	var lastUsage *Usage
+	for {
+		delta, err := stream.Recv()
+		if err != nil {
+			break
+		}
+		if delta != nil && delta.Usage != nil {
+			lastUsage = delta.Usage
+		}
+	}
+	if lastUsage == nil {
+		t.Fatal("expected usage in stream, got none — empty-choices chunk was skipped")
+	}
+	if lastUsage.PromptTokens != 10 || lastUsage.CompletionTokens != 3 {
+		t.Fatalf("usage = %+v, want {10 3 13}", lastUsage)
+	}
+}
+
+func TestAzureStreamingRequestIncludesStreamOptions(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintln(w, "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}")
+		fmt.Fprintln(w, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	p := NewAzureProvider("key", server.URL)
+	p.sleep = func(context.Context, int) error { return nil }
+
+	stream, _ := p.ChatStream(context.Background(), ChatRequest{
+		Model:    "gpt-4",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	stream.Close()
+
+	if gotBody == nil {
+		t.Fatal("no request body captured")
+	}
+	so, ok := gotBody["stream_options"].(map[string]any)
+	if !ok {
+		t.Fatal("stream_options not present in request body")
+	}
+	if so["include_usage"] != true {
+		t.Fatalf("stream_options.include_usage = %v, want true", so["include_usage"])
 	}
 }
