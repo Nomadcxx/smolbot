@@ -156,3 +156,77 @@ func TestModelsSetRejectsResponseWithoutCurrentModel(t *testing.T) {
 		t.Fatalf("expected missing-current error, got %v", err)
 	}
 }
+
+func TestSessionsResetSendsSessionParam(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	received := make(chan json.RawMessage, 1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("Upgrade: %v", err)
+		}
+		defer conn.Close()
+
+		if _, raw, err := conn.ReadMessage(); err != nil {
+			t.Fatalf("Read hello: %v", err)
+		} else {
+			var hello Request
+			if err := json.Unmarshal(raw, &hello); err != nil {
+				t.Fatalf("Unmarshal hello: %v", err)
+			}
+			if err := conn.WriteJSON(Response{
+				Type:    FrameRes,
+				ID:      hello.ID,
+				OK:      true,
+				Payload: json.RawMessage(`{"server":"smolbot","version":"test","protocol":1,"methods":["sessions.reset"],"events":[]}`),
+			}); err != nil {
+				t.Fatalf("Write hello: %v", err)
+			}
+		}
+
+		if _, raw, err := conn.ReadMessage(); err != nil {
+			t.Fatalf("Read sessions.reset: %v", err)
+		} else {
+			var wire struct {
+				Method string          `json:"method"`
+				ID     string          `json:"id"`
+				Params json.RawMessage `json:"params"`
+			}
+			if err := json.Unmarshal(raw, &wire); err != nil {
+				t.Fatalf("Unmarshal wire: %v", err)
+			}
+			received <- append([]byte(nil), wire.Params...)
+			if err := conn.WriteJSON(Response{
+				Type:    FrameRes,
+				ID:      wire.ID,
+				OK:      true,
+				Payload: json.RawMessage(`{"ok":true}`),
+			}); err != nil {
+				t.Fatalf("Write response: %v", err)
+			}
+		}
+	}))
+	defer srv.Close()
+
+	c := New("ws" + strings.TrimPrefix(srv.URL, "http") + "/ws")
+	defer c.Close()
+	if _, err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if err := c.SessionsReset("my-session"); err != nil {
+		t.Fatalf("SessionsReset: %v", err)
+	}
+
+	var params map[string]string
+	if err := json.Unmarshal(<-received, &params); err != nil {
+		t.Fatalf("Unmarshal params: %v", err)
+	}
+	if got, ok := params["session"]; !ok || got != "my-session" {
+		t.Fatalf("sessions.reset params = %#v, want {\"session\":\"my-session\"}", params)
+	}
+	if _, hasKey := params["key"]; hasKey {
+		t.Fatalf("sessions.reset still sends old 'key' field: %#v", params)
+	}
+}
