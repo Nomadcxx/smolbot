@@ -611,6 +611,10 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		return nil, fmt.Errorf("heartbeat enabled but interval is %d (must be > 0)", cfg.Gateway.Heartbeat.Interval)
 	}
 
+	if strings.TrimSpace(cfg.Agents.Defaults.Model) == "" {
+		return nil, fmt.Errorf("config: agents.defaults.model is required — run 'smolbot onboard' to configure")
+	}
+
 	if err := agent.SyncWorkspaceTemplates(paths.Workspace()); err != nil {
 		return nil, err
 	}

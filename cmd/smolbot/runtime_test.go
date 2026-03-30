@@ -1178,3 +1178,30 @@ func (f *runtimeDiscordLoginChannel) Login(context.Context) error {
 	f.status = channel.Status{State: "connected", Detail: "Bot: @smolbot"}
 	return nil
 }
+
+func TestBuildRuntimeRejectsEmptyModel(t *testing.T) {
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = ""
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	_, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{
+		Provider: &fakeRuntimeProvider{},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty model, got nil")
+	}
+	if !strings.Contains(err.Error(), "model") {
+		t.Fatalf("expected error to mention 'model', got: %v", err)
+	}
+}
