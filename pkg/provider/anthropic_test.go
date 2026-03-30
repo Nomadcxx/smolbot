@@ -260,3 +260,39 @@ func TestAnthropicProviderName(t *testing.T) {
 		t.Fatalf("Name = %q, want anthropic", p.Name())
 	}
 }
+
+func TestAnthropicProviderStripsPrefixFromModel(t *testing.T) {
+	var gotModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			gotModel = body.Model
+		}
+		resp := map[string]any{
+			"id":          "msg-1",
+			"type":        "message",
+			"role":        "assistant",
+			"model":       "claude-3-opus-20240229",
+			"stop_reason": "end_turn",
+			"content":     []map[string]any{{"type": "text", "text": "ok"}},
+			"usage":       map[string]any{"input_tokens": 10, "output_tokens": 5},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewAnthropicProvider("test-key", server.URL)
+	_, err := p.Chat(context.Background(), ChatRequest{
+		Model:    "anthropic/claude-3-opus-20240229",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if gotModel != "claude-3-opus-20240229" {
+		t.Fatalf("model sent to API = %q, want %q", gotModel, "claude-3-opus-20240229")
+	}
+}

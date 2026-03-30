@@ -383,3 +383,36 @@ func TestOpenAIProviderName(t *testing.T) {
 		t.Fatalf("Name = %q, want ollama", p.Name())
 	}
 }
+
+func TestOpenAIProviderStripsPrefixFromModel(t *testing.T) {
+	var gotModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			gotModel = body.Model
+		}
+		resp := map[string]any{
+			"id":      "chatcmpl-1",
+			"choices": []map[string]any{{"index": 0, "finish_reason": "stop", "message": map[string]any{"role": "assistant", "content": "ok"}}},
+			"usage":   map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	p := NewOpenAIProvider("openai", "key", server.URL+"/v1", nil)
+	p.sleep = func(context.Context, int) error { return nil }
+
+	_, err := p.Chat(context.Background(), ChatRequest{
+		Model:    "openai/gpt-4o",
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if gotModel != "gpt-4o" {
+		t.Fatalf("model sent to API = %q, want %q", gotModel, "gpt-4o")
+	}
+}

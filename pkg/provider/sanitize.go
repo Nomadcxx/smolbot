@@ -161,6 +161,13 @@ func repairJSON(raw string) string {
 	return repaired
 }
 
+func StripProviderPrefix(model string) string {
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		return model[idx+1:]
+	}
+	return model
+}
+
 func supportsThinking(providerName string) bool {
 	name := strings.ToLower(providerName)
 	return strings.Contains(name, "anthropic")

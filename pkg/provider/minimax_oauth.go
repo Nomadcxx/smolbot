@@ -378,21 +378,12 @@ func (p *MiniMaxOAuthProvider) chatBase() string {
 	return base
 }
 
-// stripProviderPrefix removes a "provider/" prefix from a model name so that
-// "minimax-portal/MiniMax-M2.7" becomes "MiniMax-M2.7" before it is sent to the API.
-func stripProviderPrefix(model string) string {
-	if idx := strings.LastIndex(model, "/"); idx >= 0 {
-		return model[idx+1:]
-	}
-	return model
-}
-
 func (p *MiniMaxOAuthProvider) Chat(ctx context.Context, req ChatRequest) (*Response, error) {
 	tok, err := p.ensureValidToken(ctx)
 	if err != nil {
 		return nil, err
 	}
-	req.Model = stripProviderPrefix(req.Model)
+	req.Model = StripProviderPrefix(req.Model)
 	openai := NewOpenAIProvider(p.provider, tok.AccessToken, p.chatBase(), nil)
 	return openai.Chat(ctx, req)
 }
@@ -402,7 +393,7 @@ func (p *MiniMaxOAuthProvider) ChatStream(ctx context.Context, req ChatRequest) 
 	if err != nil {
 		return nil, err
 	}
-	req.Model = stripProviderPrefix(req.Model)
+	req.Model = StripProviderPrefix(req.Model)
 	openai := NewOpenAIProvider(p.provider, tok.AccessToken, p.chatBase(), nil)
 	return openai.ChatStream(ctx, req)
 }

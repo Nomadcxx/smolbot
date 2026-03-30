@@ -46,6 +46,7 @@ func (p *AzureProvider) Name() string {
 }
 
 func (p *AzureProvider) Chat(ctx context.Context, req ChatRequest) (*Response, error) {
+	req.Model = StripProviderPrefix(req.Model)
 	wireReq := p.buildRequest(req, false)
 	body, err := p.doWithRetry(ctx, req.Model, wireReq)
 	if err != nil {
@@ -60,6 +61,7 @@ func (p *AzureProvider) Chat(ctx context.Context, req ChatRequest) (*Response, e
 }
 
 func (p *AzureProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stream, error) {
+	req.Model = StripProviderPrefix(req.Model)
 	wireReq := p.buildRequest(req, true)
 	data, err := json.Marshal(wireReq)
 	if err != nil {

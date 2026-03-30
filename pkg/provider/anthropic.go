@@ -198,7 +198,7 @@ func (p *AnthropicProvider) doWithRetry(ctx context.Context, req anthropicReques
 		lowerBody := strings.ToLower(string(body))
 		if !imageRetried && hasImageBlocks(originalMessages) && isImageUnsupported(lowerBody) {
 			request = p.buildRequest(ChatRequest{
-				Model:           req.Model,
+				Model:           StripProviderPrefix(req.Model),
 				Messages:        maybeOmitImages(originalMessages, true),
 				Tools:           req.originalTools,
 				ToolChoice:      req.ToolChoice,
@@ -235,7 +235,7 @@ func (p *AnthropicProvider) buildRequest(req ChatRequest, stream bool, imagesOmi
 	}
 
 	wireReq := anthropicRequest{
-		Model:           req.Model,
+		Model:           StripProviderPrefix(req.Model),
 		MaxTokens:       req.MaxTokens,
 		ToolChoice:      req.ToolChoice,
 		Stream:          stream,

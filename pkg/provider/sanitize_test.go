@@ -123,6 +123,27 @@ func TestNormalizeToolCallIDPreservesLongIDs(t *testing.T) {
 	}
 }
 
+func TestStripProviderPrefix(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"anthropic/claude-3-opus", "claude-3-opus"},
+		{"openai/gpt-4o", "gpt-4o"},
+		{"azure/gpt-4", "gpt-4"},
+		{"minimax-portal/MiniMax-M2.7", "MiniMax-M2.7"},
+		{"gpt-4o", "gpt-4o"},
+		{"claude-3-opus", "claude-3-opus"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		got := StripProviderPrefix(tc.input)
+		if got != tc.want {
+			t.Errorf("StripProviderPrefix(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
 func TestSanitizeRepairsToolArguments(t *testing.T) {
 	msgs := []Message{
 		{

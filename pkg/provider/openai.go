@@ -179,7 +179,7 @@ func (p *OpenAIProvider) buildWireRequest(req ChatRequest, stream bool) (openAIR
 	messages = maybeOmitImages(messages, false)
 
 	wireReq := openAIRequest{
-		Model:      req.Model,
+		Model:      StripProviderPrefix(req.Model),
 		Messages:   convertOpenAIMessages(messages, supportsPromptCaching(p.name, p.baseURL)),
 		ToolChoice: req.ToolChoice,
 		Stream:     stream,
