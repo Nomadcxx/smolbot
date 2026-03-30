@@ -235,3 +235,35 @@ func findJobByName(jobs []Job, name string) Job {
 	}
 	return Job{}
 }
+
+func TestPersistIsAtomicNoTempFileLeftOnSuccess(t *testing.T) {
+	dir := t.TempDir()
+	jobsFile := filepath.Join(dir, "jobs.json")
+
+	svc := &Service{
+		jobsFile: jobsFile,
+		jobs: []Job{
+			{ID: "j1", Name: "daily-report", Schedule: "0 9 * * *", Enabled: true},
+		},
+	}
+
+	if err := svc.persist(); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+
+	if _, err := os.Stat(jobsFile + ".tmp"); !os.IsNotExist(err) {
+		t.Fatal("expected .tmp file to be cleaned up after successful persist")
+	}
+
+	data, err := os.ReadFile(jobsFile)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var jobs []Job
+	if err := json.Unmarshal(data, &jobs); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].ID != "j1" {
+		t.Fatalf("unexpected jobs: %#v", jobs)
+	}
+}

@@ -303,7 +303,24 @@ func (s *Service) persist() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.jobsFile, data, 0o644)
+	tmp := s.jobsFile + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.jobsFile)
 }
 
 func (s *Service) jobByID(id string) *Job {
