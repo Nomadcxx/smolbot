@@ -749,6 +749,8 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 			Channels:  channels,
 			Config:    cfg,
 			Usage:     usageStore,
+			Skills:    skills,
+			Cron:      cronService,
 			Version:   version,
 			StartedAt: time.Now(),
 			SetModelCallback: func(model string) (string, error) {
