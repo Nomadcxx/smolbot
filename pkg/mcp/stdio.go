@@ -2,13 +2,14 @@ package mcp
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,7 +27,6 @@ type StdioTransport struct {
 	pending map[string]chan responseResult
 	closed  bool
 	readErr error
-	stderr  *stderrCapture
 }
 
 type responseResult struct {
@@ -41,44 +41,11 @@ type writeResult struct {
 	aborted bool
 }
 
-type stderrCapture struct {
-	mu       sync.Mutex
-	buf      bytes.Buffer
-	capBytes int
-}
-
-func newStderrCapture(capBytes int) *stderrCapture {
-	return &stderrCapture{capBytes: capBytes}
-}
-
-func (c *stderrCapture) Write(p []byte) (int, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.capBytes <= 0 {
-		return len(p), nil
-	}
-	remaining := c.capBytes - c.buf.Len()
-	if remaining > 0 {
-		if len(p) > remaining {
-			p = p[:remaining]
-		}
-		_, _ = c.buf.Write(p)
-	}
-	return len(p), nil
-}
-
-func (c *stderrCapture) Snapshot() string {
-	if c == nil {
-		return ""
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return strings.TrimSpace(c.buf.String())
-}
-
 func NewStdioTransport(ctx context.Context, command string, args []string, env map[string]string) (*StdioTransport, error) {
+	resolvedCommand := resolveCommand(command, env)
+
 	procCtx, cancel := context.WithCancel(ctx)
-	cmd := exec.CommandContext(procCtx, command, args...)
+	cmd := exec.CommandContext(procCtx, resolvedCommand, args...)
 
 	cmdEnv := cmd.Environ()
 	for k, v := range env {
@@ -96,11 +63,14 @@ func NewStdioTransport(ctx context.Context, command string, args []string, env m
 		cancel()
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	stderr := newStderrCapture(4096)
-	cmd.Stderr = stderr
+	cmd.Stderr = io.Discard
 
 	if err := cmd.Start(); err != nil {
 		cancel()
+		if errors.Is(err, exec.ErrNotFound) || strings.Contains(err.Error(), "no such file or directory") {
+			return nil, fmt.Errorf("start mcp server %q: command %q not found — ensure it is installed and in PATH (current PATH: %s): %w",
+				command, resolvedCommand, os.Getenv("PATH"), err)
+		}
 		return nil, fmt.Errorf("start mcp server %q: %w", command, err)
 	}
 
@@ -112,10 +82,40 @@ func NewStdioTransport(ctx context.Context, command string, args []string, env m
 		stdin:   stdin,
 		cancel:  cancel,
 		pending: make(map[string]chan responseResult),
-		stderr:  stderr,
 	}
 	t.startReadLoop(scanner)
 	return t, nil
+}
+
+func resolveCommand(command string, env map[string]string) string {
+	if strings.Contains(command, string(filepath.Separator)) {
+		base := filepath.Base(command)
+		if base != "." && base != "" {
+			command = base
+		}
+	}
+
+	effectivePath := os.Getenv("PATH")
+	if envPath, ok := env["PATH"]; ok {
+		effectivePath = envPath + string(os.PathListSeparator) + effectivePath
+	}
+	if resolved, err := lookPathWithEnv(command, effectivePath); err == nil {
+		return resolved
+	}
+	return command
+}
+
+func lookPathWithEnv(file, pathEnv string) (string, error) {
+	for _, dir := range filepath.SplitList(pathEnv) {
+		if dir == "" {
+			dir = "."
+		}
+		path := filepath.Join(dir, file)
+		if fi, err := os.Stat(path); err == nil && !fi.IsDir() && fi.Mode()&0111 != 0 {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("%s not found in PATH", file)
 }
 
 func (t *StdioTransport) Send(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -323,7 +323,6 @@ func (t *StdioTransport) startReadLoop(scanner *bufio.Scanner) error {
 		if err == nil {
 			err = io.EOF
 		}
-		err = t.withStderr(err)
 		t.stateMu.Lock()
 		t.closed = true
 		t.readErr = err
@@ -336,18 +335,4 @@ func (t *StdioTransport) startReadLoop(scanner *bufio.Scanner) error {
 		}
 	}()
 	return nil
-}
-
-func (t *StdioTransport) withStderr(err error) error {
-	if err == nil {
-		return nil
-	}
-	stderr := ""
-	if t != nil && t.stderr != nil {
-		stderr = t.stderr.Snapshot()
-	}
-	if stderr == "" {
-		return err
-	}
-	return fmt.Errorf("%w: stderr: %s", err, stderr)
 }

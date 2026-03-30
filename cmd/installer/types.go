@@ -168,7 +168,7 @@ type model struct {
 	discordTokenInput  textinput.Model
 
 	// MiniMax OAuth state
-	oauthFlow  *oauthFlowState
+	oauthDC    *deviceCodeResp
 	oauthToken *oauthToken
 	oauthError string
 	oauthURL   string

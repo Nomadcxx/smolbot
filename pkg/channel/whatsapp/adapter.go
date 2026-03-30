@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/smolbot/pkg/channel"
+	"github.com/Nomadcxx/smolbot/pkg/channel/qr"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
@@ -559,3 +560,5 @@ func loginUpdateFromQR(item whatsmeow.QRChannelItem) loginUpdate {
 func sqliteStoreDSN(path string) string {
 	return "file:" + path + "?_foreign_keys=on"
 }
+
+var NewQRRenderer = qr.New

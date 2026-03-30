@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/smolbot/pkg/channel"
+	"github.com/Nomadcxx/smolbot/pkg/channel/qr"
 	"github.com/Nomadcxx/smolbot/pkg/channel/whatsapp"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -29,7 +30,7 @@ type whatsappLoginModel struct {
 	spinner   spinner.Model
 	ctx       context.Context
 	cancel    context.CancelFunc
-	renderer  *whatsapp.QRRenderer
+	renderer  *qr.Renderer
 	program   *tea.Program
 	startTime time.Time
 }
@@ -43,7 +44,7 @@ func newWhatsAppLoginModel(cfg *config.Config) (*whatsappLoginModel, error) {
 		spinner:   spinner.New(),
 		ctx:       ctx,
 		cancel:    cancel,
-		renderer:  whatsapp.NewQRRenderer(256),
+		renderer:  qr.New(256),
 		startTime: time.Now(),
 	}
 	m.spinner.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("86"))

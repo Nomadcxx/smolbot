@@ -136,9 +136,9 @@ type tickerMsg struct{}
 
 // miniMaxOAuthInitMsg is sent once the browser has been opened and we know the URL.
 type miniMaxOAuthInitMsg struct {
-	url  string
-	flow *oauthFlowState
-	err  error
+	url string
+	dc  *deviceCodeResp
+	err error
 }
 
 // miniMaxOAuthDoneMsg is sent when the token exchange completes (or fails).
@@ -147,18 +147,18 @@ type miniMaxOAuthDoneMsg struct {
 	err   error
 }
 
-// startMiniMaxOAuthCmd starts the localhost server, posts to MiniMax, and opens the browser.
+// startMiniMaxOAuthCmd posts to MiniMax /oauth/code and opens the browser.
 func startMiniMaxOAuthCmd() tea.Cmd {
 	return func() tea.Msg {
-		verificationURL, flow, err := initiateAuthFlow()
-		return miniMaxOAuthInitMsg{url: verificationURL, flow: flow, err: err}
+		verificationURL, dc, err := initiateAuthFlow()
+		return miniMaxOAuthInitMsg{url: verificationURL, dc: dc, err: err}
 	}
 }
 
-// waitMiniMaxCallbackCmd waits for the browser redirect callback and exchanges the code.
-func waitMiniMaxCallbackCmd(ctx context.Context, flow *oauthFlowState) tea.Cmd {
+// pollMiniMaxCmd polls MiniMax until the device code is exchanged for a token.
+func pollMiniMaxCmd(ctx context.Context, dc *deviceCodeResp) tea.Cmd {
 	return func() tea.Msg {
-		tok, err := waitForAuthCode(ctx, flow)
+		tok, err := pollMiniMax(ctx, dc, nil)
 		return miniMaxOAuthDoneMsg{token: tok, err: err}
 	}
 }
@@ -230,8 +230,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.oauthURL = msg.url
-		m.oauthFlow = msg.flow
-		return m, waitMiniMaxCallbackCmd(m.ctx, msg.flow)
+		m.oauthDC = msg.dc
+		return m, pollMiniMaxCmd(m.ctx, msg.dc)
 
 	case miniMaxOAuthDoneMsg:
 		if msg.err != nil {
@@ -392,7 +392,7 @@ func (m model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedModel = defaultModelFor(m.provider)
 		case providerMiniMaxOAuth:
 			m.selectedModel = defaultModelFor(m.provider)
-			m.oauthFlow = nil
+			m.oauthDC = nil
 			m.oauthToken = nil
 			m.oauthError = ""
 			m.oauthURL = ""
@@ -471,10 +471,7 @@ func (m model) handleConfigurationKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) handleMiniMaxOAuthKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		if m.oauthFlow != nil {
-			m.oauthFlow.Close()
-			m.oauthFlow = nil
-		}
+		m.oauthDC = nil
 		m.step = stepProvider
 		m.oauthToken = nil
 		m.oauthError = ""
@@ -483,10 +480,7 @@ func (m model) handleMiniMaxOAuthKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.oauthError != "" {
 			// Retry
-			if m.oauthFlow != nil {
-				m.oauthFlow.Close()
-			}
-			m.oauthFlow = nil
+			m.oauthDC = nil
 			m.oauthToken = nil
 			m.oauthError = ""
 			m.oauthURL = ""

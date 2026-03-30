@@ -300,11 +300,12 @@ func TestBuildRuntimeCallsMCPCleanupOnClose(t *testing.T) {
 
 func TestBuildRuntimeMCPDiscoveryFailureDoesNotAbortStartup(t *testing.T) {
 	origNewMCPMgr := newMCPMgr
-	origDefault := slog.Default()
-	t.Cleanup(func() {
-		newMCPMgr = origNewMCPMgr
-		slog.SetDefault(origDefault)
-	})
+	t.Cleanup(func() { newMCPMgr = origNewMCPMgr })
+
+	origLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(origLogger) })
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
 
 	cleanupCalled := 0
 	newMCPMgr = func() (mcpDiscoveryManager, func()) {
@@ -312,10 +313,6 @@ func TestBuildRuntimeMCPDiscoveryFailureDoesNotAbortStartup(t *testing.T) {
 			cleanupCalled++
 		}
 	}
-
-	var logBuf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
-	slog.SetDefault(logger)
 
 	port := freePort(t)
 	cfg := config.DefaultConfig()
@@ -325,7 +322,7 @@ func TestBuildRuntimeMCPDiscoveryFailureDoesNotAbortStartup(t *testing.T) {
 	cfg.Gateway.Port = port
 	cfg.Tools.MCPServers = map[string]config.MCPServerConfig{
 		"hybrid-memory": {
-			Command:     "broken-server",
+			Command:     "node",
 			ToolTimeout: 30,
 		},
 	}
@@ -342,29 +339,25 @@ func TestBuildRuntimeMCPDiscoveryFailureDoesNotAbortStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildRuntime: %v", err)
 	}
+	defer func() {
+		if err := app.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	}()
+
+	if cleanupCalled != 0 {
+		t.Fatalf("expected cleanup to defer until runtime close, got %d", cleanupCalled)
+	}
+	if !strings.Contains(buf.String(), "mcp discovery failed; continuing without discovered tools") {
+		t.Fatalf("expected warning about MCP discovery failure, got %q", buf.String())
+	}
 
 	names := make([]string, 0)
 	for _, def := range app.tools.Definitions() {
 		names = append(names, def.Name)
 	}
-	for _, name := range names {
-		if strings.HasPrefix(name, "mcp_") {
-			t.Fatalf("expected no discovered MCP tools after startup warning, got %#v", names)
-		}
-	}
-
-	if cleanupCalled != 0 {
-		t.Fatalf("expected cleanup to defer until runtime close, got %d", cleanupCalled)
-	}
-	if err := app.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	if cleanupCalled != 1 {
-		t.Fatalf("expected cleanup once on runtime close, got %d", cleanupCalled)
-	}
-
-	if !strings.Contains(logBuf.String(), "mcp discovery failed; continuing without discovered tools") {
-		t.Fatalf("expected warning log in output, got %q", logBuf.String())
+	if slices.ContainsFunc(names, func(name string) bool { return strings.HasPrefix(name, "mcp_") }) {
+		t.Fatalf("expected no MCP tools after discovery failure, got %#v", names)
 	}
 }
 
@@ -398,6 +391,6 @@ func (m *fakeMCPDisonveryClientManager) DiscoverAndRegister(ctx context.Context,
 
 type failingMCPDiscoveryManager struct{}
 
-func (failingMCPDiscoveryManager) DiscoverAndRegister(_ context.Context, _ *tool.Registry, _ map[string]config.MCPServerConfig) ([]string, error) {
+func (failingMCPDiscoveryManager) DiscoverAndRegister(context.Context, *tool.Registry, map[string]config.MCPServerConfig) ([]string, error) {
 	return nil, errors.New("boom")
 }

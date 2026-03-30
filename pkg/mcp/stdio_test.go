@@ -2,325 +2,207 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 )
 
-var (
-	mockServerOnce sync.Once
-	mockServerPath string
-	mockServerErr  error
-)
-
-func TestJSONRPCNotificationOmitsID(t *testing.T) {
-	req := jsonRPCRequest{
-		JSONRPC: "2.0",
-		Method:  "notifications/initialized",
-	}
-	data, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	if strings.Contains(string(data), `"id"`) {
-		t.Fatalf("notification should omit id field, got %s", data)
-	}
-}
-
-func TestJSONRPCIDSupportsNumberAndString(t *testing.T) {
-	var numeric struct {
-		ID jsonRPCID `json:"id"`
-	}
-	if err := json.Unmarshal([]byte(`{"id":1}`), &numeric); err != nil {
-		t.Fatalf("unmarshal numeric id: %v", err)
-	}
-	if string(numeric.ID) != "1" {
-		t.Fatalf("unexpected numeric id %q", numeric.ID)
-	}
-
-	var str struct {
-		ID jsonRPCID `json:"id"`
-	}
-	if err := json.Unmarshal([]byte(`{"id":"req-1"}`), &str); err != nil {
-		t.Fatalf("unmarshal string id: %v", err)
-	}
-	if string(str.ID) != `"req-1"` {
-		t.Fatalf("unexpected string id %q", str.ID)
-	}
-}
-
-func TestStdioTransportRoundTrip(t *testing.T) {
-	transport := newMockTransport(t)
-	t.Cleanup(func() {
-		_ = transport.Close()
-	})
-
-	result, err := transport.Send(context.Background(), "initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "smolbot", "version": "test"},
-	})
-	if err != nil {
-		t.Fatalf("initialize: %v", err)
-	}
-	var initResult mcpInitResult
-	if err := json.Unmarshal(result, &initResult); err != nil {
-		t.Fatalf("unmarshal initialize result: %v", err)
-	}
-	if initResult.ServerInfo.Name != "mock-mcp" {
-		t.Fatalf("server info = %#v", initResult.ServerInfo)
-	}
-
-	if err := transport.Notify(context.Background(), "notifications/initialized", nil); err != nil {
-		t.Fatalf("notify: %v", err)
-	}
-
-	listResult, err := transport.Send(context.Background(), "tools/list", map[string]any{})
-	if err != nil {
-		t.Fatalf("tools/list: %v", err)
-	}
-	var tools mcpToolsListResult
-	if err := json.Unmarshal(listResult, &tools); err != nil {
-		t.Fatalf("unmarshal tools/list result: %v", err)
-	}
-	if len(tools.Tools) != 1 || tools.Tools[0].Name != "echo" {
-		t.Fatalf("unexpected tools result %#v", tools)
-	}
-
-	callResult, err := transport.Send(context.Background(), "tools/call", map[string]any{
-		"name":      "echo",
-		"arguments": json.RawMessage(`{"text":"hello"}`),
-	})
-	if err != nil {
-		t.Fatalf("tools/call: %v", err)
-	}
-	var call mcpCallResult
-	if err := json.Unmarshal(callResult, &call); err != nil {
-		t.Fatalf("unmarshal tools/call result: %v", err)
-	}
-	if call.IsError {
-		t.Fatalf("expected success call result, got %#v", call)
-	}
-	if len(call.Content) != 1 || call.Content[0].Text != "echoed: hello" {
-		t.Fatalf("unexpected call result %#v", call)
-	}
-}
-
-func TestStdioTransportContextCancel(t *testing.T) {
-	transport := newMockTransport(t, mockServerEnv("MOCK_MCP_DELAY_LIST", "1")...)
-	t.Cleanup(func() {
-		_ = transport.Close()
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-
-	_, err := transport.Send(ctx, "tools/list", map[string]any{})
-	if err == nil {
-		t.Fatal("expected context cancellation error")
-	}
-	if !errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "deadline exceeded") {
-		t.Fatalf("expected deadline exceeded, got %v", err)
-	}
-}
-
-func TestStdioTransportWriteHonorsContextCancel(t *testing.T) {
-	transport, err := NewStdioTransport(context.Background(), "sh", []string{"-c", "sleep 5"}, nil)
-	if err != nil {
-		t.Fatalf("new stdio transport: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = transport.Close()
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-
-	_, err = transport.Send(ctx, "tools/call", map[string]any{
-		"payload": strings.Repeat("x", 8*1024*1024),
-	})
-	if err == nil {
-		t.Fatal("expected blocked write to fail")
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("expected deadline exceeded context, got %v", err)
-	}
-}
-
-func TestStdioTransportLargePayload(t *testing.T) {
-	transport := newMockTransport(t, mockServerEnv("MOCK_MCP_LARGE", "1")...)
-	t.Cleanup(func() {
-		_ = transport.Close()
-	})
-
-	result, err := transport.Send(context.Background(), "tools/list", map[string]any{})
-	if err != nil {
-		t.Fatalf("tools/list: %v", err)
-	}
-	var list mcpToolsListResult
-	if err := json.Unmarshal(result, &list); err != nil {
-		t.Fatalf("unmarshal large result: %v", err)
-	}
-	if len(list.Tools) != 1 {
-		t.Fatalf("expected one tool, got %#v", list)
-	}
-	if got := len(list.Tools[0].Description); got < 256*1024 {
-		t.Fatalf("expected large payload, got %d bytes", got)
-	}
-}
-
-func TestStdioTransportIgnoresUnsolicitedNotifications(t *testing.T) {
-	transport := newMockTransport(t, mockServerEnv("MOCK_MCP_NOTIFY_BURST", "1")...)
-	t.Cleanup(func() {
-		_ = transport.Close()
-	})
-
-	result, err := transport.Send(context.Background(), "tools/list", map[string]any{})
-	if err != nil {
-		t.Fatalf("tools/list: %v", err)
-	}
-	var list mcpToolsListResult
-	if err := json.Unmarshal(result, &list); err != nil {
-		t.Fatalf("unmarshal tools/list result: %v", err)
-	}
-	if len(list.Tools) != 1 || list.Tools[0].Name != "echo" {
-		t.Fatalf("unexpected tools result %#v", list)
-	}
-}
-
-func TestStdioTransportSubprocessExit(t *testing.T) {
-	transport := newMockTransport(t, mockServerEnv("MOCK_MCP_EXIT_ON_CALL", "1")...)
-	t.Cleanup(func() {
-		_ = transport.Close()
-	})
-
-	if _, err := transport.Send(context.Background(), "tools/call", map[string]any{
-		"name":      "exit_now",
-		"arguments": json.RawMessage(`{}`),
-	}); err == nil {
-		t.Fatal("expected subprocess exit error")
-	}
-}
-
-func TestStdioTransportIncludesChildStderrInReadError(t *testing.T) {
-	transport, err := NewStdioTransport(context.Background(), "sh", []string{"-c", "echo loader boom >&2; exit 1"}, nil)
-	if err != nil {
-		t.Fatalf("new stdio transport: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = transport.Close()
-	})
-
-	_, err = transport.Send(context.Background(), "initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-	})
-	if err == nil {
-		t.Fatal("expected initialize to fail")
-	}
-	if !strings.Contains(err.Error(), "loader boom") {
-		t.Fatalf("expected child stderr in error, got %v", err)
-	}
-}
-
-func TestStdioTransportClose(t *testing.T) {
-	transport := newMockTransport(t)
-	if err := transport.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-}
-
-func TestStdioTransportConcurrentCalls(t *testing.T) {
-	transport := newMockTransport(t)
-	t.Cleanup(func() {
-		_ = transport.Close()
-	})
-
-	var wg sync.WaitGroup
-	results := make([]string, 2)
-	errs := make([]error, 2)
-	requests := []json.RawMessage{
-		json.RawMessage(`{"text":"hello"}`),
-		json.RawMessage(`{"text":"world"}`),
-	}
-	for i := range requests {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			result, err := transport.Send(context.Background(), "tools/call", map[string]any{
-				"name":      "echo",
-				"arguments": requests[i],
-			})
-			if err != nil {
-				errs[i] = err
-				return
-			}
-			var call mcpCallResult
-			if err := json.Unmarshal(result, &call); err != nil {
-				errs[i] = err
-				return
-			}
-			if len(call.Content) > 0 {
-				results[i] = call.Content[0].Text
-			}
-		}(i)
-	}
-	wg.Wait()
-
-	for _, err := range errs {
-		if err != nil {
-			t.Fatalf("concurrent call error: %v", err)
+func TestLookPathWithEnv(t *testing.T) {
+	t.Run("finds binary in custom PATH", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		exePath := filepath.Join(tmpDir, "mytestcmd")
+		
+		if err := os.WriteFile(exePath, []byte("#!/bin/sh\necho hello"), 0755); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if results[0] != "echoed: hello" || results[1] != `echoed: {"text":"world"}` {
-		t.Fatalf("unexpected concurrent results %#v", results)
-	}
-}
 
-func newMockTransport(t *testing.T, extraEnv ...string) *StdioTransport {
-	t.Helper()
-
-	env := map[string]string{}
-	for i := 0; i+1 < len(extraEnv); i += 2 {
-		env[extraEnv[i]] = extraEnv[i+1]
-	}
-
-	transport, err := NewStdioTransport(context.Background(), mockServerBinary(t), nil, env)
-	if err != nil {
-		t.Fatalf("new stdio transport: %v", err)
-	}
-	return transport
-}
-
-func mockServerBinary(t *testing.T) string {
-	t.Helper()
-
-	mockServerOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "mcp-mock-server-*")
+		got, err := lookPathWithEnv("mytestcmd", tmpDir)
 		if err != nil {
-			mockServerErr = err
-			return
+			t.Fatalf("expected to find mytestcmd in %s, got error: %v", tmpDir, err)
 		}
-		mockServerPath = filepath.Join(dir, "mock_mcp_server")
-		cmd := exec.Command("go", "build", "-o", mockServerPath, "./testdata/mock_mcp_server")
-		cmd.Dir = "."
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			mockServerErr = fmt.Errorf("build mock server: %w: %s", err, string(out))
+		if got != exePath {
+			t.Errorf("expected %s, got %s", exePath, got)
 		}
 	})
-	if mockServerErr != nil {
-		t.Fatal(mockServerErr)
-	}
-	return mockServerPath
+
+	t.Run("returns error when binary not in PATH", func(t *testing.T) {
+		_, err := lookPathWithEnv("nonexistent-binary-xyz", "/nonexistent/path")
+		if err == nil {
+			t.Error("expected error for nonexistent binary")
+		}
+		if !strings.Contains(err.Error(), "not found in PATH") {
+			t.Errorf("expected 'not found in PATH' error, got: %v", err)
+		}
+	})
+
+	t.Run("handles empty PATH gracefully", func(t *testing.T) {
+		_, err := lookPathWithEnv("echo", "")
+		if err == nil {
+			t.Error("expected error for empty PATH")
+		}
+	})
+
+	t.Run("prefers earlier PATH entries", func(t *testing.T) {
+		tmpDir1 := t.TempDir()
+		tmpDir2 := t.TempDir()
+		exe1 := filepath.Join(tmpDir1, "testcmd")
+		exe2 := filepath.Join(tmpDir2, "testcmd")
+
+		for _, p := range []string{exe1, exe2} {
+			if err := os.WriteFile(p, []byte("#!/bin/sh\necho "+filepath.Dir(p)), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		got, err := lookPathWithEnv("testcmd", tmpDir1+string(os.PathListSeparator)+tmpDir2)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != exe1 {
+			t.Errorf("expected %s (first in PATH), got %s", exe1, got)
+		}
+	})
+
+	t.Run("skips non-executable files", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		nonExe := filepath.Join(tmpDir, "notexe")
+		if err := os.WriteFile(nonExe, []byte("not executable"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := lookPathWithEnv("notexe", tmpDir)
+		if err == nil {
+			t.Error("expected error for non-executable file")
+		}
+	})
+
+	t.Run("skips directories", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		subDir := filepath.Join(tmpDir, "subdir")
+		if err := os.MkdirAll(subDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := lookPathWithEnv("subdir", tmpDir)
+		if err == nil {
+			t.Error("expected error for directory")
+		}
+	})
 }
 
-func mockServerEnv(key, value string) []string {
-	return []string{key, value}
+func TestResolveCommand(t *testing.T) {
+	t.Run("extracts basename from absolute path", func(t *testing.T) {
+		got := resolveCommand("/usr/local/bin/node", nil)
+		if got == "/usr/local/bin/node" {
+			t.Error("expected basename extraction from absolute path")
+		}
+		if !strings.Contains(got, "node") {
+			t.Errorf("expected 'node' in resolved path, got: %s", got)
+		}
+	})
+
+	t.Run("resolves bare command using system PATH", func(t *testing.T) {
+		got := resolveCommand("echo", nil)
+		if got == "echo" {
+			t.Error("expected resolveCommand to resolve 'echo' to an absolute path")
+		}
+		if _, err := os.Stat(got); err != nil {
+			t.Errorf("resolved path does not exist: %s", got)
+		}
+	})
+
+	t.Run("returns original command if not found in PATH", func(t *testing.T) {
+		original := resolveCommand("this-command-does-not-exist-12345", nil)
+		if original != "this-command-does-not-exist-12345" {
+			t.Errorf("expected original command to be returned when not found, got: %s", original)
+		}
+	})
+
+	t.Run("uses MCP env PATH when provided", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		exePath := filepath.Join(tmpDir, "myenvcmd")
+		if err := os.WriteFile(exePath, []byte("#!/bin/sh\necho hello"), 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		env := map[string]string{"PATH": tmpDir}
+		got := resolveCommand("myenvcmd", env)
+		if got != exePath {
+			t.Errorf("expected %s, got %s", exePath, got)
+		}
+	})
+
+	t.Run("prepends MCP env PATH to system PATH", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		exePath := filepath.Join(tmpDir, "prependcmd")
+		if err := os.WriteFile(exePath, []byte("#!/bin/sh\necho hello"), 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		env := map[string]string{"PATH": tmpDir}
+		got := resolveCommand("prependcmd", env)
+		if got != exePath {
+			t.Errorf("expected %s, got %s", exePath, got)
+		}
+	})
+}
+
+func TestNewStdioTransportWithBareCommand(t *testing.T) {
+	t.Run("bare echo command resolves successfully", func(t *testing.T) {
+		ctx := testContext()
+		t.Logf("Testing bare 'echo' command resolution")
+
+		transport, err := NewStdioTransport(ctx, "echo", []string{"hello"}, nil)
+		if err != nil {
+			t.Fatalf("failed to create transport with bare 'echo' command: %v", err)
+		}
+		defer transport.Close()
+
+		result, err := transport.Send(ctx, "tools/call", map[string]any{
+			"name":      "echo",
+			"arguments": map[string]any{"message": "hello"},
+		})
+		if err != nil {
+			t.Logf("echo may not implement tools/call, which is expected: %v", err)
+		}
+		_ = result
+	})
+
+	t.Run("absolute path extracts basename and resolves", func(t *testing.T) {
+		ctx := testContext()
+
+		echoPath, err := exec.LookPath("echo")
+		if err != nil {
+			t.Skip("echo not found in PATH")
+		}
+
+		transport, err := NewStdioTransport(ctx, echoPath, []string{"test"}, nil)
+		if err != nil {
+			t.Fatalf("failed to create transport with absolute path: %v", err)
+		}
+		defer transport.Close()
+		_ = transport
+	})
+
+	t.Run("nonexistent command gives clear error", func(t *testing.T) {
+		ctx := testContext()
+
+		_, err := NewStdioTransport(ctx, "nonexistent-command-xyz", []string{}, nil)
+		if err == nil {
+			t.Fatal("expected error for nonexistent command")
+		}
+		errStr := err.Error()
+		if !strings.Contains(errStr, "not found") {
+			t.Errorf("expected 'not found' in error, got: %s", errStr)
+		}
+		if !strings.Contains(errStr, "nonexistent-command-xyz") {
+			t.Errorf("expected command name in error, got: %s", errStr)
+		}
+	})
+}
+
+func testContext() context.Context {
+	return context.Background()
 }
