@@ -50,10 +50,12 @@ func TestStatusCommandPrintsGatewayStatus(t *testing.T) {
 
 	fetchStatus = func(context.Context, rootOptions) (*statusReport, error) {
 		return &statusReport{
-			Model:            "claude-sonnet",
-			UptimeSeconds:    12,
-			Channels:         []string{"slack", "discord"},
-			ConnectedClients: 3,
+			Model:  "claude-sonnet",
+			Uptime: 12,
+			Channels: []channelEntry{
+				{Name: "slack", Status: "connected"},
+				{Name: "discord", Status: "disconnected"},
+			},
 		}, nil
 	}
 
@@ -67,7 +69,7 @@ func TestStatusCommandPrintsGatewayStatus(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	rendered := out.String()
-	for _, needle := range []string{"claude-sonnet", "12", "slack", "discord", "3"} {
+	for _, needle := range []string{"claude-sonnet", "12", "slack=connected", "discord=disconnected"} {
 		if !strings.Contains(rendered, needle) {
 			t.Fatalf("expected %q in output %q", needle, rendered)
 		}

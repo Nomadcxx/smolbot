@@ -12,20 +12,12 @@ func TestFetchChannelStatusesWithDetail(t *testing.T) {
 
 	fetchStatus = func(ctx context.Context, opts rootOptions) (*statusReport, error) {
 		return &statusReport{
-			Model:         "claude-sonnet",
-			UptimeSeconds: 12,
-			Channels:      []string{"signal", "whatsapp"},
-			ChannelStates: map[string]map[string]string{
-				"signal": {
-					"state":  "connected",
-					"detail": "signal-cli ready",
-				},
-				"whatsapp": {
-					"state":  "auth_required",
-					"detail": "device not linked",
-				},
+			Model:  "claude-sonnet",
+			Uptime: 12,
+			Channels: []channelEntry{
+				{Name: "signal", Status: "connected"},
+				{Name: "whatsapp", Status: "auth_required"},
 			},
-			ConnectedClients: 1,
 		}, nil
 	}
 
@@ -42,16 +34,10 @@ func TestFetchChannelStatusesWithDetail(t *testing.T) {
 			if s.State != "connected" {
 				t.Errorf("signal: expected state=%q, got %q", "connected", s.State)
 			}
-			if s.Detail != "signal-cli ready" {
-				t.Errorf("signal: expected detail=%q, got %q", "signal-cli ready", s.Detail)
-			}
 		}
 		if s.Name == "whatsapp" {
 			if s.State != "auth_required" {
 				t.Errorf("whatsapp: expected state=%q, got %q", "auth_required", s.State)
-			}
-			if s.Detail != "device not linked" {
-				t.Errorf("whatsapp: expected detail=%q, got %q", "device not linked", s.Detail)
 			}
 		}
 	}

@@ -71,11 +71,12 @@ func TestFetchStatusQueriesGateway(t *testing.T) {
 		}
 
 		payload, err := json.Marshal(map[string]any{
-			"model":            "claude-sonnet",
-			"uptimeSeconds":    42,
-			"channels":         []string{"slack", "discord"},
-			"channelStates":    map[string]map[string]string{"slack": {"state": "connected"}, "discord": {"state": "error"}},
-			"connectedClients": 2,
+			"model":    "claude-sonnet",
+			"uptime":   42,
+			"channels": []map[string]string{
+				{"name": "slack", "status": "connected"},
+				{"name": "discord", "status": "error"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("Marshal: %v", err)
@@ -105,11 +106,11 @@ func TestFetchStatusQueriesGateway(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchStatus: %v", err)
 	}
-	if report.Model != "claude-sonnet" || report.UptimeSeconds != 42 || report.ConnectedClients != 2 {
+	if report.Model != "claude-sonnet" || report.Uptime != 42 {
 		t.Fatalf("unexpected status report %#v", report)
 	}
-	if got := strings.Join(report.Channels, ","); got != "slack,discord" {
-		t.Fatalf("unexpected channels %q", got)
+	if len(report.Channels) != 2 || report.Channels[0].Name != "slack" || report.Channels[1].Name != "discord" {
+		t.Fatalf("unexpected channels %#v", report.Channels)
 	}
 }
 
@@ -133,11 +134,12 @@ func TestFetchChannelStatusesQueriesGatewayStatus(t *testing.T) {
 			t.Fatalf("DecodeFrame: %v", err)
 		}
 		payload, err := json.Marshal(map[string]any{
-			"model":            "claude-sonnet",
-			"uptimeSeconds":    42,
-			"channels":         []string{"slack", "discord"},
-			"channelStates":    map[string]map[string]string{"slack": {"state": "connected"}, "discord": {"state": "error"}},
-			"connectedClients": 2,
+			"model":    "claude-sonnet",
+			"uptime":   42,
+			"channels": []map[string]string{
+				{"name": "slack", "status": "connected"},
+				{"name": "discord", "status": "error"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("Marshal: %v", err)
