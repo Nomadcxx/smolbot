@@ -38,6 +38,7 @@ type ToolCall struct {
 }
 
 const maxToolOutputLines = 10
+const maxToolOutputBytes = 4096
 
 func renderToolCall(tc ToolCall, width int, expanded bool) string {
 	t := theme.Current()
@@ -232,6 +233,15 @@ func toolOutputSummary(status, output string, expanded bool) string {
 
 	if expanded {
 		return output
+	}
+
+	if len(output) > maxToolOutputBytes {
+		truncated := output[:maxToolOutputBytes]
+		lastNewline := strings.LastIndex(truncated, "\n")
+		if lastNewline > maxToolOutputBytes/2 {
+			truncated = truncated[:lastNewline]
+		}
+		return truncated + fmt.Sprintf("\n… (%d bytes hidden)", len(output)-len(truncated))
 	}
 
 	lines := strings.Split(output, "\n")
@@ -454,6 +464,9 @@ func renderRoleBlock(label, body string, accent color.Color, width int) string {
 	if t == nil {
 		return label + "\n" + body
 	}
+	if accent == nil {
+		accent = t.Primary
+	}
 	innerWidth := cappedWidth(width)
 	badge := lipgloss.NewStyle().
 		Background(accent).
@@ -503,6 +516,9 @@ func renderThinkingBlock(body string, dur time.Duration, accent color.Color, wid
 	t := theme.Current()
 	if t == nil {
 		return "THINKING\n" + body
+	}
+	if accent == nil {
+		accent = t.Primary
 	}
 	innerWidth := cappedWidth(width)
 	badge := lipgloss.NewStyle().
