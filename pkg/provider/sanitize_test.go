@@ -38,8 +38,9 @@ func TestSanitizeToolCallIDNormalization(t *testing.T) {
 
 	sanitized := SanitizeMessages(msgs, "openai")
 	newID := sanitized[0].ToolCalls[0].ID
-	if len(newID) != 9 {
-		t.Fatalf("normalized id len = %d, want 9", len(newID))
+	want := "callverylongidthatexceedsninechars"
+	if newID != want {
+		t.Fatalf("normalized id = %q, want %q", newID, want)
 	}
 	if sanitized[1].ToolCallID != newID {
 		t.Fatalf("tool_call_id = %q, want %q", sanitized[1].ToolCallID, newID)
@@ -101,6 +102,24 @@ func TestSanitizeNormalizesDictAndBlockContent(t *testing.T) {
 	}
 	if len(blocks) != 1 || blocks[0].Text != "kept" {
 		t.Fatalf("blocks = %#v, want single kept block", blocks)
+	}
+}
+
+func TestNormalizeToolCallIDNoCollision(t *testing.T) {
+	id1 := "callfunct0"
+	id2 := "callfunct1"
+	n1 := normalizeToolCallID(id1)
+	n2 := normalizeToolCallID(id2)
+	if n1 == n2 {
+		t.Errorf("collision: both %q and %q normalize to %q", id1, id2, n1)
+	}
+}
+
+func TestNormalizeToolCallIDPreservesLongIDs(t *testing.T) {
+	id := "call_very_long_id_that_exceeds_nine_chars"
+	got := normalizeToolCallID(id)
+	if len(got) <= 9 {
+		t.Errorf("ID was truncated: got %q (len %d)", got, len(got))
 	}
 }
 

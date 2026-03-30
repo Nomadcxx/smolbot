@@ -127,15 +127,12 @@ func normalizeToolCallID(id string) string {
 		}
 	}
 	value := cleaned.String()
-	if len(value) >= 9 {
-		return value[:9]
-	}
 	if len(value) > 0 {
 		return value
 	}
 
 	hash := sha256.Sum256([]byte(id))
-	return hex.EncodeToString(hash[:])[:9]
+	return hex.EncodeToString(hash[:])[:16]
 }
 
 func repairJSON(raw string) string {
