@@ -631,7 +631,13 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 
 	providerRegistry := deps.ProviderRegistry
 	if providerRegistry == nil && deps.Provider == nil {
-		providerRegistry = provider.NewRegistryWithOAuthStore(cfg, config.NewOAuthTokenStore(paths))
+		oauthStore, err := config.NewOAuthTokenStore(paths)
+		if err != nil {
+			_ = sessions.Close()
+			_ = usageStore.Close()
+			return nil, fmt.Errorf("create oauth token store: %w", err)
+		}
+		providerRegistry = provider.NewRegistryWithOAuthStore(cfg, oauthStore)
 	}
 
 	runtimeProvider := deps.Provider

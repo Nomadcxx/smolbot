@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -38,17 +39,14 @@ type OAuthTokenStore interface {
 	Clear(provider, profileID string) error
 }
 
-func NewOAuthTokenStore(paths *Paths) OAuthTokenStore {
+func NewOAuthTokenStore(paths *Paths) (OAuthTokenStore, error) {
 	if err := os.MkdirAll(paths.Root(), 0700); err != nil {
-		return &tokenStore{
-			pathFn:  func() string { return filepath.Join(paths.Root(), "oauth_tokens.json") },
-			entries: make(map[string]map[string]TokenStoreEntry),
-		}
+		return nil, fmt.Errorf("create oauth token store directory: %w", err)
 	}
 	return &tokenStore{
 		pathFn:  func() string { return filepath.Join(paths.Root(), "oauth_tokens.json") },
 		entries: make(map[string]map[string]TokenStoreEntry),
-	}
+	}, nil
 }
 
 func (s *tokenStore) path() string {

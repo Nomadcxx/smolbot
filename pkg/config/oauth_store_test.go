@@ -1,14 +1,32 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
+func TestNewOAuthTokenStoreReturnsErrorOnBadRoot(t *testing.T) {
+	tmp := t.TempDir()
+	blockingFile := filepath.Join(tmp, "blocking")
+	if err := os.WriteFile(blockingFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	paths := NewPaths(filepath.Join(blockingFile, "smolbot"))
+	_, err := NewOAuthTokenStore(paths)
+	if err == nil {
+		t.Fatal("expected error from NewOAuthTokenStore with uncreateable root, got nil")
+	}
+}
+
 func TestOAuthTokenStore_SaveAndLoad(t *testing.T) {
 	tmp := t.TempDir()
 	paths := NewPaths(tmp)
-	store := NewOAuthTokenStore(paths)
+	store, err := NewOAuthTokenStore(paths)
+	if err != nil {
+		t.Fatalf("NewOAuthTokenStore: %v", err)
+	}
 
 	token := &TokenStoreEntry{
 		AccessToken:  "access-abc",
@@ -21,7 +39,7 @@ func TestOAuthTokenStore_SaveAndLoad(t *testing.T) {
 		AccountEmail: "user@example.com",
 	}
 
-	err := store.Save("minimax-portal", "default", token)
+	err = store.Save("minimax-portal", "default", token)
 	if err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
@@ -50,7 +68,10 @@ func TestOAuthTokenStore_SaveAndLoad(t *testing.T) {
 func TestOAuthTokenStore_ClearRemovesOnlyTarget(t *testing.T) {
 	tmp := t.TempDir()
 	paths := NewPaths(tmp)
-	store := NewOAuthTokenStore(paths)
+	store, err := NewOAuthTokenStore(paths)
+	if err != nil {
+		t.Fatalf("NewOAuthTokenStore: %v", err)
+	}
 
 	token1 := &TokenStoreEntry{AccessToken: "access-1", ExpiresAt: time.Now().Add(1 * time.Hour)}
 	token2 := &TokenStoreEntry{AccessToken: "access-2", ExpiresAt: time.Now().Add(1 * time.Hour)}
@@ -58,7 +79,7 @@ func TestOAuthTokenStore_ClearRemovesOnlyTarget(t *testing.T) {
 	store.Save("provider-a", "profile-1", token1)
 	store.Save("provider-b", "profile-1", token2)
 
-	err := store.Clear("provider-a", "profile-1")
+	err = store.Clear("provider-a", "profile-1")
 	if err != nil {
 		t.Fatalf("Clear failed: %v", err)
 	}
@@ -86,7 +107,10 @@ func TestOAuthTokenStore_ClearRemovesOnlyTarget(t *testing.T) {
 func TestOAuthTokenStore_MissingFileReturnsNotFound(t *testing.T) {
 	tmp := t.TempDir()
 	paths := NewPaths(tmp)
-	store := NewOAuthTokenStore(paths)
+	store, err := NewOAuthTokenStore(paths)
+	if err != nil {
+		t.Fatalf("NewOAuthTokenStore: %v", err)
+	}
 
 	_, found, err := store.Load("nonexistent", "default")
 	if err != nil {
@@ -100,7 +124,10 @@ func TestOAuthTokenStore_MissingFileReturnsNotFound(t *testing.T) {
 func TestOAuthTokenStore_PrivatePermissions(t *testing.T) {
 	tmp := t.TempDir()
 	paths := NewPaths(tmp)
-	store := NewOAuthTokenStore(paths)
+	store, err := NewOAuthTokenStore(paths)
+	if err != nil {
+		t.Fatalf("NewOAuthTokenStore: %v", err)
+	}
 	token := &TokenStoreEntry{AccessToken: "secret", ExpiresAt: time.Now().Add(1 * time.Hour)}
 
 	store.Save("minimax-portal", "default", token)
@@ -118,7 +145,10 @@ func TestOAuthTokenStore_PrivatePermissions(t *testing.T) {
 func TestOAuthTokenStore_PreservesOtherEntriesOnUpdate(t *testing.T) {
 	tmp := t.TempDir()
 	paths := NewPaths(tmp)
-	store := NewOAuthTokenStore(paths)
+	store, err := NewOAuthTokenStore(paths)
+	if err != nil {
+		t.Fatalf("NewOAuthTokenStore: %v", err)
+	}
 
 	store.Save("provider-a", "profile-1", &TokenStoreEntry{AccessToken: "token-a", ExpiresAt: time.Now().Add(1 * time.Hour)})
 	store.Save("provider-b", "profile-1", &TokenStoreEntry{AccessToken: "token-b", ExpiresAt: time.Now().Add(1 * time.Hour)})
