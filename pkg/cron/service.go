@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strings"
@@ -36,13 +37,14 @@ type ServiceDeps struct {
 }
 
 type Service struct {
-	mu        sync.Mutex
-	jobsFile  string
-	processor Processor
-	evaluator Evaluator
-	router    Router
-	now       func() time.Time
-	jobs      []Job
+	mu          sync.Mutex
+	jobsFile    string
+	processor   Processor
+	evaluator   Evaluator
+	router      Router
+	now         func() time.Time
+	jobs        []Job
+	runningJobs map[string]bool
 }
 
 type Job struct {
@@ -69,11 +71,12 @@ func NewService(deps ServiceDeps) *Service {
 		now = time.Now
 	}
 	s := &Service{
-		jobsFile:  deps.JobsFile,
-		processor: deps.Processor,
-		evaluator: deps.Evaluator,
-		router:    deps.Router,
-		now:       now,
+		jobsFile:    deps.JobsFile,
+		processor:   deps.Processor,
+		evaluator:   deps.Evaluator,
+		router:      deps.Router,
+		now:         now,
+		runningJobs: make(map[string]bool),
 	}
 	_ = s.load()
 	return s
@@ -144,23 +147,36 @@ func (s *Service) ListJobs() []Job {
 
 func (s *Service) RunDue(ctx context.Context, now time.Time) error {
 	s.mu.Lock()
-	jobs := make([]Job, len(s.jobs))
-	copy(jobs, s.jobs)
-	s.mu.Unlock()
-
-	for _, job := range jobs {
+	jobs := make([]Job, 0, len(s.jobs))
+	for _, job := range s.jobs {
 		if !job.Enabled || job.NextRun.After(now) {
 			continue
 		}
+		if s.runningJobs[job.ID] {
+			continue
+		}
+		s.runningJobs[job.ID] = true
+		jobs = append(jobs, job)
+	}
+	s.mu.Unlock()
+
+	var firstErr error
+	for _, job := range jobs {
 		if err := s.executeJob(ctx, job, now); err != nil {
-			return err
+			if firstErr == nil {
+				firstErr = err
+			}
+			log.Printf("[cron] job %q failed: %v", job.Name, err)
 		}
 	}
-	return nil
+	return firstErr
 }
 
 func (s *Service) executeJob(ctx context.Context, job Job, now time.Time) error {
 	if s.processor == nil {
+		s.mu.Lock()
+		delete(s.runningJobs, job.ID)
+		s.mu.Unlock()
 		return nil
 	}
 
@@ -182,6 +198,7 @@ func (s *Service) executeJob(ctx context.Context, job Job, now time.Time) error 
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	delete(s.runningJobs, job.ID)
 	stored := s.jobByIDLocked(job.ID)
 	if stored == nil {
 		return nil
