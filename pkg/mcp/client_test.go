@@ -163,7 +163,7 @@ func (f *fakeDiscoveryClient) Discover(_ context.Context, spec ConnectionSpec) (
 	return f.tools, nil
 }
 
-func (f *fakeDiscoveryClient) Invoke(_ context.Context, spec ConnectionSpec, toolName string, _ json.RawMessage) (*tool.Result, error) {
+func (f *fakeDiscoveryClient) Invoke(_ context.Context, spec ConnectionSpec, toolName string, _ json.RawMessage, _ tool.ToolContext) (*tool.Result, error) {
 	f.lastSpec = spec
 	f.lastInvokedTool = toolName
 	f.invokeCalls++

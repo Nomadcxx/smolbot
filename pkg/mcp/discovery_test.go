@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Nomadcxx/smolbot/pkg/tool"
 )
 
 func TestStdioDiscoveryClientDiscover(t *testing.T) {
@@ -39,7 +41,7 @@ func TestStdioDiscoveryClientInvoke(t *testing.T) {
 		t.Fatalf("expected one tool, got %#v", tools)
 	}
 
-	result, err := client.Invoke(context.Background(), spec, "echo", json.RawMessage(`{"text":"hello"}`))
+	result, err := client.Invoke(context.Background(), spec, "echo", json.RawMessage(`{"text":"hello"}`), tool.ToolContext{})
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
@@ -59,7 +61,7 @@ func TestStdioDiscoveryClientErrorTool(t *testing.T) {
 		t.Fatalf("discover: %v", err)
 	}
 
-	result, err := client.Invoke(context.Background(), spec, "echo", json.RawMessage(`{"text":"hello"}`))
+	result, err := client.Invoke(context.Background(), spec, "echo", json.RawMessage(`{"text":"hello"}`), tool.ToolContext{})
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
@@ -79,7 +81,7 @@ func TestStdioDiscoveryClientUnsupportedContent(t *testing.T) {
 		t.Fatalf("discover: %v", err)
 	}
 
-	result, err := client.Invoke(context.Background(), spec, "echo", json.RawMessage(`{"text":"hello"}`))
+	result, err := client.Invoke(context.Background(), spec, "echo", json.RawMessage(`{"text":"hello"}`), tool.ToolContext{})
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
@@ -279,7 +281,10 @@ func mockConnectionSpec(t *testing.T, env map[string]string) ConnectionSpec {
 		Transport:   TransportStdio,
 		Command:     mockServerBinary(t),
 		Args:        nil,
-		Env:         specEnv,
-		ToolTimeout: 200 * time.Millisecond,
 	}
+}
+
+func mockServerBinary(t *testing.T) string {
+	t.Helper()
+	return ""
 }

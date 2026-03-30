@@ -41,7 +41,7 @@ type RemoteTool struct {
 
 type DiscoveryClient interface {
 	Discover(ctx context.Context, spec ConnectionSpec) ([]RemoteTool, error)
-	Invoke(ctx context.Context, spec ConnectionSpec, toolName string, args json.RawMessage) (*tool.Result, error)
+	Invoke(ctx context.Context, spec ConnectionSpec, toolName string, args json.RawMessage, tctx tool.ToolContext) (*tool.Result, error)
 }
 
 type Manager struct {
@@ -189,8 +189,8 @@ func (t *wrappedTool) Parameters() map[string]any {
 	return t.parameters
 }
 
-func (t *wrappedTool) Execute(ctx context.Context, args json.RawMessage, _ tool.ToolContext) (*tool.Result, error) {
+func (t *wrappedTool) Execute(ctx context.Context, args json.RawMessage, tctx tool.ToolContext) (*tool.Result, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, t.spec.ToolTimeout)
 	defer cancel()
-	return t.client.Invoke(timeoutCtx, t.spec, t.rawName, args)
+	return t.client.Invoke(timeoutCtx, t.spec, t.rawName, args, tctx)
 }

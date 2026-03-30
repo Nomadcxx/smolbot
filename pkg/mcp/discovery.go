@@ -199,7 +199,7 @@ func (c *StdioDiscoveryClient) Discover(ctx context.Context, spec ConnectionSpec
 	return tools, nil
 }
 
-func (c *StdioDiscoveryClient) Invoke(ctx context.Context, spec ConnectionSpec, toolName string, args json.RawMessage) (*tool.Result, error) {
+func (c *StdioDiscoveryClient) Invoke(ctx context.Context, spec ConnectionSpec, toolName string, args json.RawMessage, _ tool.ToolContext) (*tool.Result, error) {
 	t, err := c.getOrConnect(ctx, spec)
 	if err != nil {
 		return nil, err
