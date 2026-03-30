@@ -348,6 +348,9 @@ func writeConfig(m *model) error {
 		if m.signalCLIPath != "" {
 			signalConfig["cliPath"] = m.signalCLIPath
 		}
+		if m.signalAccount != "" {
+			signalConfig["account"] = m.signalAccount
+		}
 	}
 	if m.whatsappEnabled {
 		whatsappConfig := channels["whatsapp"].(map[string]interface{})
