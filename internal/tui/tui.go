@@ -790,6 +790,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editor.Blur()
 				return m, nil
 			}
+			m.messages.ClearSelection()
+			return m, nil
 		case "i":
 			if !m.editor.Focused() {
 				return m, m.editor.Focus()
