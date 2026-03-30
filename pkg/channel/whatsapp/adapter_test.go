@@ -246,12 +246,41 @@ func TestShouldIgnoreInboundMessageAllowsLinkedDeviceMessagesFromUser(t *testing
 	}
 }
 
+func TestAdapterStatusTransitionsOnDisconnectAndReconnect(t *testing.T) {
+	seam := &fakeSeam{}
+	adapter := NewAdapter(seam)
+
+	if err := adapter.Start(context.Background(), func(context.Context, channel.InboundMessage) {}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if s, _ := adapter.Status(context.Background()); s.State != "connected" {
+		t.Fatalf("expected connected after Start, got %s", s.State)
+	}
+
+	if seam.onDisconnect == nil {
+		t.Fatal("expected Start to register a disconnect callback on the seam")
+	}
+
+	seam.onDisconnect()
+	if s, _ := adapter.Status(context.Background()); s.State != "disconnected" {
+		t.Fatalf("expected disconnected after disconnect event, got %s", s.State)
+	}
+
+	seam.onReconnect()
+	if s, _ := adapter.Status(context.Background()); s.State != "connected" {
+		t.Fatalf("expected connected after reconnect event, got %s", s.State)
+	}
+}
+
 type fakeSeam struct {
 	sendCalls    []sendCall
 	startFn      func(context.Context, func(rawInboundMessage) error) error
 	loginFn      func(context.Context, func(loginUpdate) error) error
 	stopped      bool
 	loginUpdates []loginUpdate
+	onDisconnect func()
+	onReconnect  func()
 }
 
 type sendCall struct {
@@ -285,4 +314,9 @@ func (f *fakeSeam) Login(ctx context.Context, report func(loginUpdate) error) er
 		return report(update)
 	}
 	return f.loginFn(ctx, wrapped)
+}
+
+func (f *fakeSeam) SetConnectionStateHandler(onDisconnect, onReconnect func()) {
+	f.onDisconnect = onDisconnect
+	f.onReconnect = onReconnect
 }
