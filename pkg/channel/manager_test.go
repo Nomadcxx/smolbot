@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManager(t *testing.T) {
@@ -190,5 +191,51 @@ func TestManagerStartReturnsErrorWhenNoInboundHandlerSet(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "SetInboundHandler") {
 		t.Fatalf("unexpected error message %q", err.Error())
+	}
+}
+
+func TestManagerWatchFiresCallbackForDeadChannels(t *testing.T) {
+	manager := NewManager()
+	dead := &fakeChannel{name: "signal", status: Status{State: "disconnected", Detail: "offline"}}
+	live := &fakeChannel{name: "whatsapp", status: Status{State: "connected"}}
+	manager.Register(dead)
+	manager.Register(live)
+
+	notified := make(chan string, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go manager.Watch(ctx, 20*time.Millisecond, func(name string, _ Status) {
+		notified <- name
+		cancel()
+	})
+
+	select {
+	case got := <-notified:
+		if got != "signal" {
+			t.Fatalf("expected dead channel %q to be reported, got %q", "signal", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Watch did not fire callback within 2 seconds")
+	}
+}
+
+func TestManagerWatchDoesNotFireForConnectedChannels(t *testing.T) {
+	manager := NewManager()
+	manager.Register(&fakeChannel{name: "discord", status: Status{State: "connected"}})
+
+	fired := make(chan struct{}, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	go manager.Watch(ctx, 20*time.Millisecond, func(string, Status) {
+		fired <- struct{}{}
+	})
+
+	<-ctx.Done()
+	select {
+	case <-fired:
+		t.Fatal("Watch should not fire for connected channels")
+	default:
 	}
 }

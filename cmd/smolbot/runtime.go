@@ -534,6 +534,9 @@ func launchDaemonImpl(ctx context.Context, opts daemonLaunchOptions) error {
 	defer func() {
 		_ = app.channels.Stop(context.Background())
 	}()
+	go app.channels.Watch(ctx, 60*time.Second, func(name string, status channel.Status) {
+		log.Printf("[channel] health-check: %s is %s (%s)", name, status.State, status.Detail)
+	})
 	bgErrCh := make(chan error, 2)
 	bgCtx, bgCancel := context.WithCancel(ctx)
 	defer bgCancel()
