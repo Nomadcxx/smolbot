@@ -1205,3 +1205,28 @@ func TestBuildRuntimeRejectsEmptyModel(t *testing.T) {
 		t.Fatalf("expected error to mention 'model', got: %v", err)
 	}
 }
+
+func TestLoadRuntimeConfigExplicitPathNotFound(t *testing.T) {
+	_, _, err := loadRuntimeConfig("/tmp/does-not-exist-smolbot-test-config.json", "", 0)
+	if err == nil {
+		t.Fatal("expected error for non-existent explicit config path, got nil")
+	}
+	if !strings.Contains(err.Error(), "config file not found") {
+		t.Fatalf("expected 'config file not found' in error, got %q", err.Error())
+	}
+}
+
+func TestDialGatewayErrorSuggestsSmolbotRun(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{}
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = 1
+
+	_, err := dialGateway(ctx, cfg)
+	if err == nil {
+		t.Fatal("expected connection error, got nil")
+	}
+	if !strings.Contains(err.Error(), "smolbot run") {
+		t.Fatalf("expected 'smolbot run' hint in error, got %q", err.Error())
+	}
+}

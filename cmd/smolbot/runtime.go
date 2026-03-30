@@ -939,7 +939,10 @@ func loadRuntimeConfig(configPath, workspace string, port int) (*config.Config, 
 	)
 	if configPath != "" {
 		cfg, err = config.Load(configPath)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, nil, fmt.Errorf("config file not found: %s — run 'smolbot onboard' to create one", configPath)
+			}
 			return nil, nil, err
 		}
 	}
@@ -1369,5 +1372,5 @@ func dialGateway(ctx context.Context, cfg *config.Config) (*websocket.Conn, erro
 	if lastErr == nil {
 		lastErr = errors.New("gateway dial failed")
 	}
-	return nil, lastErr
+	return nil, fmt.Errorf("%w — is the smolbot daemon running? Try 'smolbot run'", lastErr)
 }
