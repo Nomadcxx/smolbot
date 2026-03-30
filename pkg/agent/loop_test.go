@@ -851,6 +851,75 @@ func (f *fakeLoopMemory) MaybeConsolidate(context.Context, string) error {
 	return nil
 }
 
+func TestConsumeStreamNonContiguousToolCallIndices(t *testing.T) {
+	calls := 0
+	stream := provider.NewStream(func() (*provider.StreamDelta, error) {
+		calls++
+		if calls == 1 {
+			return &provider.StreamDelta{
+				ToolCalls: []provider.ToolCall{
+					{Index: 0, ID: "tc0", Function: provider.FunctionCall{Name: "exec", Arguments: "{}"}},
+				},
+			}, nil
+		}
+		return nil, io.EOF
+	}, func() error { return nil })
+
+	loop := &AgentLoop{}
+	resp, err := loop.consumeStream(stream, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("want 1 tool call, got %d", len(resp.ToolCalls))
+	}
+
+	calls2 := 0
+	stream2 := provider.NewStream(func() (*provider.StreamDelta, error) {
+		calls2++
+		if calls2 == 1 {
+			return &provider.StreamDelta{
+				ToolCalls: []provider.ToolCall{
+					{Index: 0, ID: "tc0", Function: provider.FunctionCall{Name: "exec", Arguments: "{}"}},
+				},
+			}, nil
+		}
+		return nil, io.EOF
+	}, func() error { return nil })
+	resp2, err := loop.consumeStream(stream2, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp2.ToolCalls) != 1 {
+		t.Fatalf("want 1 tool call, got %d", len(resp2.ToolCalls))
+	}
+}
+
+func TestConsumeStreamSparseIndices(t *testing.T) {
+	deltas := []*provider.StreamDelta{
+		{ToolCalls: []provider.ToolCall{{Index: 0, ID: "tc0", Function: provider.FunctionCall{Name: "read", Arguments: "{}"}}}},
+		{ToolCalls: []provider.ToolCall{{Index: 2, ID: "tc2", Function: provider.FunctionCall{Name: "write", Arguments: "{}"}}}},
+	}
+	idx := 0
+	stream := provider.NewStream(func() (*provider.StreamDelta, error) {
+		if idx >= len(deltas) {
+			return nil, io.EOF
+		}
+		d := deltas[idx]
+		idx++
+		return d, nil
+	}, func() error { return nil })
+
+	loop := &AgentLoop{}
+	resp, err := loop.consumeStream(stream, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Errorf("want 2 tool calls, got %d: %+v", len(resp.ToolCalls), resp.ToolCalls)
+	}
+}
+
 func newTestAgentLoop(t *testing.T, p provider.Provider, tools ...tool.Tool) (*AgentLoop, *session.Store, *fakeLoopMemory) {
 	return newTestAgentLoopWithUsage(t, p, nil, tools...)
 }

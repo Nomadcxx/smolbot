@@ -556,7 +556,13 @@ func (a *AgentLoop) consumeStream(stream *provider.Stream, cb EventCallback, sup
 		}
 	}
 
-	for idx := 0; idx < len(toolCalls); idx++ {
+	maxIdx := -1
+	for idx := range toolCalls {
+		if idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+	for idx := 0; idx <= maxIdx; idx++ {
 		if call, ok := toolCalls[idx]; ok {
 			resp.ToolCalls = append(resp.ToolCalls, *call)
 		}
