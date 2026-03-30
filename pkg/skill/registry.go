@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -42,7 +43,7 @@ func NewRegistry(paths *config.Paths) (*Registry, error) {
 
 	// Load user skills from ~/.smolbot/skills/
 	userSkillsDir := paths.SkillsDir()
-	if _, err := fs.Stat(nanobotgo.EmbeddedAssets, userSkillsDir); err == nil {
+	if _, err := os.Stat(userSkillsDir); err == nil {
 		userSkills, err := LoadDir(userSkillsDir)
 		if err != nil {
 			return nil, fmt.Errorf("load user skills: %w", err)
@@ -127,12 +128,13 @@ func (r *Registry) HasResource(skillName, resource string) bool {
 
 	// Check if resource exists in skill directory
 	resourcePath := filepath.Join(filepath.Dir(skill.Path), resource)
+	var err error
 	if skill.Source == "builtin" {
-		_, err := fs.Stat(nanobotgo.EmbeddedAssets, resourcePath)
+		_, err = fs.Stat(nanobotgo.EmbeddedAssets, resourcePath)
 		return err == nil
 	}
 
-	_, err := fs.Stat(nil, resourcePath)
+	_, err = os.Stat(resourcePath)
 	return err == nil
 }
 

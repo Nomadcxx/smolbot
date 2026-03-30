@@ -172,3 +172,58 @@ func TestRegistryThreadSafety(t *testing.T) {
 		}
 	}
 }
+
+func TestNewRegistryLoadsUserSkills(t *testing.T) {
+	tmp := t.TempDir()
+	skillsDir := filepath.Join(tmp, "skills")
+	skillDir := filepath.Join(skillsDir, "my-user-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	skillContent := `---
+name: my-user-skill
+description: A test skill
+---
+# My Skill`
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	paths := config.NewPaths(tmp)
+	reg, err := NewRegistry(paths)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	if _, ok := reg.Get("my-user-skill"); !ok {
+		t.Fatal("user skill 'my-user-skill' not loaded — K3: user skills dir checked against embedded FS")
+	}
+}
+
+func TestHasResourceNonBuiltinDoesNotPanic(t *testing.T) {
+	tmp := t.TempDir()
+	skillFile := filepath.Join(tmp, "my-skill.xml")
+	os.WriteFile(skillFile, []byte(`<?xml version="1.0"?><skill><name>my-skill</name><description>test</description></skill>`), 0o644)
+	resourceFile := filepath.Join(tmp, "data.txt")
+	os.WriteFile(resourceFile, []byte("resource"), 0o644)
+
+	reg := &Registry{
+		skills: map[string]*Skill{
+			"my-skill": {
+				Name:        "my-skill",
+				Path:        skillFile,
+				Source:      "user",
+				Description: "test",
+			},
+		},
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("HasResource panicked: %v — C14: fs.Stat(nil, path) panics", r)
+		}
+	}()
+	if !reg.HasResource("my-skill", "data.txt") {
+		t.Fatal("HasResource returned false for existing resource")
+	}
+}
