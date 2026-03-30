@@ -895,6 +895,34 @@ func TestConsumeStreamNonContiguousToolCallIndices(t *testing.T) {
 	}
 }
 
+func TestAnyToMessagesNonMapItemDoesNotPanic(t *testing.T) {
+	items := []any{"not a map", 42, nil}
+	msgs := anyToMessages(items)
+	if len(msgs) != 0 {
+		t.Errorf("expected 0 messages from invalid items, got %d", len(msgs))
+	}
+}
+
+func TestAnyToMessagesNilFunctionMapDoesNotPanic(t *testing.T) {
+	items := []any{
+		map[string]any{
+			"role": "assistant",
+			"tool_calls": []any{
+				map[string]any{
+					"id": "tc1",
+				},
+			},
+		},
+	}
+	msgs := anyToMessages(items)
+	if len(msgs) != 1 {
+		t.Errorf("expected 1 message, got %d", len(msgs))
+	}
+	if len(msgs[0].ToolCalls) != 0 {
+		t.Errorf("expected 0 tool calls due to nil function map, got %d", len(msgs[0].ToolCalls))
+	}
+}
+
 func TestMessageToAnyRoundTripPreservesToolCallID(t *testing.T) {
 	original := []provider.Message{
 		{Role: "user", Content: "hello"},

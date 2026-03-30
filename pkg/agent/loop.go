@@ -714,7 +714,10 @@ func messageToAny(m provider.Message) any {
 func anyToMessages(a []any) []provider.Message {
 	result := make([]provider.Message, 0, len(a))
 	for _, item := range a {
-		m := item.(map[string]any)
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
 		msg := provider.Message{
 			Role:       getString(m, "role"),
 			Content:    m["content"],
@@ -723,8 +726,14 @@ func anyToMessages(a []any) []provider.Message {
 		}
 		if toolCalls, ok := m["tool_calls"].([]any); ok {
 			for _, tc := range toolCalls {
-				tcm := tc.(map[string]any)
+				tcm, ok := tc.(map[string]any)
+				if !ok {
+					continue
+				}
 				fn := getMap(tcm, "function")
+				if fn == nil {
+					continue
+				}
 				msg.ToolCalls = append(msg.ToolCalls, provider.ToolCall{
 					ID: getString(tcm, "id"),
 					Function: provider.FunctionCall{
