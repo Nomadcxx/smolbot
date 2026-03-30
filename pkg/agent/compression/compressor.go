@@ -22,19 +22,53 @@ func (c *Compressor) Compress(messages []any) Result {
 	}
 	
 	keepRecent := c.config.KeepRecentMessages
-	
+
 	// Separate messages by type and position
 	var systemMessages []any
 	var compressible []any
 	var recentMessages []any
-	
+
+	splitIdx := len(messages) - keepRecent
+	if splitIdx < 0 {
+		splitIdx = 0
+	}
+
+	// Scan backward from split point to avoid splitting tool_call/result pairs
+	for i := splitIdx; i < len(messages); i++ {
+		m := messages[i].(map[string]any)
+		if getRole(m) == "tool" {
+			tcID, ok := m["tool_call_id"].(string)
+			if !ok {
+				continue
+			}
+			// Find the paired assistant message and move boundary to include it
+			for j := i - 1; j >= 0; j-- {
+				if msgs, ok := messages[j].(map[string]any); ok {
+					if getRole(msgs) == "assistant" {
+						if tcs, ok := msgs["tool_calls"].([]any); ok {
+							for _, tc := range tcs {
+								if tcMap, ok := tc.(map[string]any); ok {
+									if id, ok := tcMap["id"].(string); ok && id == tcID {
+										splitIdx = j
+										goto adjusted
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+adjusted:
+
 	for i, msg := range messages {
 		m := msg.(map[string]any)
 		role := getRole(m)
-		
+
 		if role == "system" {
 			systemMessages = append(systemMessages, msg)
-		} else if i >= len(messages)-keepRecent {
+		} else if i >= splitIdx {
 			recentMessages = append(recentMessages, msg)
 		} else {
 			compressible = append(compressible, msg)
@@ -214,11 +248,18 @@ func truncateAtSentence(text string, limit int) string {
 	
 	summary := result.String()
 	// If no sentences were added (single long word/sentence without periods), truncate directly
+	cutoff := limit - 3
+	if cutoff < 0 {
+		cutoff = 0
+	}
+	if cutoff > len(text) {
+		cutoff = len(text)
+	}
 	if len(summary) == 0 {
-		summary = text[:limit-3] + "..."
+		summary = text[:cutoff] + "..."
 	} else if len(summary) < limit/2 {
 		// Fallback: character truncation if sentence boundaries gave very short result
-		summary = text[:limit-3] + "..."
+		summary = text[:cutoff] + "..."
 	} else if !strings.HasSuffix(summary, "...") {
 		summary += "..."
 	}

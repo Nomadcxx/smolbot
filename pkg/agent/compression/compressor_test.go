@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+func TestTruncateAtSentenceBoundary(t *testing.T) {
+	// Text exactly at limit should return as-is
+	text := strings.Repeat("a", 25)
+	result := truncateAtSentence(text, 25)
+	if result != text {
+		t.Errorf("expected unchanged text at limit, got %q", result)
+	}
+	
+	// Text just over limit but with no sentence structure
+	// limit=30, text=28 chars (no periods) - triggers panic if bounds check missing
+	text2 := strings.Repeat("a", 28)
+	result2 := truncateAtSentence(text2, 30)
+	if len(result2) == 0 {
+		t.Error("expected truncated result, got empty")
+	}
+	
+	// Text with sentence structure that hits boundary
+	text3 := "This is sentence one. This is sentence two."
+	result3 := truncateAtSentence(text3, 25)
+	if len(result3) == 0 {
+		t.Error("expected truncated result, got empty")
+	}
+}
+
 func TestCompressorPreservesSystemMessages(t *testing.T) {
 	c := NewCompressor(Config{Enabled: true, Mode: ModeAggressive})
 	messages := []any{
@@ -131,6 +155,60 @@ func TestCompressorModeAggressive(t *testing.T) {
 	
 	if len(userContent) > 103 { // TruncationLimitAggressive + "..."
 		t.Errorf("aggressive mode should truncate to ~100 chars, got %d", len(userContent))
+	}
+}
+
+func TestCompressorDoesNotSplitToolCallAndResultPairs(t *testing.T) {
+	// With 5 messages and keepRecent=2, splitIdx=3:
+	// Original: [0]user, [1]assistant(ok), [2]assistant(tc1), [3]tool(tc1), [4]user
+	// Without fix: splitIdx=3 -> [0,1,2] compressible, [3,4] recent
+	//   -> assistant at index 2 (compressible), tool_result at index 3 (recent) - SEPARATED!
+	// With fix: tool_result at index 3 triggers backward scan, finds paired assistant at 2, moves splitIdx to 2
+	//   -> [0,1] compressible, [2,3,4] recent -> both in recent, adjacent (gap=1)
+	messages := []any{
+		map[string]any{"role": "user", "content": "hello"},
+		map[string]any{"role": "assistant", "content": "ok"},
+		map[string]any{"role": "assistant", "content": "", "tool_calls": []any{
+			map[string]any{"id": "tc1", "function": map[string]any{"name": "exec", "arguments": "{}"}},
+		}},
+		map[string]any{"role": "tool", "content": "done", "tool_call_id": "tc1", "name": "exec"},
+		map[string]any{"role": "user", "content": "continue"},
+	}
+
+	c := NewCompressor(Config{Enabled: true, KeepRecentMessages: 2})
+	result := c.Compress(messages)
+
+	var assistantIdx, resultIdx int = -1, -1
+	for i, msg := range result.CompressedMessages {
+		m := msg.(map[string]any)
+		role := getRole(m)
+
+		if role == "tool" {
+			if tcid, ok := m["tool_call_id"].(string); ok && tcid == "tc1" {
+				resultIdx = i
+			}
+		}
+		if role == "assistant" {
+			if tcs, ok := m["tool_calls"].([]any); ok {
+				for _, tc := range tcs {
+					if tcMap, ok := tc.(map[string]any); ok {
+						if id, ok := tcMap["id"].(string); ok && id == "tc1" {
+							assistantIdx = i
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if assistantIdx == -1 || resultIdx == -1 {
+		t.Fatal("assistant or tool result missing")
+	}
+
+	// With fix: both in recent, tool_result right after assistant (indices differ by 1)
+	gap := resultIdx - assistantIdx
+	if gap != 1 {
+		t.Errorf("expected tool_result right after assistant (gap=1), got gap=%d (assistant=%d, result=%d)", gap, assistantIdx, resultIdx)
 	}
 }
 
