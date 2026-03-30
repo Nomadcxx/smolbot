@@ -215,6 +215,47 @@ func TestDefaultSoulTemplateProvidesStructuredGuidance(t *testing.T) {
 	}
 }
 
+func TestOnboardCommandRefusesIfConfigExists(t *testing.T) {
+	origCollect := collectOnboardConfig
+	origWrite := writeConfigFile
+	defer func() {
+		collectOnboardConfig = origCollect
+		writeConfigFile = origWrite
+	}()
+
+	collectOnboardConfig = func(context.Context, rootOptions) (*config.Config, error) {
+		cfg := config.DefaultConfig()
+		return &cfg, nil
+	}
+	var writeCalled bool
+	writeConfigFile = func(path string, cfg *config.Config) error {
+		writeCalled = true
+		return nil
+	}
+
+	target := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(target, []byte(`{"ok":true}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cmd := NewRootCmd("test")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"onboard", "--config", target})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when config already exists, got nil")
+	}
+	if writeCalled {
+		t.Fatal("writeConfigFile should not have been called")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected 'already exists' in error, got %q", err.Error())
+	}
+}
+
 func TestCollectOnboardConfigEnablesOllamaQuota(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "nanobot-workspace")
 	input := strings.NewReader(strings.Join([]string{
