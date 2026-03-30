@@ -51,6 +51,8 @@ type WebSearchTool struct {
 	deps WebDependencies
 }
 
+const maxSearchOutputBytes = 32 * 1024
+
 type WebFetchTool struct {
 	cfg  config.WebToolConfig
 	deps WebDependencies
@@ -147,16 +149,17 @@ func (t *WebSearchTool) Execute(ctx context.Context, raw json.RawMessage, _ Tool
 	}
 
 	var builder strings.Builder
-	for i, result := range results {
-		if i > 0 {
+	for _, result := range results {
+		entry := "Title: " + result.Title + "\nURL: " + result.URL + "\nSnippet: " + result.Snippet
+		if builder.Len() > 0 {
+			if builder.Len()+len(entry)+2 > maxSearchOutputBytes {
+				break
+			}
 			builder.WriteString("\n\n")
+		} else if len(entry) > maxSearchOutputBytes {
+			entry = entry[:maxSearchOutputBytes]
 		}
-		builder.WriteString("Title: ")
-		builder.WriteString(result.Title)
-		builder.WriteString("\nURL: ")
-		builder.WriteString(result.URL)
-		builder.WriteString("\nSnippet: ")
-		builder.WriteString(result.Snippet)
+		builder.WriteString(entry)
 	}
 	return &Result{Output: builder.String()}, nil
 }

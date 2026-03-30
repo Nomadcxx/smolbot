@@ -342,3 +342,31 @@ func TestBuildHTTPClientUsesProxyURLParsing(t *testing.T) {
 		t.Fatalf("unexpected proxy %s", got)
 	}
 }
+
+func TestWebSearchOutputIsCapped(t *testing.T) {
+	longSnippet := strings.Repeat("x", 10_000)
+	results := make([]SearchResult, 10)
+	for i := range results {
+		results[i] = SearchResult{
+			Title:   fmt.Sprintf("Result %d", i),
+			URL:     fmt.Sprintf("https://example.com/%d", i),
+			Snippet: longSnippet,
+		}
+	}
+
+	backend := &fakeSearchBackend{results: results}
+	tool := &WebSearchTool{
+		deps: WebDependencies{
+			Backends: map[string]SearchBackend{"duckduckgo": backend},
+		},
+	}
+
+	raw, _ := json.Marshal(map[string]any{"query": "test"})
+	result, err := tool.Execute(context.Background(), raw, ToolContext{})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(result.Output) > maxSearchOutputBytes+1024 {
+		t.Fatalf("output length = %d, want <= %d", len(result.Output), maxSearchOutputBytes+1024)
+	}
+}
