@@ -631,7 +631,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 
 	providerRegistry := deps.ProviderRegistry
 	if providerRegistry == nil && deps.Provider == nil {
-		providerRegistry = provider.NewRegistryWithDefaults(cfg)
+		providerRegistry = provider.NewRegistryWithOAuthStore(cfg, config.NewOAuthTokenStore(paths))
 	}
 
 	runtimeProvider := deps.Provider
