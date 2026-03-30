@@ -269,7 +269,13 @@ func detectProviderName(model, fallback string, providers map[string]config.Prov
 	sort.Strings(names)
 	for _, name := range names {
 		lowerName := strings.ToLower(name)
-		if strings.HasPrefix(lowerModel, lowerName+"/") || strings.Contains(lowerModel, lowerName) {
+		if strings.HasPrefix(lowerModel, lowerName+"/") {
+			return name
+		}
+	}
+	for _, name := range names {
+		lowerName := strings.ToLower(name)
+		if strings.Contains(lowerModel, lowerName) {
 			return name
 		}
 	}
