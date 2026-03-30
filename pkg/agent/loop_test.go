@@ -895,6 +895,22 @@ func TestConsumeStreamNonContiguousToolCallIndices(t *testing.T) {
 	}
 }
 
+func TestMessageToAnyRoundTripPreservesToolCallID(t *testing.T) {
+	original := []provider.Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "ok"},
+		{Role: "tool", Content: "result", ToolCallID: "tc-abc123", Name: "exec"},
+	}
+	anySlice := historyToAny(original)
+	restored := anyToMessages(anySlice)
+	if len(restored) != len(original) {
+		t.Fatalf("message count mismatch: got %d, want %d", len(restored), len(original))
+	}
+	if restored[2].ToolCallID != original[2].ToolCallID {
+		t.Errorf("ToolCallID: want %q, got %q", original[2].ToolCallID, restored[2].ToolCallID)
+	}
+}
+
 func TestConsumeStreamSparseIndices(t *testing.T) {
 	deltas := []*provider.StreamDelta{
 		{ToolCalls: []provider.ToolCall{{Index: 0, ID: "tc0", Function: provider.FunctionCall{Name: "read", Arguments: "{}"}}}},
