@@ -234,6 +234,15 @@ type resolvedProvider struct {
 func detectProviderName(model, fallback string, providers map[string]config.ProviderConfig, factories map[string]ProviderFactory, oauthFactories map[string]func(cfg OAuthConfig) OAuthProvider) string {
 	lowerModel := strings.ToLower(strings.TrimSpace(model))
 
+	// First, check if any OAuth-configured provider matches the model prefix
+	for providerName, providerConfig := range providers {
+		if providerConfig.AuthType == "oauth" {
+			if strings.HasPrefix(lowerModel, strings.ToLower(providerName)+"/") {
+				return providerName
+			}
+		}
+	}
+
 	if strings.HasPrefix(lowerModel, "claude-") || strings.HasPrefix(lowerModel, "anthropic/") {
 		return "anthropic"
 	}

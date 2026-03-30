@@ -370,12 +370,20 @@ func (p *MiniMaxOAuthProvider) ensureValidToken(ctx context.Context) (*TokenInfo
 	return tok, nil
 }
 
+func (p *MiniMaxOAuthProvider) chatBase() string {
+	base := strings.TrimRight(p.config.BaseURL, "/")
+	if !strings.HasSuffix(base, "/v1") {
+		base += "/v1"
+	}
+	return base
+}
+
 func (p *MiniMaxOAuthProvider) Chat(ctx context.Context, req ChatRequest) (*Response, error) {
 	tok, err := p.ensureValidToken(ctx)
 	if err != nil {
 		return nil, err
 	}
-	openai := NewOpenAIProvider(p.provider, tok.AccessToken, p.config.BaseURL, nil)
+	openai := NewOpenAIProvider(p.provider, tok.AccessToken, p.chatBase(), nil)
 	return openai.Chat(ctx, req)
 }
 
@@ -384,6 +392,6 @@ func (p *MiniMaxOAuthProvider) ChatStream(ctx context.Context, req ChatRequest) 
 	if err != nil {
 		return nil, err
 	}
-	openai := NewOpenAIProvider(p.provider, tok.AccessToken, p.config.BaseURL, nil)
+	openai := NewOpenAIProvider(p.provider, tok.AccessToken, p.chatBase(), nil)
 	return openai.ChatStream(ctx, req)
 }
