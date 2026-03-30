@@ -22,12 +22,6 @@ func newChannelsLoginCmd(opts *rootOptions) *cobra.Command {
 				}
 				return runWhatsAppLogin(cmd.Context(), *opts)
 			}
-			if channelName == "signal" {
-				if jsonOutput {
-					return runSignalLoginJSON(cmd.Context(), *opts)
-				}
-				return runSignalLogin(cmd.Context(), *opts)
-			}
 			if err := runChannelLogin(cmd.Context(), *opts, channelName, cmd.OutOrStdout()); err != nil {
 				return err
 			}
