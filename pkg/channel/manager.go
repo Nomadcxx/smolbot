@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -35,6 +36,10 @@ func (m *Manager) SetInboundHandler(handler Handler) {
 
 func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()
+	if m.inboundHandler == nil {
+		m.mu.Unlock()
+		return errors.New("channel manager: SetInboundHandler must be called before Start")
+	}
 	channels := make([]Channel, 0, len(m.channels))
 	for _, ch := range m.channels {
 		channels = append(channels, ch)

@@ -13,6 +13,7 @@ func TestManagerStartRollbackUsesBoundedContext(t *testing.T) {
 	second := &fakeChannel{name: "whatsapp", startErr: errors.New("boom")}
 	manager.Register(first)
 	manager.Register(second)
+	manager.SetInboundHandler(func(context.Context, InboundMessage) {})
 
 	err := manager.Start(context.Background())
 	if err == nil {
@@ -30,6 +31,7 @@ func TestManagerStopDeliversBoundedContext(t *testing.T) {
 	manager := NewManager()
 	fake := &fakeChannel{name: "signal"}
 	manager.Register(fake)
+	manager.SetInboundHandler(func(context.Context, InboundMessage) {})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()

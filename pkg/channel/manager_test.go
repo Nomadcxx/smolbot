@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -99,6 +100,7 @@ func TestManagerStartStopsAlreadyStartedChannelsOnFailure(t *testing.T) {
 	second := &fakeChannel{name: "whatsapp", startErr: errors.New("boom")}
 	manager.Register(first)
 	manager.Register(second)
+	manager.SetInboundHandler(func(context.Context, InboundMessage) {})
 
 	err := manager.Start(context.Background())
 	if err == nil {
@@ -176,5 +178,17 @@ func (f *fakeChannel) LoginWithUpdates(ctx context.Context, report func(Status) 
 func (f *fakeChannel) emit(msg InboundMessage) {
 	if f.handler != nil {
 		f.handler(context.Background(), msg)
+	}
+}
+
+func TestManagerStartReturnsErrorWhenNoInboundHandlerSet(t *testing.T) {
+	manager := NewManager()
+	manager.Register(&fakeChannel{name: "signal"})
+	err := manager.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected error when starting without an inbound handler")
+	}
+	if !strings.Contains(err.Error(), "SetInboundHandler") {
+		t.Fatalf("unexpected error message %q", err.Error())
 	}
 }
