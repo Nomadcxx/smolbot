@@ -2,9 +2,11 @@ package channel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 type Manager struct {
@@ -35,6 +37,10 @@ func (m *Manager) SetInboundHandler(handler Handler) {
 
 func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()
+	if m.inboundHandler == nil {
+		m.mu.Unlock()
+		return errors.New("channel manager: SetInboundHandler must be called before Start")
+	}
 	channels := make([]Channel, 0, len(m.channels))
 	for _, ch := range m.channels {
 		channels = append(channels, ch)
@@ -155,4 +161,21 @@ func (m *Manager) ChannelNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func (m *Manager) Watch(ctx context.Context, interval time.Duration, onDead func(name string, status Status)) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for name, status := range m.Statuses(ctx) {
+				if status.State != "connected" {
+					onDead(name, status)
+				}
+			}
+		}
+	}
 }

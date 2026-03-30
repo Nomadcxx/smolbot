@@ -31,6 +31,7 @@ type clientSeam interface {
 	Start(context.Context, func(rawInboundMessage) error) error
 	Stop(context.Context) error
 	Login(context.Context, func(loginUpdate) error) error
+	SetConnectionStateHandler(onDisconnect func(), onReconnect func())
 }
 
 type Adapter struct {
@@ -96,6 +97,10 @@ func (a *Adapter) Start(ctx context.Context, handler channel.Handler) error {
 	if a.enforceAllowlist && len(a.allowedChatIDs) == 0 {
 		log.Printf("[whatsapp] inbound allowlist empty; all inbound WhatsApp messages will be ignored")
 	}
+	a.seam.SetConnectionStateHandler(
+		func() { a.updateStatus("disconnected", "auto-reconnect in progress") },
+		func() { a.updateStatus("connected", "") },
+	)
 	a.updateStatus("connecting", "")
 	log.Printf("[whatsapp] adapter starting...")
 	err := a.seam.Start(ctx, func(raw rawInboundMessage) error {
@@ -262,12 +267,21 @@ func normalizeAllowedChatIDs(chatIDs []string) map[string]struct{} {
 type whatsmeowSeam struct {
 	client *whatsmeow.Client
 
-	mu        sync.Mutex
-	started   bool
-	handlerID uint32
+	mu           sync.Mutex
+	started      bool
+	handlerID    uint32
+	onDisconnect func()
+	onReconnect  func()
 
 	recentMessages map[string]time.Time
 	recentMu       sync.Mutex
+}
+
+func (s *whatsmeowSeam) SetConnectionStateHandler(onDisconnect func(), onReconnect func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onDisconnect = onDisconnect
+	s.onReconnect = onReconnect
 }
 
 const dedupWindow = 5 * time.Minute
@@ -506,6 +520,26 @@ func (s *whatsmeowSeam) handleEvent(evt any, handle func(rawInboundMessage) erro
 			Content: content,
 		}); err != nil {
 			log.Printf("[whatsapp] handle event: %v", err)
+		}
+	case *waEvents.Disconnected:
+		if typed == nil {
+			return
+		}
+		s.mu.Lock()
+		cb := s.onDisconnect
+		s.mu.Unlock()
+		if cb != nil {
+			cb()
+		}
+	case *waEvents.Connected:
+		if typed == nil {
+			return
+		}
+		s.mu.Lock()
+		cb := s.onReconnect
+		s.mu.Unlock()
+		if cb != nil {
+			cb()
 		}
 	}
 }

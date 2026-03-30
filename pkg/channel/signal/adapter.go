@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"strings"
 	"sync"
@@ -28,6 +29,8 @@ type Adapter struct {
 	cfg    config.SignalChannelConfig
 	runner commandRunner
 
+	testReconnectDelay time.Duration
+
 	mu              sync.RWMutex
 	provisioningURI string
 	connected       bool
@@ -35,7 +38,11 @@ type Adapter struct {
 	receiveDone     chan struct{}
 }
 
-const receiveStartupGrace = 50 * time.Millisecond
+const (
+	receiveStartupGrace    = 50 * time.Millisecond
+	signalReconnectInitial = 5 * time.Second
+	signalReconnectMax    = 5 * time.Minute
+)
 
 type rawInboundMessage struct {
 	Source  string `json:"source,omitempty"`
@@ -92,14 +99,57 @@ func (a *Adapter) Start(ctx context.Context, handler channel.Handler) error {
 	a.mu.Unlock()
 
 	go func() {
-		err := <-resultCh
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		a.connected = false
-		a.receiveCancel = nil
-		a.receiveDone = nil
-		if err != nil && receiveCtx.Err() == nil {
-			a.provisioningURI = ""
+		currentResultCh := resultCh
+		backoff := signalReconnectInitial
+		if a.testReconnectDelay != 0 {
+			backoff = a.testReconnectDelay
+		}
+		for {
+			err := <-currentResultCh
+
+			a.mu.Lock()
+			a.connected = false
+			if receiveCtx.Err() != nil {
+				a.receiveCancel = nil
+				a.receiveDone = nil
+				a.mu.Unlock()
+				return
+			}
+			a.mu.Unlock()
+
+			log.Printf("[signal] receive loop exited (%v); reconnecting in %s", err, backoff)
+			select {
+			case <-receiveCtx.Done():
+				a.mu.Lock()
+				a.receiveCancel = nil
+				a.receiveDone = nil
+				a.mu.Unlock()
+				return
+			case <-time.After(backoff):
+			}
+			if a.testReconnectDelay == 0 && backoff < signalReconnectMax {
+				backoff *= 2
+				if backoff > signalReconnectMax {
+					backoff = signalReconnectMax
+				}
+			}
+
+			newResultCh := make(chan error, 1)
+			newDone := make(chan struct{})
+			go func() {
+				defer close(newDone)
+				newResultCh <- a.runner.Receive(receiveCtx, a.cliPath(), args, func(raw rawInboundMessage) error {
+					handler(receiveCtx, raw.normalize())
+					return nil
+				})
+			}()
+
+			a.mu.Lock()
+			a.connected = true
+			a.receiveDone = newDone
+			a.mu.Unlock()
+
+			currentResultCh = newResultCh
 		}
 	}()
 

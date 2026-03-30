@@ -80,6 +80,11 @@ type runtimeDeps struct {
 	SetModelCallback  func(model string) (string, error)
 }
 
+type agentRunner interface {
+	ProcessDirect(ctx context.Context, req agent.Request, cb agent.EventCallback) (string, error)
+	EffectiveModel() string
+}
+
 type runtimeApp struct {
 	config           *config.Config
 	paths            *config.Paths
@@ -88,7 +93,7 @@ type runtimeApp struct {
 	mcpCleanup       func()
 	channels         *channel.Manager
 	tools            *tool.Registry
-	agent            *agent.AgentLoop
+	agent            agentRunner
 	providerRegistry *provider.Registry
 	cron             *cron.Service
 	heartbeat        *heartbeat.Service
@@ -534,6 +539,9 @@ func launchDaemonImpl(ctx context.Context, opts daemonLaunchOptions) error {
 	defer func() {
 		_ = app.channels.Stop(context.Background())
 	}()
+	go app.channels.Watch(ctx, 60*time.Second, func(name string, status channel.Status) {
+		log.Printf("[channel] health-check: %s is %s (%s)", name, status.State, status.Detail)
+	})
 	bgErrCh := make(chan error, 2)
 	bgCtx, bgCancel := context.WithCancel(ctx)
 	defer bgCancel()
@@ -1148,6 +1156,11 @@ func (a *runtimeApp) handleInbound(ctx context.Context, msg channel.InboundMessa
 		})
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[channel] panic in inbound handler for %s/%s: %v", msg.Channel, msg.ChatID, r)
+			}
+		}()
 		sessionKey := firstNonEmpty(msg.Channel+":"+msg.ChatID, msg.ChatID, "channel:unknown")
 		cb := a.channelEventCallback(msg.Channel, msg.ChatID)
 		response, err := a.agent.ProcessDirect(ctx, agent.Request{

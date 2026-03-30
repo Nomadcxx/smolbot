@@ -3,8 +3,10 @@ package cron
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -184,13 +186,87 @@ func TestService(t *testing.T) {
 			t.Fatal("expected deleted job")
 		}
 	})
+
+	t.Run("RunDue continues executing remaining jobs after one fails", func(t *testing.T) {
+		now2 := time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC)
+		errProcessor := &fakeCronProcessor{
+			result:    "ok",
+			errOnCall: 1,
+			callErr:   errors.New("job-a exploded"),
+		}
+		svc2 := NewService(ServiceDeps{
+			JobsFile:  filepath.Join(t.TempDir(), "jobs2.json"),
+			Processor: errProcessor,
+			Router:    &fakeCronRouter{},
+			Evaluator: &fakeCronEvaluator{deliver: false},
+			Now:       func() time.Time { return now2 },
+		})
+		for _, name := range []string{"job-a", "job-b"} {
+			if _, err := svc2.Handle(context.Background(), toolpkg.CronRequest{
+				Action:   "create",
+				Name:     name,
+				Schedule: now2.Add(-time.Minute).Format(time.RFC3339),
+				Timezone: "UTC",
+				Reminder: "ping",
+				Enabled:  true,
+			}); err != nil {
+				t.Fatalf("create %s: %v", name, err)
+			}
+		}
+		_ = svc2.RunDue(context.Background(), now2)
+		if errProcessor.calls != 2 {
+			t.Fatalf("expected 2 processor calls (both jobs run despite first error), got %d", errProcessor.calls)
+		}
+	})
+
+	t.Run("RunDue skips a job that is already running from a prior cycle", func(t *testing.T) {
+		now3 := time.Date(2026, 3, 20, 11, 0, 0, 0, time.UTC)
+		started := make(chan struct{}, 1)
+		unblock := make(chan struct{})
+		blockP := &blockingCronProcessor{started: started, wait: unblock}
+		svc3 := NewService(ServiceDeps{
+			JobsFile:  filepath.Join(t.TempDir(), "jobs3.json"),
+			Processor: blockP,
+			Router:    &fakeCronRouter{},
+			Evaluator: &fakeCronEvaluator{deliver: false},
+			Now:       func() time.Time { return now3 },
+		})
+		if _, err := svc3.Handle(context.Background(), toolpkg.CronRequest{
+			Action:   "create",
+			Name:     "slow-job",
+			Schedule: now3.Add(-time.Minute).Format(time.RFC3339),
+			Timezone: "UTC",
+			Reminder: "slow",
+			Enabled:  true,
+		}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+
+		done1 := make(chan error, 1)
+		go func() { done1 <- svc3.RunDue(context.Background(), now3) }()
+		<-started
+
+		if err := svc3.RunDue(context.Background(), now3); err != nil {
+			t.Fatalf("second RunDue: %v", err)
+		}
+		if blockP.calls != 1 {
+			t.Fatalf("expected 1 processor call after second RunDue, got %d", blockP.calls)
+		}
+
+		close(unblock)
+		if err := <-done1; err != nil {
+			t.Fatalf("first RunDue: %v", err)
+		}
+	})
 }
 
 type fakeCronProcessor struct {
-	calls   int
-	lastReq agent.Request
-	result  string
-	cbEvent *agent.Event
+	calls     int
+	lastReq   agent.Request
+	result    string
+	cbEvent   *agent.Event
+	errOnCall int
+	callErr   error
 }
 
 func (f *fakeCronProcessor) ProcessDirect(ctx context.Context, req agent.Request, cb agent.EventCallback) (string, error) {
@@ -198,6 +274,9 @@ func (f *fakeCronProcessor) ProcessDirect(ctx context.Context, req agent.Request
 	f.lastReq = req
 	if f.cbEvent != nil && cb != nil {
 		cb(*f.cbEvent)
+	}
+	if f.errOnCall > 0 && f.calls == f.errOnCall {
+		return "", f.callErr
 	}
 	return f.result, nil
 }
@@ -266,4 +345,20 @@ func TestPersistIsAtomicNoTempFileLeftOnSuccess(t *testing.T) {
 	if len(jobs) != 1 || jobs[0].ID != "j1" {
 		t.Fatalf("unexpected jobs: %#v", jobs)
 	}
+}
+
+type blockingCronProcessor struct {
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	wait    chan struct{}
+}
+
+func (b *blockingCronProcessor) ProcessDirect(_ context.Context, _ agent.Request, _ agent.EventCallback) (string, error) {
+	b.mu.Lock()
+	b.calls++
+	b.mu.Unlock()
+	b.started <- struct{}{}
+	<-b.wait
+	return "done", nil
 }

@@ -3,7 +3,9 @@ package channel
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestManager(t *testing.T) {
@@ -99,6 +101,7 @@ func TestManagerStartStopsAlreadyStartedChannelsOnFailure(t *testing.T) {
 	second := &fakeChannel{name: "whatsapp", startErr: errors.New("boom")}
 	manager.Register(first)
 	manager.Register(second)
+	manager.SetInboundHandler(func(context.Context, InboundMessage) {})
 
 	err := manager.Start(context.Background())
 	if err == nil {
@@ -176,5 +179,63 @@ func (f *fakeChannel) LoginWithUpdates(ctx context.Context, report func(Status) 
 func (f *fakeChannel) emit(msg InboundMessage) {
 	if f.handler != nil {
 		f.handler(context.Background(), msg)
+	}
+}
+
+func TestManagerStartReturnsErrorWhenNoInboundHandlerSet(t *testing.T) {
+	manager := NewManager()
+	manager.Register(&fakeChannel{name: "signal"})
+	err := manager.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected error when starting without an inbound handler")
+	}
+	if !strings.Contains(err.Error(), "SetInboundHandler") {
+		t.Fatalf("unexpected error message %q", err.Error())
+	}
+}
+
+func TestManagerWatchFiresCallbackForDeadChannels(t *testing.T) {
+	manager := NewManager()
+	dead := &fakeChannel{name: "signal", status: Status{State: "disconnected", Detail: "offline"}}
+	live := &fakeChannel{name: "whatsapp", status: Status{State: "connected"}}
+	manager.Register(dead)
+	manager.Register(live)
+
+	notified := make(chan string, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go manager.Watch(ctx, 20*time.Millisecond, func(name string, _ Status) {
+		notified <- name
+		cancel()
+	})
+
+	select {
+	case got := <-notified:
+		if got != "signal" {
+			t.Fatalf("expected dead channel %q to be reported, got %q", "signal", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Watch did not fire callback within 2 seconds")
+	}
+}
+
+func TestManagerWatchDoesNotFireForConnectedChannels(t *testing.T) {
+	manager := NewManager()
+	manager.Register(&fakeChannel{name: "discord", status: Status{State: "connected"}})
+
+	fired := make(chan struct{}, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	go manager.Watch(ctx, 20*time.Millisecond, func(string, Status) {
+		fired <- struct{}{}
+	})
+
+	<-ctx.Done()
+	select {
+	case <-fired:
+		t.Fatal("Watch should not fire for connected channels")
+	default:
 	}
 }

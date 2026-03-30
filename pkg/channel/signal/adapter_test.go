@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -350,4 +351,63 @@ func (f *fakeRunner) Receive(ctx context.Context, name string, args []string, ha
 		return errors.New("missing receive args")
 	}
 	return f.receiveFn(ctx, name, args, handle)
+}
+
+func TestAdapterStartReconnectsReceiveLoopAfterCrash(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	runner := &fakeRunner{
+		receiveFn: func(ctx context.Context, _ string, _ []string, _ func(rawInboundMessage) error) error {
+			mu.Lock()
+			calls++
+			currentCalls := calls
+			mu.Unlock()
+			if currentCalls == 1 {
+				select {
+				case <-time.After(100 * time.Millisecond):
+					return errors.New("signal-cli crashed")
+				case <-ctx.Done():
+					return nil
+				}
+			}
+			<-ctx.Done()
+			return nil
+		},
+	}
+	adapter := NewAdapter(config.SignalChannelConfig{
+		Account: "+15551234567",
+		CLIPath: "signal-cli",
+		DataDir: "/tmp/signal",
+	}, runner)
+	adapter.testReconnectDelay = 10 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := adapter.Start(ctx, func(context.Context, channel.InboundMessage) {}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		currentCalls := calls
+		mu.Unlock()
+		status, _ := adapter.Status(context.Background())
+		if status.State == "connected" && currentCalls >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	mu.Lock()
+	finalCalls := calls
+	mu.Unlock()
+	if finalCalls < 2 {
+		t.Fatalf("expected at least 2 receive-loop calls (initial + reconnect), got %d", finalCalls)
+	}
+	status, _ := adapter.Status(context.Background())
+	if status.State != "connected" {
+		t.Fatalf("expected connected after reconnect, got %s", status.State)
+	}
 }

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nomadcxx/smolbot/pkg/agent"
 	"github.com/Nomadcxx/smolbot/pkg/channel"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
@@ -613,4 +614,40 @@ func writeHeartbeatConfig(t *testing.T, port int, enabled bool, channelName stri
 		t.Fatalf("writeConfigFile: %v", err)
 	}
 	return path
+}
+
+func TestHandleInboundGoroutineRecoversPanic(t *testing.T) {
+	mgr := channel.NewManager()
+	mgr.SetInboundHandler(func(context.Context, channel.InboundMessage) {})
+
+	panicked := make(chan struct{})
+	app := &runtimeApp{
+		channels: mgr,
+		agent:    &panicOnProcessAgent{done: panicked},
+	}
+
+	app.handleInbound(context.Background(), channel.InboundMessage{
+		Channel: "signal",
+		ChatID:  "+15551234567",
+		Content: "trigger panic",
+	})
+
+	select {
+	case <-panicked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent was not called within 2 seconds")
+	}
+}
+
+type panicOnProcessAgent struct {
+	done chan struct{}
+}
+
+func (a *panicOnProcessAgent) ProcessDirect(context.Context, agent.Request, agent.EventCallback) (string, error) {
+	close(a.done)
+	panic("deliberate test panic in agent")
+}
+
+func (a *panicOnProcessAgent) EffectiveModel() string {
+	return "test-model"
 }
