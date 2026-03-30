@@ -332,3 +332,30 @@ func (f *fakeReadline) GetTerminalSize() (int, int, error) {
 }
 
 var _ readlineSession = (*fakeReadline)(nil)
+
+func TestNavigateHistoryReturnsSelectedEntry(t *testing.T) {
+	r := &bubbleteaReadline{
+		history: []string{"first", "second", "third"},
+		histIdx: -1,
+	}
+
+	entry := r.navigateHistory(-1)
+	if entry != "third" {
+		t.Fatalf("expected 'third', got %q", entry)
+	}
+
+	entry = r.navigateHistory(-1)
+	if entry != "second" {
+		t.Fatalf("expected 'second', got %q", entry)
+	}
+
+	entry = r.navigateHistory(1)
+	if entry != "third" {
+		t.Fatalf("expected 'third', got %q", entry)
+	}
+
+	entry = r.navigateHistory(1)
+	if entry != "" {
+		t.Fatalf("expected empty string at end of history, got %q", entry)
+	}
+}

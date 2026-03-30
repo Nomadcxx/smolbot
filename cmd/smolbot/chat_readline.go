@@ -77,13 +77,17 @@ func (r *bubbleteaReadline) ReadLine() (string, error) {
 					case 'A':
 						reader.ReadByte()
 						reader.ReadByte()
-						r.navigateHistory(-1)
+						entry := r.navigateHistory(-1)
+						currentLine.Reset()
+						currentLine.WriteString(entry)
 						r.redrawPrompt(&currentLine)
 						continue
 					case 'B':
 						reader.ReadByte()
 						reader.ReadByte()
-						r.navigateHistory(1)
+						entry := r.navigateHistory(1)
+						currentLine.Reset()
+						currentLine.WriteString(entry)
 						r.redrawPrompt(&currentLine)
 						continue
 					}
@@ -178,12 +182,12 @@ func (r *bubbleteaReadline) redrawPrompt(currentLine *strings.Builder) {
 	fmt.Fprint(r.out, "\r"+strings.Repeat(" ", r.width)+"\r> "+currentLine.String())
 }
 
-func (r *bubbleteaReadline) navigateHistory(delta int) {
+func (r *bubbleteaReadline) navigateHistory(delta int) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if len(r.history) == 0 {
-		return
+		return ""
 	}
 
 	if r.histIdx == -1 {
@@ -195,11 +199,12 @@ func (r *bubbleteaReadline) navigateHistory(delta int) {
 		newIdx = 0
 	}
 	if newIdx >= len(r.history) {
-		newIdx = len(r.history)
-		return
+		r.histIdx = len(r.history)
+		return ""
 	}
 
 	r.histIdx = newIdx
+	return r.history[newIdx]
 }
 
 func (r *bubbleteaReadline) AddToHistory(line string) {
