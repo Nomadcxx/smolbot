@@ -94,10 +94,11 @@ type ThinkingPayload struct {
 }
 
 type ToolDonePayload struct {
-	Name   string `json:"name"`
-	Output string `json:"output"`
-	Error  string `json:"error,omitempty"`
-	ID     string `json:"id"`
+	Name                    string `json:"name"`
+	Output                  string `json:"output"`
+	Error                   string `json:"error,omitempty"`
+	ID                      string `json:"id"`
+	DeliveredToRequestTarget bool   `json:"deliveredToRequestTarget,omitempty"`
 }
 
 type ChatDonePayload struct {

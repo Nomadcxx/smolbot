@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +51,30 @@ func TestResponseJSONRoundTrip(t *testing.T) {
 	}
 	if payload.RunID != "abc" {
 		t.Fatalf("unexpected run id: %q", payload.RunID)
+	}
+}
+
+func TestToolDonePayloadDecodesDeliveredField(t *testing.T) {
+	raw := []byte(`{"name":"web_search","output":"results","id":"call-1","deliveredToRequestTarget":true}`)
+	var p ToolDonePayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !p.DeliveredToRequestTarget {
+		t.Fatal("DeliveredToRequestTarget was not decoded: field missing from struct")
+	}
+	if p.Name != "web_search" || p.ID != "call-1" {
+		t.Fatalf("unexpected payload %#v", p)
+	}
+}
+
+func TestToolDonePayloadOmitsDeliveredWhenFalse(t *testing.T) {
+	p := ToolDonePayload{Name: "tool", Output: "out", ID: "id-1"}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "deliveredToRequestTarget") {
+		t.Fatalf("deliveredToRequestTarget should be omitted when false, got: %s", raw)
 	}
 }
