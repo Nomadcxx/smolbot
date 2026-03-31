@@ -39,6 +39,29 @@ func GetAvailableModels(cfg *config.Config) ([]ModelInfo, error) {
 		}
 	}
 
+	for _, providerID := range KnownProviderIDs() {
+		pc, ok := cfg.Providers[providerID]
+		if !ok {
+			continue
+		}
+		if pc.AuthType == "oauth" {
+			continue
+		}
+		if strings.TrimSpace(pc.APIKey) == "" {
+			continue
+		}
+		for _, entry := range CatalogueModels(providerID) {
+			models = appendUniqueModel(models, seen, ModelInfo{
+				ID:          entry.ID,
+				Name:        entry.Name,
+				Provider:    providerID,
+				Capability:  entry.Capability,
+				Source:      "catalogue",
+				Selectable:  true,
+			})
+		}
+	}
+
 	for _, providerID := range configuredCompatibleProviders(cfg) {
 		models = appendUniqueModel(models, seen, configuredProviderModel(cfg, providerID))
 	}
@@ -88,9 +111,12 @@ func configuredCompatibleProviders(cfg *config.Config) []string {
 
 func isConfiguredCompatibleProvider(providerID string) bool {
 	switch strings.TrimSpace(providerID) {
-	case "", "anthropic", "ollama":
+	case "", "ollama":
 		return false
 	default:
+		if len(CatalogueModels(providerID)) > 0 {
+			return false
+		}
 		return true
 	}
 }
