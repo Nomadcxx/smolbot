@@ -107,6 +107,11 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	}
 	defer a.endSession(req.SessionKey)
 	defer cancel()
+	defer func() {
+		if cleaner, ok := a.spawner.(interface{ CleanupParent(string) }); ok {
+			cleaner.CleanupParent(req.SessionKey)
+		}
+	}()
 
 	if _, err := a.sessions.GetOrCreateSession(req.SessionKey); err != nil {
 		return "", err
@@ -143,11 +148,16 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	newMessages := []provider.Message{userMessage}
 	finalResponse := ""
 	suppressFinalResponse := false
-	maxIterations := a.config.Agents.Defaults.MaxToolIterations
+	maxIterations := req.MaxIterations
+	if maxIterations <= 0 {
+		maxIterations = a.config.Agents.Defaults.MaxToolIterations
+	}
 	if maxIterations <= 0 {
 		maxIterations = 40
 	}
-	activeModel := a.config.Agents.Defaults.Model
+	activeModel := firstNonEmptyString(req.Model, a.config.Agents.Defaults.Model)
+	reasoningEffort := firstNonEmptyString(req.ReasoningEffort, a.config.Agents.Defaults.ReasoningEffort)
+	toolDefs := a.tools.DefinitionsExcluding(req.DisabledTools)
 
 	for i := 0; i < maxIterations; i++ {
 		iterationStart := time.Now()
@@ -156,10 +166,10 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 		stream, err := a.provider.ChatStream(runCtx, provider.ChatRequest{
 			Model:           activeModel,
 			Messages:        sanitized,
-			Tools:           a.tools.Definitions(),
+			Tools:           toolDefs,
 			MaxTokens:       a.config.Agents.Defaults.MaxTokens,
 			Temperature:     a.config.Agents.Defaults.Temperature,
-			ReasoningEffort: a.config.Agents.Defaults.ReasoningEffort,
+			ReasoningEffort: reasoningEffort,
 		})
 		if err != nil {
 			return "", err
@@ -207,6 +217,18 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 					Spawner:       a.spawner,
 					MessageRouter: a.messageRouter,
 					IsCronContext: req.IsCronContext,
+					EmitEvent: func(name string, payload map[string]any) {
+						switch name {
+						case string(EventAgentSpawned):
+							emit(cb, Event{Type: EventAgentSpawned, Data: payload})
+						case string(EventAgentCompleted):
+							emit(cb, Event{Type: EventAgentCompleted, Data: payload})
+						case string(EventAgentWaitStarted):
+							emit(cb, Event{Type: EventAgentWaitStarted, Data: payload})
+						case string(EventAgentWaitCompleted):
+							emit(cb, Event{Type: EventAgentWaitCompleted, Data: payload})
+						}
+					},
 				})
 				if err != nil {
 					errMsg := provider.Message{

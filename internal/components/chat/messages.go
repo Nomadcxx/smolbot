@@ -34,6 +34,7 @@ type messageCache struct {
 type MessagesModel struct {
 	messages      []ChatMessage
 	tools         []ToolCall
+	artifacts     []AgentArtifact
 	width         int
 	height        int
 	progress      string
@@ -1172,4 +1173,39 @@ func stringPtr(value string) *string {
 
 func uintPtr(value uint) *uint {
 	return &value
+}
+
+func (m *MessagesModel) AppendSpawnedAgent(agent AgentArtifactAgent) {
+	m.artifacts = append(m.artifacts, AgentArtifact{
+		Kind:   SpawnedAgentArtifact,
+		Agents: []AgentArtifactAgent{agent},
+	})
+	m.dirty = true
+	m.sync(m.viewport.AtBottom())
+}
+
+func (m *MessagesModel) AppendWaitingAgents(agents []AgentArtifactAgent) {
+	if len(agents) == 0 {
+		return
+	}
+	m.artifacts = append(m.artifacts, AgentArtifact{
+		Kind:   WaitingAgentsArtifact,
+		Count:  len(agents),
+		Agents: append([]AgentArtifactAgent(nil), agents...),
+	})
+	m.dirty = true
+	m.sync(m.viewport.AtBottom())
+}
+
+func (m *MessagesModel) AppendFinishedWaiting(agents []AgentArtifactAgent) {
+	if len(agents) == 0 {
+		return
+	}
+	m.artifacts = append(m.artifacts, AgentArtifact{
+		Kind:   FinishedWaitingArtifact,
+		Count:  len(agents),
+		Agents: append([]AgentArtifactAgent(nil), agents...),
+	})
+	m.dirty = true
+	m.sync(m.viewport.AtBottom())
 }

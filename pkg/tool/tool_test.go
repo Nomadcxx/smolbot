@@ -68,7 +68,7 @@ func TestWithToolContextRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("ContextToolContext returned ok=false, want true")
 	}
-	if got != want {
+	if got.SessionKey != want.SessionKey || got.Channel != want.Channel || got.ChatID != want.ChatID {
 		t.Fatalf("ContextToolContext() = %+v, want %+v", got, want)
 	}
 }

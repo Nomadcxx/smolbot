@@ -56,8 +56,8 @@ func TestRoutingTools(t *testing.T) {
 		if !containsString(spawner.req.DisabledTools, "message") || !containsString(spawner.req.DisabledTools, "spawn") {
 			t.Fatalf("expected recursive tools to be disabled, got %#v", spawner.req.DisabledTools)
 		}
-		if !strings.Contains(firstNonEmpty(result.Output, result.Content), "spawn:parent-session:abc123") {
-			t.Fatalf("expected child session key in output, got %#v", result)
+		if result.Error != "" {
+			t.Fatalf("expected no error, got %#v", result)
 		}
 	})
 
@@ -149,10 +149,20 @@ type fakeSpawner struct {
 	req   SpawnRequest
 }
 
+func (f *fakeSpawner) Spawn(_ context.Context, req SpawnRequest) (*SpawnResult, error) {
+	f.calls++
+	f.req = req
+	return &SpawnResult{ID: "spawned"}, nil
+}
+
 func (f *fakeSpawner) ProcessDirect(_ context.Context, req SpawnRequest) (string, error) {
 	f.calls++
 	f.req = req
 	return "child finished", nil
+}
+
+func (f *fakeSpawner) Wait(_ context.Context, _ WaitRequest) (*WaitResult, error) {
+	return &WaitResult{}, nil
 }
 
 type fakeCronService struct {

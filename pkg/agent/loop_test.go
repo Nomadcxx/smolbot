@@ -838,8 +838,16 @@ func (fakeMessageRouter) Route(context.Context, string, string, string) error { 
 
 type fakeSpawner struct{}
 
+func (fakeSpawner) Spawn(_ context.Context, _ tool.SpawnRequest) (*tool.SpawnResult, error) {
+	return &tool.SpawnResult{ID: "spawned"}, nil
+}
+
 func (fakeSpawner) ProcessDirect(context.Context, tool.SpawnRequest) (string, error) {
 	return "spawned", nil
+}
+
+func (fakeSpawner) Wait(_ context.Context, _ tool.WaitRequest) (*tool.WaitResult, error) {
+	return &tool.WaitResult{}, nil
 }
 
 type fakeLoopMemory struct {

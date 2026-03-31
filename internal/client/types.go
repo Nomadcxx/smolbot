@@ -101,3 +101,57 @@ type CronJob struct {
 	Status   string `json:"status"`
 	NextRun  string `json:"nextRun"`
 }
+
+// AgentSpawnedPayload describes a delegated child agent that has been started.
+type AgentSpawnedPayload struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	AgentType       string `json:"agentType"`
+	Model           string `json:"model,omitempty"`
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
+	Description     string `json:"description"`
+	PromptPreview   string `json:"promptPreview,omitempty"`
+}
+
+// AgentCompletedPayload describes a delegated child agent that has finished.
+type AgentCompletedPayload struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	AgentType     string `json:"agentType"`
+	Status        string `json:"status"`
+	Description   string `json:"description,omitempty"`
+	PromptPreview string `json:"promptPreview,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
+// AgentWaitAgent identifies a child agent included in a wait state.
+type AgentWaitAgent struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	AgentType string `json:"agentType"`
+}
+
+// AgentWaitStartedPayload describes outstanding delegated children.
+type AgentWaitStartedPayload struct {
+	Count  int              `json:"count"`
+	Agents []AgentWaitAgent `json:"agents"`
+}
+
+// AgentWaitResult describes a completed child agent in a wait summary.
+type AgentWaitResult struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	AgentType     string `json:"agentType"`
+	Status        string `json:"status"`
+	Description   string `json:"description,omitempty"`
+	PromptPreview string `json:"promptPreview,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
+// AgentWaitCompletedPayload describes the results of a completed wait.
+type AgentWaitCompletedPayload struct {
+	Count   int               `json:"count"`
+	Results []AgentWaitResult `json:"results"`
+}

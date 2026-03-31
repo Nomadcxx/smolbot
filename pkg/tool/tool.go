@@ -21,6 +21,7 @@ type ToolContext struct {
 	Spawner       Spawner
 	MessageRouter MessageRouter
 	IsCronContext bool
+	EmitEvent     func(name string, payload map[string]any)
 }
 
 type toolContextKey struct{}
@@ -52,15 +53,55 @@ type Tool interface {
 }
 
 type Spawner interface {
+	Spawn(ctx context.Context, req SpawnRequest) (*SpawnResult, error)
 	ProcessDirect(ctx context.Context, req SpawnRequest) (string, error)
+	Wait(ctx context.Context, req WaitRequest) (*WaitResult, error)
 }
 
 type SpawnRequest struct {
 	ParentSessionKey string
 	ChildSessionKey  string
-	Message          string
+	Description      string
+	Prompt           string
+	AgentType        string
+	Model            string
+	ReasoningEffort  string
 	MaxIterations    int
 	DisabledTools    []string
+	EmitEvent        func(name string, payload map[string]any)
+}
+
+type SpawnResult struct {
+	ID              string
+	SessionKey      string
+	Name            string
+	AgentType       string
+	Model           string
+	ReasoningEffort string
+	Description     string
+	PromptPreview   string
+}
+
+type WaitRequest struct {
+	ParentSessionKey string
+	AgentIDs         []string
+	EmitEvent        func(name string, payload map[string]any)
+}
+
+type WaitResult struct {
+	Count   int
+	Results []WaitResultItem
+}
+
+type WaitResultItem struct {
+	ID            string
+	Name          string
+	AgentType     string
+	Status        string
+	Description   string
+	PromptPreview string
+	Summary       string
+	Error         string
 }
 
 type MessageRouter interface {
@@ -104,11 +145,27 @@ func (r *Registry) SetCancelSession(fn func(sessionKey string)) {
 }
 
 func (r *Registry) Definitions() []provider.ToolDef {
+	return r.DefinitionsExcluding(nil)
+}
+
+func (r *Registry) DefinitionsExcluding(disabled []string) []provider.ToolDef {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	blocked := make(map[string]struct{}, len(disabled))
+	for _, name := range disabled {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		blocked[name] = struct{}{}
+	}
+
 	defs := make([]provider.ToolDef, 0, len(r.tools))
 	for _, tool := range r.tools {
+		if _, skip := blocked[tool.Name()]; skip {
+			continue
+		}
 		defs = append(defs, provider.ToolDef{
 			Name:        tool.Name(),
 			Description: tool.Description(),

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Nomadcxx/smolbot/pkg/agent"
@@ -94,6 +95,7 @@ type runtimeApp struct {
 	sessions         *session.Store
 	usage            *usage.Store
 	mcpCleanup       func()
+	spawner          *runtimeSpawner
 	channels         *channel.Manager
 	tools            *tool.Registry
 	agent            agentRunner
@@ -111,7 +113,16 @@ type runtimeApp struct {
 }
 
 type runtimeSpawner struct {
-	loop *agent.AgentLoop
+	loop             *agent.AgentLoop
+	process          func(context.Context, agent.Request) (string, error)
+	mu               sync.Mutex
+	runs             map[string]*runtimeChildRun
+	childrenByParent map[string]map[string]*runtimeChildRun
+	waiting          map[string]map[string]int
+	nameIdx          map[string]int
+	orderIdx         map[string]int
+	ctx              context.Context
+	cancel           context.CancelFunc
 }
 
 type modelRoutingProvider struct {
@@ -757,6 +768,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 		sessions:   sessions,
 		usage:      usageStore,
 		mcpCleanup: mcpCleanup,
+		spawner:    spawner,
 		channels:   channels,
 		tools:      tools,
 		agent:      loop,
@@ -1109,6 +1121,8 @@ func registerRuntimeTools(registry *tool.Registry, cfg *config.Config) {
 	registry.Register(tool.NewWebFetchTool(cfg.Tools.Web, tool.WebDependencies{}))
 	registry.Register(tool.NewMessageTool())
 	registry.Register(tool.NewSpawnTool(uuid.NewString))
+	registry.Register(tool.NewTaskTool(uuid.NewString))
+	registry.Register(tool.NewWaitTool())
 }
 
 func (a *runtimeApp) Close() error {
@@ -1118,6 +1132,10 @@ func (a *runtimeApp) Close() error {
 	if a.mcpCleanup != nil {
 		a.mcpCleanup()
 		a.mcpCleanup = nil
+	}
+	if a.spawner != nil {
+		a.spawner.Close()
+		a.spawner = nil
 	}
 	var errs []error
 	if a.usage != nil {
@@ -1134,15 +1152,6 @@ func (a *runtimeApp) Close() error {
 	return nil
 }
 
-func (s *runtimeSpawner) ProcessDirect(ctx context.Context, req tool.SpawnRequest) (string, error) {
-	if s == nil || s.loop == nil {
-		return "", errors.New("spawner unavailable")
-	}
-	return s.loop.ProcessDirect(ctx, agent.Request{
-		Content:    req.Message,
-		SessionKey: req.ChildSessionKey,
-	}, nil)
-}
 
 func (a *runtimeApp) handleInbound(ctx context.Context, msg channel.InboundMessage) {
 	if a == nil || a.agent == nil || a.channels == nil {

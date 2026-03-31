@@ -697,6 +697,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.messages.FinishTool(p.ID, p.Name, status, p.Output)
 			}
+		case "agent.spawned":
+			var p client.AgentSpawnedPayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			m.messages.AppendSpawnedAgent(chat.AgentArtifactAgent{
+				ID:              p.ID,
+				Name:            p.Name,
+				AgentType:       p.AgentType,
+				Model:           p.Model,
+				ReasoningEffort: p.ReasoningEffort,
+				Description:     p.Description,
+				PromptPreview:   p.PromptPreview,
+			})
+		case "agent.completed":
+			// Completion is reflected by the later finished-wait artifact to avoid
+			// creating standalone transcript noise for each child.
+		case "agent.wait.started":
+			var p client.AgentWaitStartedPayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			agents := make([]chat.AgentArtifactAgent, 0, len(p.Agents))
+			for _, agentInfo := range p.Agents {
+				agents = append(agents, chat.AgentArtifactAgent{
+					ID:        agentInfo.ID,
+					Name:      agentInfo.Name,
+					AgentType: agentInfo.AgentType,
+				})
+			}
+			m.messages.AppendWaitingAgents(agents)
+		case "agent.wait.completed":
+			var p client.AgentWaitCompletedPayload
+			_ = json.Unmarshal(msg.Event.Payload, &p)
+			agents := make([]chat.AgentArtifactAgent, 0, len(p.Results))
+			for _, result := range p.Results {
+				agents = append(agents, chat.AgentArtifactAgent{
+					ID:            result.ID,
+					Name:          result.Name,
+					AgentType:     result.AgentType,
+					Status:        result.Status,
+					Description:   result.Description,
+					PromptPreview: result.PromptPreview,
+					Summary:       result.Summary,
+					Error:         result.Error,
+				})
+			}
+			m.messages.AppendFinishedWaiting(agents)
 		case "context.compressed":
 			var p client.CompressionInfo
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {

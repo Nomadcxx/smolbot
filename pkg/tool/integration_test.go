@@ -78,8 +78,8 @@ func TestToolRegistryIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
-	if !strings.Contains(firstNonEmpty(spawnResult.Output, spawnResult.Content), "spawn:parent:child1") {
-		t.Fatalf("unexpected spawn result %#v", spawnResult)
+	if spawnResult.Error != "" {
+		t.Fatalf("unexpected spawn error: %v", spawnResult.Error)
 	}
 
 	if _, err := os.Stat(filepath.Join(workspace, "notes.txt")); err != nil {
