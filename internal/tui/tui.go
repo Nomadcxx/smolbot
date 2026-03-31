@@ -3,7 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -647,49 +647,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "chat.done":
 			var p client.ChatDonePayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal chat.done payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				mapped = ChatDoneMsg{Content: p.Content}
 			}
 		case "chat.progress":
 			var p client.ProgressPayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal chat.progress payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				mapped = ChatProgressMsg{Content: p.Content}
 			}
 		case "chat.error":
 			var p client.ChatErrorPayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal chat.error payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				mapped = ChatErrorMsg{Message: p.Message}
 			}
 		case "chat.thinking":
 			var p client.ThinkingPayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal chat.thinking payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				m.messages.SetThinking(m.messages.GetThinking() + p.Content)
 			}
 		case "chat.thinking.done":
 			var p client.ThinkingDonePayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal chat.thinking.done payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				mapped = ThinkingDoneMsg{Content: p.Content}
 			}
 		case "chat.tool.start":
 			var p client.ToolStartPayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal chat.tool.start payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				m.messages.StartTool(p.ID, p.Name, p.Input)
 			}
 		case "chat.tool.done":
 			var p client.ToolDonePayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal chat.tool.done payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				status := "done"
 				if p.Error != "" {
@@ -700,7 +700,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "context.compressed":
 			var p client.CompressionInfo
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal context.compressed payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				m.footer.SetCompression(&p)
 				m.sidebar.SetCompression(&p)
@@ -718,7 +718,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "chat.usage":
 			var p client.UsagePayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal chat.usage payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				usage := client.UsageInfo{
 					PromptTokens:     p.PromptTokens,
@@ -737,28 +737,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "channel.inbound":
 			var p client.ChannelMessagePayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal channel.inbound payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				mapped = ChannelInboundMsg{Channel: p.Channel, ChatID: p.ChatID, Content: p.Content}
 			}
 		case "channel.outbound":
 			var p client.ChannelMessagePayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal channel.outbound payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				mapped = ChannelOutboundMsg{Channel: p.Channel, ChatID: p.ChatID, Content: p.Content}
 			}
 		case "channel.progress":
 			var p client.ChannelMessagePayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal channel.progress payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				mapped = ChatProgressMsg{Content: p.Content}
 			}
 		case "channel.error":
 			var p client.ChannelErrorPayload
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
-				log.Printf("debug: failed to unmarshal channel.error payload: %v", err)
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				m.messages.AppendError("[" + p.Channel + "] " + p.Error)
 			}
