@@ -497,8 +497,17 @@ func renderRoleBlock(label, body string, accent color.Color, width int) string {
 }
 
 func subtleWash(accent color.Color) color.Color {
+	if accent == nil {
+		if t := theme.Current(); t != nil {
+			return t.Background
+		}
+		return lipgloss.Color("#111111")
+	}
 	hex := colorHex(accent)
 	if len(hex) != 7 || hex[0] != '#' {
+		if t := theme.Current(); t != nil {
+			return t.Background
+		}
 		return lipgloss.Color("#111111")
 	}
 	r, _ := strconv.ParseInt(hex[1:3], 16, 64)

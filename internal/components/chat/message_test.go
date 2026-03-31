@@ -296,6 +296,30 @@ func useSemanticToolTheme(t *testing.T) {
 	})
 }
 
+func TestToolOutputSummaryByteCapTruncatesLongLines(t *testing.T) {
+	// A single line longer than 4096 bytes — the line-count cap alone would not catch this
+	longLine := strings.Repeat("x", 5000)
+	result := toolOutputSummary("done", longLine, false)
+	if len(result) >= 5000 {
+		t.Fatalf("toolOutputSummary did not truncate a 5000-byte single line, got len=%d", len(result))
+	}
+	if !strings.Contains(result, "bytes hidden") {
+		t.Fatalf("toolOutputSummary should indicate truncation with 'bytes hidden', got: %q", result)
+	}
+}
+
+func TestSubtleWashFallbackUsesThemeBackground(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be registered")
+	}
+	// nil accent is not a valid colour — triggers the fallback path
+	got := subtleWash(nil)
+	bg := theme.Current().Background
+	if got != bg {
+		t.Fatalf("subtleWash(nil) = %v, want theme background %v", got, bg)
+	}
+}
+
 func assertRoleBlockSurface(t *testing.T, label, block, panelBg, bandBg, forbiddenBandBg string) {
 	t.Helper()
 
