@@ -244,6 +244,11 @@ func TestGetAvailableModelsLegacyAzureConfigUsesConsistentDiscoveryID(t *testing
 	}
 
 	registry := NewRegistryWithDefaults(cfg)
+	// Register "azure" as an alias for "azure_openai" since GetAvailableModels
+	// returns "azure" as the model/provider ID for legacy azure configs.
+	registry.RegisterFactory("azure", func(pc config.ProviderConfig) Provider {
+		return NewOpenAIProvider("azure", pc.APIKey, pc.APIBase, pc.ExtraHeaders)
+	})
 	resolved, err := registry.ForModel(azureRow.ID)
 	if err != nil {
 		t.Fatalf("ForModel(%q): %v", azureRow.ID, err)

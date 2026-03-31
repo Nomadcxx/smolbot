@@ -146,11 +146,8 @@ func (r *Registry) ForModelWithCtx(ctx context.Context, model string) (Provider,
 	}
 
 	factory, ok := r.factories[resolved.factoryKey]
-	if !ok && resolved.factoryKey != "openai" {
-		factory, ok = r.factories["openai"]
-	}
 	if !ok {
-		return nil, fmt.Errorf("no provider factory for %q", resolved.factoryKey)
+		return nil, fmt.Errorf("no provider factory for %q (model %q) — check your config", resolved.factoryKey, model)
 	}
 
 	provider := factory(resolved.providerConfig)
@@ -197,9 +194,6 @@ func (r *Registry) resolveProvider(model string) resolvedProvider {
 	default:
 		if !hasConfig {
 			providerConfig = config.ProviderConfig{}
-		}
-		if _, ok := r.factories[name]; !ok {
-			factoryKey = "openai"
 		}
 		if cacheKey == "" {
 			cacheKey = factoryKey

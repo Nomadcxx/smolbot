@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Nomadcxx/smolbot/pkg/config"
@@ -120,6 +121,9 @@ func TestRegistryCustomOpenAICompatibleProvider(t *testing.T) {
 	cfg.Providers["kilo"] = config.ProviderConfig{APIKey: "sk-kilo", APIBase: "https://kilo.example/v1"}
 
 	r := NewRegistry(&cfg)
+	r.RegisterFactory("kilo", func(pc config.ProviderConfig) Provider {
+		return &mockProvider{name: pc.APIBase}
+	})
 	r.RegisterFactory("openai", func(pc config.ProviderConfig) Provider {
 		return &mockProvider{name: pc.APIBase}
 	})
@@ -140,6 +144,14 @@ func TestRegistryCustomProvidersHaveDistinctCacheKeys(t *testing.T) {
 
 	callCount := 0
 	r := NewRegistry(&cfg)
+	r.RegisterFactory("kilo", func(pc config.ProviderConfig) Provider {
+		callCount++
+		return &mockProvider{name: pc.APIBase}
+	})
+	r.RegisterFactory("nova", func(pc config.ProviderConfig) Provider {
+		callCount++
+		return &mockProvider{name: pc.APIBase}
+	})
 	r.RegisterFactory("openai", func(pc config.ProviderConfig) Provider {
 		callCount++
 		return &mockProvider{name: pc.APIBase}
@@ -200,5 +212,21 @@ func TestRegistryDefaultFactories(t *testing.T) {
 	}
 	if p4.Name() != "openrouter" {
 		t.Fatalf("openrouter -> %q, want openrouter", p4.Name())
+	}
+}
+
+func TestForModelUnrecognizedModelReturnsError(t *testing.T) {
+	cfg := config.DefaultConfig()
+	r := NewRegistry(&cfg)
+	r.RegisterFactory("anthropic", func(_ config.ProviderConfig) Provider {
+		return &mockProvider{name: "anthropic"}
+	})
+
+	_, err := r.ForModel("completely-unknown-model-xyz")
+	if err == nil {
+		t.Fatal("expected error for unrecognized model, got nil")
+	}
+	if !strings.Contains(err.Error(), "completely-unknown-model-xyz") {
+		t.Fatalf("expected error to include the unknown model name, proving no silent routing: %v", err)
 	}
 }
