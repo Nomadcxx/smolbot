@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -48,15 +49,11 @@ func (m *Manager) Start(ctx context.Context) error {
 	sort.Slice(channels, func(i, j int) bool { return channels[i].Name() < channels[j].Name() })
 	m.mu.Unlock()
 
-	var started []Channel
 	for _, channel := range channels {
 		if err := channel.Start(ctx, m.inboundHandler); err != nil {
-			for _, ch := range started {
-				_ = ch.Stop(context.Background())
-			}
-			return fmt.Errorf("start channel %s: %w", channel.Name(), err)
+			log.Printf("[channel] %s failed to start (running without it): %v", channel.Name(), err)
+			continue
 		}
-		started = append(started, channel)
 		m.mu.Lock()
 		m.running[channel] = true
 		m.mu.Unlock()
