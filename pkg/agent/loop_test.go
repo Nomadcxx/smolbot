@@ -1061,4 +1061,24 @@ func waitUntil(t *testing.T, fn func() bool) {
 	t.Fatal("condition not met before timeout")
 }
 
+func TestNormalizeMessagesForSaveClearsReasoningFields(t *testing.T) {
+	msgs := []provider.Message{
+		{
+			Role:             "assistant",
+			Content:          "Here is my answer",
+			ReasoningContent: "Let me think...",
+			ThinkingBlocks: []provider.ThinkingBlock{
+				{Type: "thinking", Content: "Deep thought"},
+			},
+		},
+	}
+	normalized := normalizeMessagesForSave(msgs)
+	if normalized[0].ReasoningContent != "" {
+		t.Fatalf("ReasoningContent = %q, want empty", normalized[0].ReasoningContent)
+	}
+	if len(normalized[0].ThinkingBlocks) != 0 {
+		t.Fatalf("ThinkingBlocks = %v, want empty", normalized[0].ThinkingBlocks)
+	}
+}
+
 func stringPtr(s string) *string { return &s }

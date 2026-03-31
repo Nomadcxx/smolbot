@@ -590,6 +590,8 @@ func normalizeMessagesForSave(messages []provider.Message) []provider.Message {
 			out.Content = normalizeUserContentForSave(msg.Content)
 		case "assistant":
 			out.Content = stripThinkBlocks(msg.StringContent())
+			out.ReasoningContent = ""
+			out.ThinkingBlocks = nil
 		case "tool":
 			out.Content = truncateString(msg.StringContent(), 16000)
 		}
