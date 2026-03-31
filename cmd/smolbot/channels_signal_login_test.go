@@ -191,6 +191,39 @@ func TestRunSignalLoginCancelsCleanly(t *testing.T) {
 	}
 }
 
+func TestRunSignalLoginWithNilWriter(t *testing.T) {
+	orig := newSignalChannel
+	defer func() { newSignalChannel = orig }()
+
+	fake := &signalBlockingLoginChannel{name: "signal"}
+	newSignalChannel = func(cfg config.SignalChannelConfig) channel.Channel {
+		return fake
+	}
+
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = t.TempDir()
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+	cfg.Channels.Signal.Enabled = true
+	cfg.Channels.Signal.Account = "+15551234567"
+
+	cfgPath := writeSignalLoginConfig(t, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // immediately cancelled so LoginWithUpdates exits fast
+
+	// Passing nil out must not panic — report is initialised as no-op
+	err := runSignalLoginImpl(ctx, rootOptions{configPath: cfgPath}, nil)
+	if err == nil {
+		t.Fatal("expected error from runSignalLoginImpl with nil writer, got nil")
+	}
+	if strings.Contains(err.Error(), "nil pointer") {
+		t.Fatalf("got nil pointer dereference: %v", err)
+	}
+}
+
 func writeSignalLoginConfig(t *testing.T, cfg config.Config) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")

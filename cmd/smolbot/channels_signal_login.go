@@ -45,7 +45,7 @@ func runSignalLoginImpl(ctx context.Context, opts rootOptions, out io.Writer) er
 		return fmt.Errorf("signal channel does not support interactive login")
 	}
 
-	var report func(channel.Status) error
+	report := func(channel.Status) error { return nil }
 	if out != nil {
 		report = func(status channel.Status) error {
 			return writeSignalLoginStatus(out, renderer, status)
