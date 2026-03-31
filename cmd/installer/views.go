@@ -363,6 +363,38 @@ func (m model) renderChannels() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Requires QR code scan"))
 	b.WriteString("\n\n")
 
+	// Telegram
+	tgStyle := lipgloss.NewStyle()
+	tgMarker := "○"
+	if m.channelIndex == 2 {
+		tgMarker = "●"
+		tgStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	}
+	telegramStatus := "[ ] Disabled"
+	if m.telegramEnabled {
+		telegramStatus = "[✓] Enabled"
+	}
+	b.WriteString(tgStyle.Render(fmt.Sprintf("  %s Telegram Integration  %s", tgMarker, telegramStatus)))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Requires bot token file"))
+	b.WriteString("\n\n")
+
+	// Discord
+	dcStyle := lipgloss.NewStyle()
+	dcMarker := "○"
+	if m.channelIndex == 3 {
+		dcMarker = "●"
+		dcStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+	}
+	discordStatus := "[ ] Disabled"
+	if m.discordEnabled {
+		discordStatus = "[✓] Enabled"
+	}
+	b.WriteString(dcStyle.Render(fmt.Sprintf("  %s Discord Integration  %s", dcMarker, discordStatus)))
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Requires bot token file"))
+	b.WriteString("\n\n")
+
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Note: Can be configured later"))
 
 	return b.String()
