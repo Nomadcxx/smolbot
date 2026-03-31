@@ -367,6 +367,13 @@ func (p *MiniMaxOAuthProvider) ensureValidToken(ctx context.Context) (*TokenInfo
 		}
 		return nil, fmt.Errorf("no OAuth token available")
 	}
+	if time.Until(tok.ExpiresAt) < 5*time.Minute && tok.RefreshToken != "" {
+		refreshed, err := p.RefreshToken(ctx)
+		if err != nil {
+			return tok, nil
+		}
+		return refreshed, nil
+	}
 	return tok, nil
 }
 
