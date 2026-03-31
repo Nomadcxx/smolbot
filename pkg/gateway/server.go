@@ -38,6 +38,10 @@ type UsageSummaryReader interface {
 	CurrentProviderSummary(sessionKey, providerID, modelName string, now time.Time) (usage.ProviderSummary, error)
 }
 
+type MCPToolCounter interface {
+	ToolCounts() map[string]int
+}
+
 type ServerDeps struct {
 	Agent            AgentProcessor
 	Cron             CronLister
@@ -46,6 +50,7 @@ type ServerDeps struct {
 	Config           *config.Config
 	Usage            UsageSummaryReader
 	Skills           *skill.Registry
+	MCPTools         MCPToolCounter
 	Version          string
 	StartedAt        time.Time
 	SetModelCallback func(model string) (string, error)
@@ -59,6 +64,7 @@ type Server struct {
 	config           *config.Config
 	usage            UsageSummaryReader
 	skills           *skill.Registry
+	mcpTools         MCPToolCounter
 	version          string
 	started          time.Time
 	setModelCallback func(model string) (string, error)
@@ -128,6 +134,7 @@ func NewServer(deps ServerDeps) *Server {
 		config:           deps.Config,
 		usage:            deps.Usage,
 		skills:           deps.Skills,
+		mcpTools:         deps.MCPTools,
 		version:          firstNonEmptyString(deps.Version, "dev"),
 		started:          started,
 		setModelCallback: deps.SetModelCallback,
@@ -540,10 +547,22 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			for _, name := range names {
 				cfg := s.config.Tools.MCPServers[name]
 				command := strings.TrimSpace(strings.Join(append([]string{cfg.Command}, cfg.Args...), " "))
+				toolCount := 0
+				status := "configured"
+				if s.mcpTools != nil {
+					counts := s.mcpTools.ToolCounts()
+					if n, ok := counts[name]; ok {
+						toolCount = n
+						if n > 0 {
+							status = "connected"
+						}
+					}
+				}
 				servers = append(servers, map[string]any{
 					"name":    name,
 					"command": command,
-					"status":  "configured",
+					"status":  status,
+					"tools":   toolCount,
 				})
 			}
 		}

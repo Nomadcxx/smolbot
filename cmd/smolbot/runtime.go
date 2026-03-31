@@ -161,6 +161,7 @@ func (p *modelRoutingProvider) resolve(model string) (provider.Provider, error) 
 
 type mcpDiscoveryManager interface {
 	DiscoverAndRegister(ctx context.Context, registry *tool.Registry, servers map[string]config.MCPServerConfig) ([]string, error)
+	ToolCounts() map[string]int
 }
 
 var newMCPMgr = func() (mcpDiscoveryManager, func()) {
@@ -684,10 +685,11 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 	tools := tool.NewRegistry()
 	registerRuntimeTools(tools, cfg)
 	mcpCleanup := func() {}
+	var mcpMgr mcpDiscoveryManager
+	mcpCleanup = func() {}
 	if len(cfg.Tools.MCPServers) > 0 {
-		mgr, cleanup := newMCPMgr()
-		mcpCleanup = cleanup
-		warnings, err := mgr.DiscoverAndRegister(context.Background(), tools, cfg.Tools.MCPServers)
+		mcpMgr, mcpCleanup = newMCPMgr()
+		warnings, err := mcpMgr.DiscoverAndRegister(context.Background(), tools, cfg.Tools.MCPServers)
 		if err != nil {
 			slog.Warn("mcp discovery failed; continuing without discovered tools", "error", err)
 		} else {
@@ -767,6 +769,7 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 			Channels:  channels,
 			Config:    cfg,
 			Usage:     usageStore,
+			MCPTools:  mcpMgr,
 			Version:   version,
 			StartedAt: time.Now(),
 			SetModelCallback: func(model string) (string, error) {

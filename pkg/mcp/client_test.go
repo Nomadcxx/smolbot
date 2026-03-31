@@ -169,3 +169,26 @@ func (f *fakeDiscoveryClient) Invoke(_ context.Context, spec ConnectionSpec, too
 	f.invokeCalls++
 	return &tool.Result{Output: "remote ok"}, nil
 }
+
+func TestManagerToolCountsTrackedAfterDiscovery(t *testing.T) {
+	client := &fakeDiscoveryClient{
+		tools: []RemoteTool{
+			{Name: "tool_a", Description: "A", InputSchema: map[string]any{"type": "object"}},
+			{Name: "tool_b", Description: "B", InputSchema: map[string]any{"type": "object"}},
+		},
+	}
+	manager := NewManager(client)
+	registry := tool.NewRegistry()
+
+	_, err := manager.DiscoverAndRegister(context.Background(), registry, map[string]config.MCPServerConfig{
+		"my-server": {Type: "stdio", ToolTimeout: 5, EnabledTools: []string{"*"}},
+	})
+	if err != nil {
+		t.Fatalf("DiscoverAndRegister: %v", err)
+	}
+
+	counts := manager.ToolCounts()
+	if counts["my-server"] != 2 {
+		t.Fatalf("expected 2 tools for my-server, got %d", counts["my-server"])
+	}
+}

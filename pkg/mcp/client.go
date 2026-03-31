@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Nomadcxx/smolbot/pkg/config"
@@ -45,11 +46,16 @@ type DiscoveryClient interface {
 }
 
 type Manager struct {
-	client DiscoveryClient
+	client     DiscoveryClient
+	mu         sync.RWMutex
+	toolCounts map[string]int
 }
 
 func NewManager(client DiscoveryClient) *Manager {
-	return &Manager{client: client}
+	return &Manager{
+		client:     client,
+		toolCounts: make(map[string]int),
+	}
 }
 
 func DetectTransport(cfg config.MCPServerConfig) TransportKind {
@@ -92,6 +98,7 @@ func (m *Manager) DiscoverAndRegister(ctx context.Context, registry *tool.Regist
 		}
 
 		available := make(map[string]struct{}, len(remoteTools)*2)
+		registered := 0
 		for _, remoteTool := range remoteTools {
 			available[remoteTool.Name] = struct{}{}
 			available[WrapName(serverName, remoteTool.Name)] = struct{}{}
@@ -106,7 +113,12 @@ func (m *Manager) DiscoverAndRegister(ctx context.Context, registry *tool.Regist
 				desc:       remoteTool.Description,
 				parameters: remoteTool.InputSchema,
 			})
+			registered++
 		}
+
+		m.mu.Lock()
+		m.toolCounts[serverName] = registered
+		m.mu.Unlock()
 
 		for _, name := range cfg.EnabledTools {
 			if name == "*" {
@@ -119,6 +131,16 @@ func (m *Manager) DiscoverAndRegister(ctx context.Context, registry *tool.Regist
 	}
 
 	return warnings, nil
+}
+
+func (m *Manager) ToolCounts() map[string]int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]int, len(m.toolCounts))
+	for k, v := range m.toolCounts {
+		out[k] = v
+	}
+	return out
 }
 
 func connectionSpec(serverName string, cfg config.MCPServerConfig) ConnectionSpec {
