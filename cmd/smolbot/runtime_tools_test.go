@@ -370,7 +370,7 @@ func (f *fakeMCPDisonveryClient) Discover(_ context.Context, _ mcp.ConnectionSpe
 	return f.tools, nil
 }
 
-func (f *fakeMCPDisonveryClient) Invoke(_ context.Context, _ mcp.ConnectionSpec, toolName string, _ json.RawMessage) (*tool.Result, error) {
+func (f *fakeMCPDisonveryClient) Invoke(_ context.Context, _ mcp.ConnectionSpec, toolName string, _ json.RawMessage, _ tool.ToolContext) (*tool.Result, error) {
 	f.lastInvokedTool = toolName
 	return &tool.Result{Output: `{"echoed":"hello"}`}, nil
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1203,6 +1204,45 @@ func TestBuildRuntimeRejectsEmptyModel(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "model") {
 		t.Fatalf("expected error to mention 'model', got: %v", err)
+	}
+}
+
+func TestBuildRuntimeWiresSkillsToGateway(t *testing.T) {
+	port := freePort(t)
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = "gpt-test"
+	cfg.Agents.Defaults.Workspace = filepath.Join(t.TempDir(), "workspace")
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = port
+
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := writeConfigFile(cfgPath, &cfg); err != nil {
+		t.Fatalf("writeConfigFile: %v", err)
+	}
+
+	app, err := buildRuntime(daemonLaunchOptions{
+		ConfigPath: cfgPath,
+		Port:       port,
+	}, runtimeDeps{
+		Provider: &fakeRuntimeProvider{},
+	})
+	if err != nil {
+		t.Fatalf("buildRuntime: %v", err)
+	}
+	defer app.Close()
+
+	httpServer := httptest.NewServer(app.gateway.Handler())
+	defer httpServer.Close()
+
+	cl := connectGatewayClient(t, httpServer.URL)
+	defer cl.Close()
+
+	skills, err := cl.Skills()
+	if err != nil {
+		t.Fatalf("Skills: %v", err)
+	}
+	if len(skills) == 0 {
+		t.Fatal("skills.list returned empty list — Skills not wired to gateway in buildRuntime")
 	}
 }
 

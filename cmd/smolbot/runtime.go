@@ -772,6 +772,8 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 			MCPTools:  mcpMgr,
 			Version:   version,
 			StartedAt: time.Now(),
+			Skills:    skills,
+			Cron:      cronService,
 			SetModelCallback: func(model string) (string, error) {
 				loop.SetActiveModel(model)
 				heartbeatService.SetActiveModel(model)
