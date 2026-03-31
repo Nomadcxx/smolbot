@@ -115,7 +115,7 @@ func (s *Service) RunOnce(ctx context.Context) error {
 		value, err := s.decider.Decide(ctx)
 		if err != nil {
 			log.Printf("[heartbeat] decider failed: %v", err)
-			return nil
+			return fmt.Errorf("heartbeat decider: %w", err)
 		}
 		decision = strings.ToLower(strings.TrimSpace(value))
 	}

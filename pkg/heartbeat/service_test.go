@@ -72,8 +72,8 @@ func TestHeartbeat(t *testing.T) {
 			Evaluator: fakeEvaluator{deliver: true},
 			Router:    &fakeRouter{},
 		})
-		if err := service.RunOnce(context.Background()); err != nil {
-			t.Fatalf("RunOnce: %v", err)
+		if err := service.RunOnce(context.Background()); err == nil {
+			t.Fatal("expected error when decider fails, got nil")
 		}
 	})
 
@@ -275,8 +275,8 @@ func TestService_StructuredDecision(t *testing.T) {
 			Evaluator: fakeEvaluator{deliver: true},
 			Router:    &fakeRouter{},
 		})
-		if err := service.RunOnce(context.Background()); err != nil {
-			t.Fatalf("RunOnce: %v", err)
+		if err := service.RunOnce(context.Background()); err == nil {
+			t.Fatal("expected error when provider decider fails")
 		}
 		if processor.calls != 0 {
 			t.Fatal("expected processor skip on provider error")
