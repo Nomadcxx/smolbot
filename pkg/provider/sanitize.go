@@ -135,6 +135,44 @@ func normalizeToolCallID(id string) string {
 	return hex.EncodeToString(hash[:])[:16]
 }
 
+func closeUnclosed(s string) string {
+	var stack []byte
+	inString := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch ch {
+		case '{':
+			stack = append(stack, '}')
+		case '[':
+			stack = append(stack, ']')
+		case '}', ']':
+			if len(stack) > 0 && stack[len(stack)-1] == ch {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		s += string(stack[i])
+	}
+	return s
+}
+
 func repairJSON(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -150,6 +188,9 @@ func repairJSON(raw string) string {
 
 	repaired := malformedKeyPattern.ReplaceAllString(trimmed, `$1"$2"$3`)
 	repaired = trailingCommaPattern.ReplaceAllString(repaired, `$1`)
+	if !json.Valid([]byte(repaired)) {
+		repaired = closeUnclosed(repaired)
+	}
 	if !json.Valid([]byte(repaired)) {
 		return raw
 	}

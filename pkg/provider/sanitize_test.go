@@ -167,3 +167,20 @@ func TestSanitizeRepairsToolArguments(t *testing.T) {
 		t.Fatalf("arguments = %q, want %q", got, want)
 	}
 }
+
+func TestRepairJSONClosesUnclosedBrace(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{`{"key": "val"`, `{"key":"val"}`},
+		{`{"a":1,"b":[1,2,3`, `{"a":1,"b":[1,2,3]}`},
+		{`[{"x":1}`, `[{"x":1}]`},
+	}
+	for _, tt := range tests {
+		got := repairJSON(tt.input)
+		if got != tt.want {
+			t.Errorf("repairJSON(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
