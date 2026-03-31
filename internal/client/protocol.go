@@ -175,3 +175,30 @@ const (
 	UsageLevelHigh                       // 80-90%
 	UsageLevelCritical                   // > 90%
 )
+
+type ProviderConfigureParams struct {
+	Provider string `json:"provider"`
+	APIKey   string `json:"apiKey"`
+	APIBase  string `json:"apiBase,omitempty"`
+}
+
+type ProviderConfigurePayload struct {
+	Provider string      `json:"provider"`
+	Models   []ModelInfo `json:"models"`
+	Current  string      `json:"current"`
+}
+
+type ProviderRemoveParams struct {
+	Provider string `json:"provider"`
+}
+
+type ProviderRemovePayload struct {
+	Provider string      `json:"provider"`
+	Models   []ModelInfo `json:"models"`
+	Current  string      `json:"current"`
+}
+
+type ModelsUpdatedPayload struct {
+	Models  []ModelInfo `json:"models"`
+	Current string      `json:"current"`
+}

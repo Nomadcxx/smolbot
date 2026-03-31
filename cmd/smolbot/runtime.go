@@ -241,14 +241,7 @@ var collectOnboardConfig = func(ctx context.Context, opts rootOptions) (*config.
 }
 
 var writeConfigFile = func(path string, cfg *config.Config) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o644)
+	return config.AtomicWriteConfig(path, cfg)
 }
 
 var writeSoulFile = func(workspace, content string) error {
@@ -624,7 +617,11 @@ func launchDaemonImpl(ctx context.Context, opts daemonLaunchOptions) error {
 }
 
 func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, error) {
-	cfg, paths, err := loadRuntimeConfig(opts.ConfigPath, opts.Workspace, opts.Port)
+	configPath := opts.ConfigPath
+	if configPath == "" {
+		configPath = config.DefaultPaths().ConfigFile()
+	}
+	cfg, paths, err := loadRuntimeConfig(configPath, opts.Workspace, opts.Port)
 	if err != nil {
 		return nil, err
 	}
@@ -797,6 +794,8 @@ func buildRuntime(opts daemonLaunchOptions, deps runtimeDeps) (*runtimeApp, erro
 				heartbeatService.SetActiveModel(model)
 				return loop.EffectiveModel(), nil
 			},
+			ConfigPath: configPath,
+			Registry:   providerRegistry,
 		}),
 	}
 	if deps.CronRun != nil {

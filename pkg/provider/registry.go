@@ -167,6 +167,44 @@ func (r *Registry) CurrentModel() string {
 	return r.cfg.Agents.Defaults.Model
 }
 
+func (r *Registry) Invalidate(providerID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.cache, providerID)
+	for k := range r.cache {
+		if strings.HasPrefix(k, providerID+":") {
+			delete(r.cache, k)
+		}
+	}
+}
+
+func (r *Registry) UpdateProviderConfig(providerID string, pc config.ProviderConfig) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cfg.Providers == nil {
+		r.cfg.Providers = make(map[string]config.ProviderConfig)
+	}
+	r.cfg.Providers[providerID] = pc
+	delete(r.cache, providerID)
+	for k := range r.cache {
+		if strings.HasPrefix(k, providerID+":") {
+			delete(r.cache, k)
+		}
+	}
+}
+
+func (r *Registry) RemoveProviderConfig(providerID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.cfg.Providers, providerID)
+	delete(r.cache, providerID)
+	for k := range r.cache {
+		if strings.HasPrefix(k, providerID+":") {
+			delete(r.cache, k)
+		}
+	}
+}
+
 func (r *Registry) resolveProvider(model string) resolvedProvider {
 	fallback := ""
 	if r.cfg != nil {

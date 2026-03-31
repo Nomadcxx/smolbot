@@ -42,6 +42,11 @@ type MCPToolCounter interface {
 	ToolCounts() map[string]int
 }
 
+type ProviderRegistry interface {
+	UpdateProviderConfig(providerID string, pc config.ProviderConfig)
+	RemoveProviderConfig(providerID string)
+}
+
 type ServerDeps struct {
 	Agent            AgentProcessor
 	Cron             CronLister
@@ -54,6 +59,8 @@ type ServerDeps struct {
 	Version          string
 	StartedAt        time.Time
 	SetModelCallback func(model string) (string, error)
+	ConfigPath       string
+	Registry         ProviderRegistry
 }
 
 type Server struct {
@@ -68,6 +75,8 @@ type Server struct {
 	version          string
 	started          time.Time
 	setModelCallback func(model string) (string, error)
+	configPath       string
+	registry         ProviderRegistry
 
 	upgrader          websocket.Upgrader
 	connectedClients  atomic.Int64
@@ -138,6 +147,8 @@ func NewServer(deps ServerDeps) *Server {
 		version:          firstNonEmptyString(deps.Version, "dev"),
 		started:          started,
 		setModelCallback: deps.SetModelCallback,
+		configPath:       deps.ConfigPath,
+		registry:         deps.Registry,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
@@ -248,9 +259,9 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"version":  s.version,
 			"protocol": 1,
 			"methods": []string{
-				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set", "compact", "skills.list", "mcps.list", "cron.list",
+				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set", "compact", "skills.list", "mcps.list", "cron.list", "provider.configure", "provider.remove",
 			},
-			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.hint", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "compact.start", "compact.done", "context.compressed", "agent.spawned", "agent.completed", "agent.wait.started", "agent.wait.completed"},
+			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.hint", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "compact.start", "compact.done", "context.compressed", "agent.spawned", "agent.completed", "agent.wait.started", "agent.wait.completed", "models.updated"},
 		}, nil
 	case "status":
 		params := struct {
@@ -598,6 +609,80 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"current":  current,
 			"previous": previous,
 		}, nil
+	case "provider.configure":
+		var params struct {
+			Provider string `json:"provider"`
+			APIKey   string `json:"apiKey"`
+			APIBase  string `json:"apiBase,omitempty"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return nil, fmt.Errorf("provider.configure: bad params: %w", err)
+		}
+		if strings.TrimSpace(params.Provider) == "" {
+			return nil, fmt.Errorf("provider.configure: missing provider")
+		}
+		if strings.TrimSpace(params.APIKey) == "" {
+			return nil, fmt.Errorf("provider.configure: missing apiKey")
+		}
+		pc := config.ProviderConfig{
+			APIKey:  strings.TrimSpace(params.APIKey),
+			APIBase: strings.TrimSpace(params.APIBase),
+		}
+		if s.config.Providers == nil {
+			s.config.Providers = make(map[string]config.ProviderConfig)
+		}
+		s.config.Providers[params.Provider] = pc
+		if s.registry != nil {
+			s.registry.UpdateProviderConfig(params.Provider, pc)
+		}
+		if s.configPath != "" {
+			if err := config.AtomicWriteConfig(s.configPath, s.config); err != nil {
+				return nil, fmt.Errorf("provider.configure: write config: %w", err)
+			}
+		}
+		models, _ := provider.GetAvailableModels(s.config)
+		current := s.currentModel()
+		s.BroadcastEvent("models.updated", map[string]any{
+			"models":  clientModels(models),
+			"current": current,
+		})
+		return map[string]any{
+			"provider": params.Provider,
+			"models":   clientModels(models),
+			"current":  current,
+		}, nil
+	case "provider.remove":
+		var params struct {
+			Provider string `json:"provider"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return nil, fmt.Errorf("provider.remove: bad params: %w", err)
+		}
+		if strings.TrimSpace(params.Provider) == "" {
+			return nil, fmt.Errorf("provider.remove: missing provider")
+		}
+		if s.config.Providers != nil {
+			delete(s.config.Providers, params.Provider)
+		}
+		if s.registry != nil {
+			s.registry.RemoveProviderConfig(params.Provider)
+		}
+		if s.configPath != "" {
+			if err := config.AtomicWriteConfig(s.configPath, s.config); err != nil {
+				return nil, fmt.Errorf("provider.remove: write config: %w", err)
+			}
+		}
+		models, _ := provider.GetAvailableModels(s.config)
+		current := s.currentModel()
+		s.BroadcastEvent("models.updated", map[string]any{
+			"models":  clientModels(models),
+			"current": current,
+		})
+		return map[string]any{
+			"provider": params.Provider,
+			"models":   clientModels(models),
+			"current":  current,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown method %q", req.Method)
 	}
@@ -608,6 +693,22 @@ func timeToRFC3339(value *time.Time) string {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339)
+}
+
+func clientModels(in []provider.ModelInfo) []clientproto.ModelInfo {
+	out := make([]clientproto.ModelInfo, len(in))
+	for i, m := range in {
+		out[i] = clientproto.ModelInfo{
+			ID:          m.ID,
+			Name:        m.Name,
+			Provider:    m.Provider,
+			Description: m.Description,
+			Source:      m.Source,
+			Capability:  m.Capability,
+			Selectable:  m.Selectable,
+		}
+	}
+	return out
 }
 
 func (s *Server) writeResponse(client *clientState, id string, payload any) error {

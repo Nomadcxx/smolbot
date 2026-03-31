@@ -160,3 +160,33 @@ func (c *Client) CronJobs() ([]CronJob, error) {
 	}
 	return payload.Jobs, nil
 }
+
+func (c *Client) ProviderConfigure(providerID, apiKey, apiBase string) (ProviderConfigurePayload, error) {
+	res, err := c.sendRequest("provider.configure", ProviderConfigureParams{
+		Provider: providerID,
+		APIKey:   apiKey,
+		APIBase:  apiBase,
+	})
+	if err != nil {
+		return ProviderConfigurePayload{}, err
+	}
+	var payload ProviderConfigurePayload
+	if err := json.Unmarshal(res.Payload, &payload); err != nil {
+		return ProviderConfigurePayload{}, fmt.Errorf("provider.configure: decode response: %w", err)
+	}
+	return payload, nil
+}
+
+func (c *Client) ProviderRemove(providerID string) (ProviderRemovePayload, error) {
+	res, err := c.sendRequest("provider.remove", ProviderRemoveParams{
+		Provider: providerID,
+	})
+	if err != nil {
+		return ProviderRemovePayload{}, err
+	}
+	var payload ProviderRemovePayload
+	if err := json.Unmarshal(res.Payload, &payload); err != nil {
+		return ProviderRemovePayload{}, fmt.Errorf("provider.remove: decode response: %w", err)
+	}
+	return payload, nil
+}
