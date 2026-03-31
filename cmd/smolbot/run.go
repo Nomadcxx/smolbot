@@ -22,8 +22,5 @@ func newRunCmd(opts *rootOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", 18790, "Gateway port")
-	cmd.Flags().StringVar(&opts.workspace, "workspace", opts.workspace, "Override workspace path")
-	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Path to config file")
-	cmd.Flags().BoolVar(&opts.verbose, "verbose", opts.verbose, "Enable verbose logging")
 	return cmd
 }

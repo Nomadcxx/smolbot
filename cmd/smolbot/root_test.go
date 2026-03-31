@@ -45,9 +45,15 @@ func TestRunFlagsAndHelp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Find run: %v", err)
 	}
-	for _, flag := range []string{"port", "workspace", "config", "verbose"} {
-		if runCmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("expected run flag %q", flag)
+	if runCmd.Flags().Lookup("port") == nil {
+		t.Fatal("expected run flag port")
+	}
+	for _, flag := range []string{"workspace", "config", "verbose"} {
+		if runCmd.InheritedFlags().Lookup(flag) == nil {
+			t.Fatalf("expected inherited flag %q", flag)
+		}
+		if runCmd.LocalFlags().Lookup(flag) != nil {
+			t.Errorf("run command should not locally define inherited flag %q", flag)
 		}
 	}
 }

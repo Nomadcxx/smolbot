@@ -389,8 +389,16 @@ func (m *fakeMCPDisonveryClientManager) DiscoverAndRegister(ctx context.Context,
 	return warnings, err
 }
 
+func (m *fakeMCPDisonveryClientManager) ToolCounts() map[string]int {
+	return make(map[string]int)
+}
+
 type failingMCPDiscoveryManager struct{}
 
 func (failingMCPDiscoveryManager) DiscoverAndRegister(context.Context, *tool.Registry, map[string]config.MCPServerConfig) ([]string, error) {
 	return nil, errors.New("boom")
+}
+
+func (failingMCPDiscoveryManager) ToolCounts() map[string]int {
+	return nil
 }
