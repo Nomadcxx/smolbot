@@ -1,88 +1,285 @@
 ---
 name: whatsapp
-description: Operating procedures for the WhatsApp channel in smolbot. Use when sending messages, handling errors, or managing WhatsApp sessions.
+description: Operating procedures for the WhatsApp channel in smolbot. Use when sending messages, receiving inbound, handling errors, managing sessions, or troubleshooting WhatsApp connectivity.
 always: false
 ---
 
 ## WhatsApp Channel
 
-smolbot connects to WhatsApp via the `whatsmeow` library. All outbound and inbound messages pass through `pkg/channel/whatsapp/adapter.go`.
+smolbot connects to WhatsApp via the `whatsmeow` library (go.mau.fi/whatsmeow). All operations pass through `pkg/channel/whatsapp/adapter.go`.
+
+### Architecture Overview
+
+```
+smolbot → message tool → MessageRouter.Route() → WhatsApp Adapter.Send()
+                                                    ↓
+                                            whatsmeowSeam.Send()
+                                                    ↓
+                                            whatsmeow.Client.SendMessage()
+                                                    ↓
+                                            WhatsApp WebSocket (port 443)
+```
 
 ### Sending Messages
 
 Use the `message` tool with `channel: "whatsapp"`:
 
 ```
-message(channel="whatsapp", chat_id="15551234567", content="Hello")
+message(channel="whatsapp", chat_id="15551234567@s.whatsapp.net", content="Hello")
 ```
 
-The `message` tool routes through `MessageRouter.Route()` which dispatches to the WhatsApp adapter's `Send()` method. The adapter sends via `whatsmeow.Client.SendMessage()`.
+**JID Format**: WhatsApp identifiers are JIDs (Jabber IDs) in the format `user@server`.
 
-### Message Content
+| Server | Purpose |
+|--------|---------|
+| `s.whatsapp.net` | Regular users and devices |
+| `g.us` | Groups |
+| `c.us` | Legacy users |
+| `lid` | Hidden accounts |
 
-**Only text is supported.** Inbound messages are parsed from:
-- Direct text (`msg.GetConversation()`)
-- Extended text (`msg.GetExtendedTextMessage().GetText()`)
-- Image/video/document captions
+**For DMs**: Use `15551234567@s.whatsapp.net` (phone number + server).
 
-No media files are parsed for content — only text with optional captions.
+**For Groups**: Use the group JID, typically `123456789-987654321@g.us` (numeric ID + `-` + random suffix + `g.us`).
+
+The adapter uses `waTypes.ParseJID()` to parse the chat_id string.
+
+### Message Content Types
+
+**Inbound text extraction** (from `extractMessageText()`):
+
+The adapter extracts text from these message types in priority order:
+
+1. `GetConversation()` — Plain direct text message
+2. `GetExtendedTextMessage().GetText()` — Text with link preview
+3. `GetImageMessage().GetCaption()` — Image caption
+4. `GetVideoMessage().GetCaption()` — Video caption
+5. `GetDocumentMessage().GetCaption()` — Document caption
+
+**Important**: The adapter does NOT download or parse media content. Images, videos, audio, stickers, and documents are silently ignored unless they have captions.
+
+**Outbound**: Only plain text via `Conversation` message type. No media sending, no formatting, no buttons, no polls.
 
 ### Character Limit
 
-Messages are chunked at **4096 characters** using paragraph-aware splitting. Find the last `\n\n`, `\n`, or space before the limit. For code blocks spanning splits, close the block in the first message and reopen in the second.
+WhatsApp's limit is **4096 characters** per message. The adapter does NOT auto-chunk — the agent must split long messages manually.
+
+**Splitting strategy**: Find the last `\n\n`, `\n`, or space before 4000 chars. Prefix continuation with "(continued)".
 
 ### Formatting
 
-WhatsApp uses its own markup, **not standard Markdown**:
-- Bold: `*text*`
-- Italic: `_text_`
-- Strikethrough: `~text~`
-- Monospace: `` `text` `` (inline) or ` ```text``` ` (block)
+**Do not use standard Markdown**. WhatsApp uses its own markup:
 
-Standard Markdown (`**bold**`, `__italic__`) renders as literal characters. Never use standard Markdown in WhatsApp messages.
+| Style | Syntax |
+|-------|--------|
+| Bold | `*text*` |
+| Italic | `_text_` |
+| Strikethrough | `~text~` |
+| Monospace (inline) | `` `code` `` |
+| Monospace (block) | ` ```code``` ` |
 
-### Session Management
+Standard Markdown (`**bold**`, `__italic__`) renders as literal characters.
 
-Sessions are stored in SQLite at `~/.smolbot/whatsapp.db` by default. The session is tied to the device link established during QR login.
+### Session / Store
 
-Session states (from `adapter.Status()`):
-- `connecting` — during startup
-- `connected` — active and ready
-- `disconnected` — not connected
-- `error` — error with detail message
+Sessions are stored in SQLite at `storePath` (default: `~/.smolbot/whatsapp.db`).
 
-### Detecting Session Expiry
+**Schema tables** (from whatsmeow sqlstore):
+- `whatsmeow_sessions` — Signal Protocol sessions
+- `whatsmeow_identity_keys` — Device identity keys
+- `whatsmeow_pre_keys` — Pre-key pairs
+- `whatsmeow_sender_keys` — Group sender keys
+- `whatsmeow_contacts` — Contact names and push names
+- `whatsmeow_message_secrets` — Message decryption keys
 
-Errors are categorized in `categorizeError()`:
-- `"auth"` category — non-retryable, session expired
-- `"connection"` category — retryable, temporary disconnect
-- `"rate"` category — retryable, rate limited
+**Device identity**: After QR login, `client.Store.ID` is populated (e.g., `12345678910@s.whatsapp.net`). This identifies the linked device.
 
-If the send tool returns an error containing "logged out" or "auth", the session has expired. Tell the user:
-> "WhatsApp session expired. Please run `smolbot channels login whatsapp` on the server and scan the QR code."
-
-### Login Command
+### QR Login Flow
 
 ```
 smolbot channels login whatsapp
 ```
 
-This displays a QR code via the TUI. The user scans it with WhatsApp > Settings > Linked Devices > Link New Device.
+**State machine** (from `loginUpdateFromQR()`):
+
+| State | Detail | Meaning |
+|-------|--------|---------|
+| `qr` | QR code string | Display as QR; user scans with phone |
+| `device-link` | "Linking device..." | Pairing in progress |
+| `connected` | — | Login successful |
+| `auth-required` | "timed out" | QR expired before scan |
+| `error` | error message | Login failed |
+
+**QR login sequence** (from `whatsmeowSeam.Login()`):
+1. Call `client.GetQRChannel(ctx)` — MUST be before Connect()
+2. Call `client.Connect()`
+3. QR codes arrive as `{Event: "code", Code: "..."}` in the channel
+4. User scans with WhatsApp > Settings > Linked Devices > Link New Device
+5. On success: `PairSuccess` → state `connected`
+6. On timeout: `QRChannelTimeout` → state `auth-required`
+7. On error: `QRChannelEventError` → state `error`
+
+**JSON output** (for installer):
+```
+smolbot channels login whatsapp --json
+```
+Outputs newline-delimited JSON events to stdout.
+
+### Connection Management
+
+**Auto-reconnect** is enabled:
+```go
+client.EnableAutoReconnect = true
+```
+
+**Reconnection behavior**:
+- Exponential backoff: 0s, 2s, 4s, 6s... (doubles on each failure)
+- `AutoReconnectHook` can return false to stop retrying
+- After `LoggedOut` or `StreamReplaced`, no auto-reconnect
+
+**Connection states**:
+- `IsConnected()` — WebSocket open (may not be authenticated)
+- `IsLoggedIn()` — Fully authenticated and ready
+
+### Event Handling
+
+The adapter registers an event handler for:
+
+**`Message`** — Inbound messages (handled)
+**`Disconnected`** — WebSocket closed → triggers `onDisconnect` callback
+**`Connected`** — Authentication complete → triggers `onReconnect` callback
+
+**Ignored** (not currently handled):
+- `Receipt` — delivery/read receipts
+- `ChatPresence` — typing, recording indicators
+- `Presence` — online/offline status
+- `GroupInfo` — group metadata changes
+- `Picture` — profile picture changes
+- `PollCreationMessage` / `PollUpdateMessage`
+- `ReactionMessage`
+- `EditedMessage`
+- `EphemeralMessage`
+
+### Error Handling
+
+**Error categorization** (from `categorizeError()`):
+
+| Category | Keywords | Retryable |
+|----------|----------|-----------|
+| `auth` | "logged out", "auth" | No |
+| `connection` | "connection", "disconnected" | Yes |
+| `timeout` | "timeout" | Yes |
+| `rate` | "rate limit" | Yes |
+| `unknown` | everything else | Yes |
+
+**Common error strings from whatsmeow**:
+- `"whatsapp login required"` — `Store.ID` is nil, not linked
+- `"not logged in"` — session expired
+- `"connection closed"` — WebSocket dropped
+- `"stream: unknown"` — protocol version mismatch
+
+**Error wrapping**:
+- Send errors: `fmt.Errorf("whatsapp send: %w", err)`
+- Connect errors: `fmt.Errorf("whatsapp connect [%s]: %w", category, err)`
+
+### Deduplication
+
+The adapter maintains a `recentMessages` map with a **5-minute sliding window** (key: message ID, value: receive time).
+
+Duplicate messages (same ID within 5 minutes) are silently dropped.
+
+**Own messages** are filtered by `shouldIgnoreInboundMessage()`:
+- Messages from bots are ignored
+- Messages from own device (same `user` and `device` in JID) are ignored
+
+### Allowlist
+
+If `AllowedChatIDs` is configured, only messages from those JIDs are processed:
+
+```go
+// Config
+{
+  "enabled": true,
+  "storePath": "~/.smolbot/whatsapp.db",
+  "allowedChatIDs": ["15551234567@s.whatsapp.net", "123456789-987654321@g.us"]
+}
+```
+
+If allowlist is empty and `enforceAllowlist=true`, all inbound is dropped (logged at INFO level).
+
+### Status Reporting
+
+Adapter status states:
+
+| State | Meaning |
+|-------|---------|
+| `connecting` | `Start()` called, connecting |
+| `connected` | WebSocket connected and authenticated |
+| `disconnected` | Not connected |
+| `error` | Error occurred; `Detail` has message |
+| `auth-required` | Login required (from `LoginWithUpdates`) |
 
 ### Rate Limiting
 
-No explicit rate limiting is implemented in smolbot. The adapter recognizes rate limit errors from whatsmeow. If rate limited:
-- Retry once after 10 seconds
-- If retry fails, back off for 60 seconds
+WhatsApp does not publish explicit rate limits. Best practices:
+- No explicit limiting in smolbot
+- If send fails with rate-related error, retry after 60s
+- Avoid sending many rapid messages to the same chat
 
-### Error Wrapping
+### Message ID Format
 
-All WhatsApp send errors are wrapped: `fmt.Errorf("whatsapp send: %w", err)`. Read the wrapped error to determine the category.
+Message IDs from inbound are strings like `"3EBXXXXXXXXXXXXXXX"`. These can be used for:
+- Deduplication (handled automatically)
+- Referencing in reactions (not implemented)
 
-### Inbound Handling
+### Detecting Session Expiry
 
-The adapter filters:
-- Own messages (via `shouldIgnoreInboundMessage()`)
-- Duplicate messages within a 5-minute sliding window
+**Programmatic detection**: Check for `auth` category errors or `"not logged in"` / `"login required"` strings.
 
-Group messages arrive from multiple senders. Track sender identity via the `ChatID` field if needed.
+**Signs of expiry**:
+- Send returns error containing "logged out" or "auth"
+- `web_whatsapp_status` (if exposed) returns `unauthenticated`
+- User reports not receiving messages
+
+**Recovery**:
+```
+smolbot channels login whatsapp
+```
+
+### Privacy Considerations
+
+- Messages are E2E encrypted by WhatsApp (smolbot cannot read them without key exchange)
+- Session store (`whatsapp.db`) contains sensitive key material — protect file permissions
+- Logging of message content should be minimal
+- Contact names are cached in store (`whatsmeow_contacts` table)
+
+### Debugging
+
+**Check if linked**:
+```go
+if client.Store.ID == nil {
+    // Not linked
+}
+```
+
+**Check connection**:
+```go
+if !client.IsConnected() {
+    // Disconnected
+}
+```
+
+**Force reconnect**:
+```go
+client.Disconnect()
+client.Connect()
+```
+
+### Relevant Files
+
+| File | Purpose |
+|------|---------|
+| `pkg/channel/whatsapp/adapter.go` | Main adapter |
+| `pkg/channel/whatsapp/adapter_test.go` | Tests with fakeSeam |
+| `cmd/smolbot/channels_whatsapp_login.go` | TUI for QR login |
+| `pkg/channel/qr/renderer.go` | QR code rendering |
+| `pkg/config/config.go` | `WhatsAppChannelConfig` struct |
