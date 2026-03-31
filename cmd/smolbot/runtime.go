@@ -45,11 +45,14 @@ type daemonLaunchOptions struct {
 }
 
 type statusReport struct {
-	Model            string
-	UptimeSeconds    int
-	Channels         []string
-	ChannelStates    map[string]map[string]string
-	ConnectedClients int
+	Model    string         `json:"model"`
+	Uptime   int            `json:"uptime"`
+	Channels []channelEntry `json:"channels"`
+}
+
+type channelEntry struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
 }
 
 type channelStatus struct {
@@ -509,12 +512,15 @@ func defaultConfigPath(opts rootOptions) string {
 }
 
 func formatStatus(report *statusReport) string {
+	channels := make([]string, 0, len(report.Channels))
+	for _, ch := range report.Channels {
+		channels = append(channels, ch.Name+"="+ch.Status)
+	}
 	return fmt.Sprintf(
-		"model: %s\nuptime: %d\nchannels: %v\nconnected clients: %d\n",
+		"model: %s\nuptime: %d\nchannels: %s\n",
 		report.Model,
-		report.UptimeSeconds,
-		report.Channels,
-		report.ConnectedClients,
+		report.Uptime,
+		strings.Join(channels, ", "),
 	)
 }
 
@@ -860,23 +866,10 @@ func fetchChannelStatusesImpl(ctx context.Context, opts rootOptions) ([]channelS
 		return nil, err
 	}
 	statuses := make([]channelStatus, 0, len(report.Channels))
-	for _, name := range report.Channels {
-		state := "registered"
-		detail := ""
-		if report.ChannelStates != nil {
-			if ch, ok := report.ChannelStates[name]; ok {
-				if s, ok := ch["state"]; ok {
-					state = s
-				}
-				if d, ok := ch["detail"]; ok {
-					detail = d
-				}
-			}
-		}
+	for _, ch := range report.Channels {
 		statuses = append(statuses, channelStatus{
-			Name:   name,
-			State:  state,
-			Detail: detail,
+			Name:  ch.Name,
+			State: ch.Status,
 		})
 	}
 	return statuses, nil
