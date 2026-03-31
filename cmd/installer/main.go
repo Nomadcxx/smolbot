@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -76,6 +77,16 @@ func newModel() model {
 		ticker:           ticker,
 	}
 
+	telegramInput := textinput.New()
+	telegramInput.Placeholder = "Path to Telegram bot token file"
+	telegramInput.CharLimit = 512
+	m.telegramTokenInput = telegramInput
+
+	discordInput := textinput.New()
+	discordInput.Placeholder = "Path to Discord bot token file"
+	discordInput.CharLimit = 512
+	m.discordTokenInput = discordInput
+
 	// Create temp log file
 	logFile, err := os.CreateTemp("", "smolbot-installer-*.log")
 	if err == nil {
@@ -134,6 +145,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSignalSetupKeys(msg)
 		case stepWhatsAppSetup:
 			return m.handleWhatsAppSetupKeys(msg)
+		case stepTelegramSetup:
+			return m.handleTelegramSetupKeys(msg)
+		case stepDiscordSetup:
+			return m.handleDiscordSetupKeys(msg)
 		case stepService:
 			return m.handleServiceKeys(msg)
 		case stepInstalling:
@@ -322,15 +337,20 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "down", "j":
-		if m.channelIndex < 2 { // Signal=0, WhatsApp=1, Telegram=2 (future)
+		if m.channelIndex < 3 {
 			m.channelIndex++
 		}
 		return m, nil
 	case " ":
-		if m.channelIndex == 0 {
+		switch m.channelIndex {
+		case 0:
 			m.signalEnabled = !m.signalEnabled
-		} else if m.channelIndex == 1 {
+		case 1:
 			m.whatsappEnabled = !m.whatsappEnabled
+		case 2:
+			m.telegramEnabled = !m.telegramEnabled
+		case 3:
+			m.discordEnabled = !m.discordEnabled
 		}
 		return m, nil
 	case "enter":
@@ -345,6 +365,16 @@ func (m model) handleChannelsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.step = stepWhatsAppSetup
 			m.whatsappStatus = "Connecting to WhatsApp..."
 			return m, startWhatsAppLinkCmd()
+		}
+		if m.telegramEnabled {
+			m.step = stepTelegramSetup
+			m.telegramTokenInput.Focus()
+			return m, nil
+		}
+		if m.discordEnabled {
+			m.step = stepDiscordSetup
+			m.discordTokenInput.Focus()
+			return m, nil
 		}
 		m.step = stepService
 		return m, nil
@@ -390,6 +420,16 @@ func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		if m.whatsappDone {
+			if m.telegramEnabled {
+				m.step = stepTelegramSetup
+				m.telegramTokenInput.Focus()
+				return m, nil
+			}
+			if m.discordEnabled {
+				m.step = stepDiscordSetup
+				m.discordTokenInput.Focus()
+				return m, nil
+			}
 			m.step = stepService
 			return m, nil
 		}
@@ -403,6 +443,16 @@ func (m model) handleWhatsAppSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.whatsappQRCode = ""
 		m.whatsappStatus = ""
 		m.whatsappError = ""
+		if m.telegramEnabled {
+			m.step = stepTelegramSetup
+			m.telegramTokenInput.Focus()
+			return m, nil
+		}
+		if m.discordEnabled {
+			m.step = stepDiscordSetup
+			m.discordTokenInput.Focus()
+			return m, nil
+		}
 		m.step = stepService
 		return m, nil
 	}
@@ -473,6 +523,16 @@ func (m model) handleSignalSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.whatsappStatus = "Connecting to WhatsApp..."
 				return m, startWhatsAppLinkCmd()
 			}
+			if m.telegramEnabled {
+				m.step = stepTelegramSetup
+				m.telegramTokenInput.Focus()
+				return m, nil
+			}
+			if m.discordEnabled {
+				m.step = stepDiscordSetup
+				m.discordTokenInput.Focus()
+				return m, nil
+			}
 			m.step = stepService
 			return m, nil
 		}
@@ -491,10 +551,95 @@ func (m model) handleSignalSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.whatsappStatus = "Connecting to WhatsApp..."
 			return m, startWhatsAppLinkCmd()
 		}
+		if m.telegramEnabled {
+			m.step = stepTelegramSetup
+			m.telegramTokenInput.Focus()
+			return m, nil
+		}
+		if m.discordEnabled {
+			m.step = stepDiscordSetup
+			m.discordTokenInput.Focus()
+			return m, nil
+		}
 		m.step = stepService
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m model) handleTelegramSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		path := strings.TrimSpace(m.telegramTokenInput.Value())
+		if path == "" {
+			m.telegramEnabled = false
+			if m.discordEnabled {
+				m.step = stepDiscordSetup
+				m.discordTokenInput.Focus()
+				return m, nil
+			}
+			m.step = stepService
+			return m, nil
+		}
+		if err := validateTelegramTokenFile(path); err != nil {
+			m.telegramTokenInput.Err = err
+			m.telegramEnabled = false
+			m.telegramTokenFile = ""
+			return m, nil
+		}
+		m.telegramTokenFile = path
+		if m.discordEnabled {
+			m.step = stepDiscordSetup
+			m.discordTokenInput.Focus()
+			return m, nil
+		}
+		m.step = stepService
+		return m, nil
+	case "esc":
+		m.telegramEnabled = false
+		m.telegramTokenFile = ""
+		if m.discordEnabled {
+			m.step = stepDiscordSetup
+			m.discordTokenInput.Focus()
+			return m, nil
+		}
+		m.step = stepService
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.telegramTokenInput, cmd = m.telegramTokenInput.Update(msg)
+		return m, cmd
+	}
+}
+
+func (m model) handleDiscordSetupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		path := strings.TrimSpace(m.discordTokenInput.Value())
+		if path == "" {
+			m.discordEnabled = false
+			m.step = stepService
+			return m, nil
+		}
+		if err := validateDiscordTokenFile(path); err != nil {
+			m.discordTokenInput.Err = err
+			m.discordEnabled = false
+			m.discordTokenFile = ""
+			return m, nil
+		}
+		m.discordTokenFile = path
+		m.step = stepService
+		return m, nil
+	case "esc":
+		m.discordEnabled = false
+		m.discordTokenFile = ""
+		m.step = stepService
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.discordTokenInput, cmd = m.discordTokenInput.Update(msg)
+		return m, cmd
+	}
 }
 
 func (m model) handleSignalPoll(msg signalPollMsg) (tea.Model, tea.Cmd) {
@@ -598,6 +743,19 @@ func (m model) handleUninstallKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) handleTaskComplete(msg taskCompleteMsg) (tea.Model, tea.Cmd) {
 	if msg.success {
 		m.tasks[msg.index].status = statusComplete
+		m.currentTaskIndex++
+
+		if m.currentTaskIndex < len(m.tasks) {
+			m.tasks[m.currentTaskIndex].status = statusRunning
+			return m, tea.Batch(m.spinner.Tick, executeTaskCmd(m.currentTaskIndex, &m))
+		}
+
+		m.step = stepComplete
+		return m, nil
+	}
+
+	if msg.skipped {
+		m.tasks[msg.index].status = statusSkipped
 		m.currentTaskIndex++
 
 		if m.currentTaskIndex < len(m.tasks) {

@@ -67,6 +67,10 @@ func (m model) View() string {
 		mainContent = m.renderSignalSetup()
 	case stepWhatsAppSetup:
 		mainContent = m.renderWhatsAppSetup()
+	case stepTelegramSetup:
+		mainContent = m.renderTelegramSetup()
+	case stepDiscordSetup:
+		mainContent = m.renderDiscordSetup()
 	case stepService:
 		mainContent = m.renderService()
 	case stepInstalling:
@@ -564,6 +568,38 @@ func (m model) renderUninstall() string {
 
 	b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("Warning: This action cannot be undone!"))
 
+	return b.String()
+}
+
+func (m model) renderTelegramSetup() string {
+	var b strings.Builder
+	b.WriteString("Telegram Setup\n\n")
+	b.WriteString("Enter the path to your Telegram bot token file.\n")
+	b.WriteString("Leave blank and press Enter to skip.\n\n")
+	b.WriteString(m.telegramTokenInput.View())
+	if m.telegramTokenInput.Err != nil {
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(
+			"Error: " + m.telegramTokenInput.Err.Error(),
+		))
+	}
+	b.WriteString("\n\nEnter: confirm  •  Esc: skip")
+	return b.String()
+}
+
+func (m model) renderDiscordSetup() string {
+	var b strings.Builder
+	b.WriteString("Discord Setup\n\n")
+	b.WriteString("Enter the path to your Discord bot token file.\n")
+	b.WriteString("Leave blank and press Enter to skip.\n\n")
+	b.WriteString(m.discordTokenInput.View())
+	if m.discordTokenInput.Err != nil {
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(
+			"Error: " + m.discordTokenInput.Err.Error(),
+		))
+	}
+	b.WriteString("\n\nEnter: confirm  •  Esc: skip")
 	return b.String()
 }
 

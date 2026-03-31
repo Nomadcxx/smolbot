@@ -23,6 +23,8 @@ const (
 	stepChannels
 	stepSignalSetup
 	stepWhatsAppSetup
+	stepTelegramSetup
+	stepDiscordSetup
 	stepService
 	stepInstalling
 	stepComplete
@@ -31,11 +33,13 @@ const (
 
 // Provider types
 const (
-	providerOllama     = "ollama"
-	providerOpenAI     = "openai"
-	providerAnthropic  = "anthropic"
-	providerAzure      = "azure"
-	providerCustom     = "custom"
+	providerOllama      = "ollama"
+	providerOpenAI      = "openai"
+	providerAnthropic   = "anthropic"
+	providerAzure       = "azure"
+	providerMiniMax     = "minimax"
+	providerMiniMaxOAuth = "minimax-portal"
+	providerCustom      = "custom"
 )
 
 var providers = []string{
@@ -43,6 +47,8 @@ var providers = []string{
 	providerOpenAI,
 	providerAnthropic,
 	providerAzure,
+	providerMiniMax,
+	providerMiniMaxOAuth,
 	providerCustom,
 }
 
@@ -61,6 +67,7 @@ const (
 type taskCompleteMsg struct {
 	index   int
 	success bool
+	skipped bool
 	err     error
 }
 
@@ -150,6 +157,19 @@ type model struct {
 	whatsappEnabled bool
 	signalCLIPath   string
 	whatsappDBPath  string
+
+	// Telegram setup state
+	telegramEnabled    bool
+	telegramTokenFile  string
+	telegramTokenInput textinput.Model
+
+	// Discord setup state
+	discordEnabled    bool
+	discordTokenFile  string
+	discordTokenInput textinput.Model
+
+	// Quota configuration
+	quotaEnabled bool
 
 	// Signal setup state
 	signalQRCode   string
