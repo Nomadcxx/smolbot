@@ -1,7 +1,9 @@
 ---
+---
 name: task-delegation
-description: When and how to use the task and wait tools to delegate sub-tasks. Use when a problem has independent sub-tasks that can be worked concurrently.
+description: "When and how to use the task and wait tools to delegate sub-tasks. Use when a problem has independent sub-tasks that can be worked concurrently."
 always: false
+---
 ---
 
 ## Task Delegation

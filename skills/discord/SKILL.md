@@ -1,7 +1,9 @@
 ---
+---
 name: discord
-description: Operating procedures for the Discord channel in smolbot. Use when sending messages, handling errors, or managing Discord bot sessions.
+description: "Operating procedures for the Discord channel in smolbot. Use when sending messages, handling errors, or managing Discord bot sessions."
 always: false
+---
 ---
 
 ## Discord Channel

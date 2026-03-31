@@ -1,7 +1,9 @@
 ---
+---
 name: skill-creator
-description: Creates new skills for smolbot. Use when the user asks you to build, create, add, or install a skill.
+description: "Creates new skills for smolbot. Use when the user asks you to build, create, add, or install a skill."
 always: false
+---
 ---
 
 # Creating Skills
@@ -12,9 +14,11 @@ A skill is a markdown file that gives the agent standing instructions for a topi
 
 ```yaml
 ---
+---
 name: <slug>
-description: <one-line description — used to decide if the skill is relevant>
+description: "<one-line description — used to decide if the skill is relevant>"
 always: false   # true = always injected; false = injected only when relevant
+---
 ---
 ```
 
@@ -38,9 +42,11 @@ The body is plain markdown. Write it as instructions to yourself: what to do, wh
 
 ```markdown
 ---
+---
 name: git-workflow
-description: Enforces commit conventions and branch naming for this repo
+description: "Enforces commit conventions and branch naming for this repo"
 always: false
+---
 ---
 
 Always use conventional commits: `feat:`, `fix:`, `docs:`, `chore:`.

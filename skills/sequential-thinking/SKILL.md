@@ -1,7 +1,9 @@
 ---
+---
 name: sequential-thinking
-description: Step-by-step reasoning with explicit revision capability. Use for complex multi-step problems, architecture decisions, debugging sequences, and any problem where earlier conclusions may need updating.
+description: "Step-by-step reasoning with explicit revision capability. Use for complex multi-step problems, architecture decisions, debugging sequences, and any problem where earlier conclusions may need updating."
 always: false
+---
 ---
 
 ## Sequential Thinking

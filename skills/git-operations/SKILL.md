@@ -1,6 +1,6 @@
 ---
 name: git-operations
-description: Common git workflows: committing, branching, rebasing, conflict resolution, undoing mistakes, PR hygiene. Use when asked to perform git operations or when about to commit/push code.
+description: Common git workflows for committing, branching, rebasing, conflict resolution, and undoing mistakes. Use when asked to perform git operations or when about to commit or push code.
 always: false
 ---
 

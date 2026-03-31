@@ -1,7 +1,9 @@
 ---
+---
 name: systematic-debugging
-description: Structured root cause analysis for bugs and unexpected behaviour. Use when encountering errors, test failures, or surprising results.
+description: "Structured root cause analysis for bugs and unexpected behaviour. Use when encountering errors, test failures, or surprising results."
 always: false
+---
 ---
 
 ## Systematic Debugging

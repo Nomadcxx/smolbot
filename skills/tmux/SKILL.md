@@ -1,6 +1,8 @@
 ---
+---
 name: tmux
-description: Manage tmux terminal sessions for persistent and multi-window terminal workflows. Use when creating detached terminal sessions, managing multiple terminal panes, or setting up persistent development environments.
+description: "Manage tmux terminal sessions for persistent and multi-window terminal workflows. Use when creating detached terminal sessions, managing multiple terminal panes, or setting up persistent development environments."
+---
 ---
 
 Use this skill when working with tmux terminal sessions.

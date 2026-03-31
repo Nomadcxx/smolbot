@@ -1,7 +1,9 @@
 ---
+---
 name: channel-triage
-description: Routing and triage across multiple messaging channels in smolbot. Use when deciding which channel to use, handling simultaneous inbound, or escalating between channels.
+description: "Routing and triage across multiple messaging channels in smolbot. Use when deciding which channel to use, handling simultaneous inbound, or escalating between channels."
 always: false
+---
 ---
 
 ## Channel Triage in smolbot

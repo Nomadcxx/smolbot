@@ -1,6 +1,8 @@
 ---
+---
 name: cron
-description: Schedule and manage periodic tasks with cron-style scheduling. Use when setting up recurring jobs, managing scheduled commands, or handling time-based automation.
+description: "Schedule and manage periodic tasks with cron-style scheduling. Use when setting up recurring jobs, managing scheduled commands, or handling time-based automation."
+---
 ---
 
 Use this skill when you need to work with cron-style job scheduling.

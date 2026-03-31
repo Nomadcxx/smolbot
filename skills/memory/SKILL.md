@@ -1,6 +1,8 @@
 ---
+---
 name: memory
-description: Store and retrieve persistent memories using HybridMemory MCP. Use when starting a session, making decisions, completing tasks, learning something new, or any time context should persist across sessions.
+description: "Store and retrieve persistent memories using HybridMemory MCP. Use when starting a session, making decisions, completing tasks, learning something new, or any time context should persist across sessions."
+---
 ---
 
 Use this skill to store and retrieve persistent memories across sessions.

@@ -1,7 +1,9 @@
 ---
+---
 name: signal
-description: Operating procedures for the Signal channel in smolbot. Use when sending messages, handling errors, or managing Signal linked devices.
+description: "Operating procedures for the Signal channel in smolbot. Use when sending messages, handling errors, or managing Signal linked devices."
 always: false
+---
 ---
 
 ## Signal Channel

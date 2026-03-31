@@ -1,7 +1,9 @@
 ---
+---
 name: code-review
-description: Review changed code for correctness, logic bugs, edge cases, security issues, and clarity. Use when asked to review a diff, PR, or specific file.
+description: "Review changed code for correctness, logic bugs, edge cases, security issues, and clarity. Use when asked to review a diff, PR, or specific file."
 always: false
+---
 ---
 
 ## Code Review

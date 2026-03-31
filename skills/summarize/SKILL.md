@@ -1,6 +1,8 @@
 ---
+---
 name: summarize
-description: Generate concise summaries of conversation content, documents, or code. Use when you need to distill key points from lengthy content or create brief overviews.
+description: "Generate concise summaries of conversation content, documents, or code. Use when you need to distill key points from lengthy content or create brief overviews."
+---
 ---
 
 Use this skill to create concise summaries of content.

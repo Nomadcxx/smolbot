@@ -1,7 +1,9 @@
 ---
+---
 name: telegram
-description: Operating procedures for the Telegram channel in smolbot. Use when sending messages, handling errors, or managing Telegram bot sessions.
+description: "Operating procedures for the Telegram channel in smolbot. Use when sending messages, handling errors, or managing Telegram bot sessions."
 always: false
+---
 ---
 
 ## Telegram Channel

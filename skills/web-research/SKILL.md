@@ -1,7 +1,9 @@
 ---
+---
 name: web-research
-description: Multi-step research workflow: form a question, search multiple angles, cross-check sources, synthesise. Use when asked to research a topic, find current information, or verify a claim.
+description: "Multi-step research workflow: form a question, search multiple angles, cross-check sources, synthesise. Use when asked to research a topic, find current information, or verify a claim."
 always: false
+---
 ---
 
 ## Web Research

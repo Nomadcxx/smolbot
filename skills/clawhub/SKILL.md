@@ -1,6 +1,8 @@
 ---
+---
 name: clawhub
-description: Interact with ClawHub registry for browsing, searching, and managing AI agent skills and tools. Use when searching for available skills, getting skill details, or managing skill installations.
+description: "Interact with ClawHub registry for browsing, searching, and managing AI agent skills and tools. Use when searching for available skills, getting skill details, or managing skill installations."
+---
 ---
 
 Use this skill when you need to interact with the ClawHub skill registry.

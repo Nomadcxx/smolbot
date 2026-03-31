@@ -1,7 +1,9 @@
 ---
+---
 name: whatsapp
-description: Operating procedures for the WhatsApp channel in smolbot. Use when sending messages, receiving inbound, handling errors, managing sessions, or troubleshooting WhatsApp connectivity.
+description: "Operating procedures for the WhatsApp channel in smolbot. Use when sending messages, receiving inbound, handling errors, managing sessions, or troubleshooting WhatsApp connectivity."
 always: false
+---
 ---
 
 ## WhatsApp Channel

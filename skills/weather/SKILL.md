@@ -1,6 +1,8 @@
 ---
+---
 name: weather
-description: Get current weather conditions and forecasts for locations. Use when checking weather for travel, planning outdoor activities, or getting weather context.
+description: "Get current weather conditions and forecasts for locations. Use when checking weather for travel, planning outdoor activities, or getting weather context."
+---
 ---
 
 Use this skill when you need weather information.
