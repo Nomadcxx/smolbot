@@ -101,7 +101,7 @@ func (s *Store) SaveMessages(sessionKey string, msgs []provider.Message) error {
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer safeRollback(tx)
 
 	if err := ensureSessionTx(tx, sessionKey); err != nil {
 		return err
@@ -127,7 +127,7 @@ func (s *Store) ReplaceMessages(sessionKey string, msgs []provider.Message) erro
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer safeRollback(tx)
 
 	if err := ensureSessionTx(tx, sessionKey); err != nil {
 		return err
@@ -319,4 +319,10 @@ func nullString(value string) any {
 		return nil
 	}
 	return value
+}
+
+func safeRollback(tx *sql.Tx) {
+	if tx != nil {
+		tx.Rollback()
+	}
 }

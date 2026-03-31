@@ -121,7 +121,7 @@ func (s *Store) DeleteBudget(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("begin delete budget transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer safeRollback(tx)
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM budget_alerts WHERE budget_id = ?`, id); err != nil {
 		return fmt.Errorf("delete budget alerts: %w", err)

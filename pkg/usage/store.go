@@ -173,7 +173,7 @@ func (s *Store) RecordCompletion(ctx context.Context, record CompletionRecord) e
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer safeRollback(tx)
 
 	if _, err := tx.ExecContext(
 		ctx,
@@ -305,4 +305,10 @@ func (r CompletionRecord) validate() error {
 		return fmt.Errorf("usage source is required")
 	}
 	return nil
+}
+
+func safeRollback(tx *sql.Tx) {
+	if tx != nil {
+		tx.Rollback()
+	}
 }
