@@ -61,16 +61,18 @@ func (m model) View() string {
 		mainContent = m.renderProvider()
 	case stepConfiguration:
 		mainContent = m.renderConfiguration()
+	case stepMiniMaxOAuth:
+		mainContent = m.renderMiniMaxOAuth()
 	case stepChannels:
 		mainContent = m.renderChannels()
 	case stepSignalSetup:
 		mainContent = m.renderSignalSetup()
-	case stepWhatsAppSetup:
-		mainContent = m.renderWhatsAppSetup()
 	case stepTelegramSetup:
 		mainContent = m.renderTelegramSetup()
 	case stepDiscordSetup:
 		mainContent = m.renderDiscordSetup()
+	case stepWhatsAppSetup:
+		mainContent = m.renderWhatsAppSetup()
 	case stepService:
 		mainContent = m.renderService()
 	case stepInstalling:
@@ -136,7 +138,9 @@ func (m model) getHelpText() string {
 	case stepProvider:
 		return "↑/↓: Navigate  •  Enter: Select  •  Esc: Back"
 	case stepConfiguration:
-		return "↑/↓: Select model  •  Enter: Confirm  •  Esc: Back"
+		return "↑/↓: Select model  •  Tab: Switch field  •  Enter: Confirm  •  Esc: Back"
+	case stepMiniMaxOAuth:
+		return "Esc: Cancel"
 	case stepChannels:
 		return "↑/↓: Navigate  •  Space: Toggle  •  Enter: Continue  •  Esc: Back"
 	case stepSignalSetup:
@@ -147,6 +151,8 @@ func (m model) getHelpText() string {
 			return "Scan QR with Signal  •  Enter: Done  •  Esc: Skip"
 		}
 		return "Enter: Start  •  Esc: Skip"
+	case stepTelegramSetup:
+		return "Enter: Continue  •  Esc: Skip"
 	case stepWhatsAppSetup:
 		if m.whatsappDone {
 			return "Enter: Continue  •  Esc: Back"
@@ -262,6 +268,8 @@ func (m model) renderProvider() string {
 		{"OpenAI", "GPT-4, GPT-3.5 (requires API key)"},
 		{"Anthropic", "Claude models (requires API key)"},
 		{"Azure OpenAI", "Enterprise OpenAI (requires endpoint + key)"},
+		{"MiniMax", "MiniMax API key authentication"},
+		{"MiniMax OAuth", "MiniMax OAuth sign-in (browser-based)"},
 		{"Custom", "OpenAI-compatible endpoint"},
 	}
 
@@ -291,11 +299,11 @@ func (m model) renderConfiguration() string {
 	b.WriteString(headerStyle.Render("Configuration"))
 	b.WriteString("\n\n")
 
-	providerNames := []string{"Ollama", "OpenAI", "Anthropic", "Azure OpenAI", "Custom"}
+	providerNames := []string{"Ollama", "OpenAI", "Anthropic", "Azure OpenAI", "MiniMax", "MiniMax OAuth", "Custom"}
 	b.WriteString(fmt.Sprintf("Provider: %s\n\n", providerNames[m.providerIndex]))
 
-	switch m.providerIndex {
-	case 0: // Ollama
+	switch m.provider {
+	case providerOllama:
 		b.WriteString("Select Default Model:\n\n")
 		if m.ollamaDetecting {
 			b.WriteString("  " + m.spinner.View() + " Detecting Ollama models...\n")
@@ -319,8 +327,109 @@ func (m model) renderConfiguration() string {
 		} else {
 			b.WriteString("  No Ollama models detected\n")
 		}
+		b.WriteString("\n")
+		b.WriteString("Ollama Account Quota:\n\n")
+		quotaMarker := "○"
+		quotaStyle := lipgloss.NewStyle()
+		if m.quotaEnabled {
+			quotaMarker = "●"
+			quotaStyle = lipgloss.NewStyle().Foreground(SuccessColor).Bold(true)
+		}
+		b.WriteString(quotaStyle.Render(fmt.Sprintf("  %s Enable quota tracking", quotaMarker)))
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).
+			Render("    Uses browser cookies for auto-discovery (Chromium/Firefox)"))
+
+	case providerOpenAI, providerAnthropic, providerMiniMax:
+		b.WriteString("API Key:\n\n")
+		if len(m.inputs) > 0 {
+			b.WriteString("  " + m.inputs[0].View())
+		}
+		b.WriteString("\n\n")
+		if m.apiKey == "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Enter your API key to continue"))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ✓ API key set — press Enter to continue"))
+		}
+
+	case providerAzure:
+		b.WriteString("API Key:\n\n")
+		if len(m.inputs) > 0 {
+			b.WriteString("  " + m.inputs[0].View())
+		}
+		b.WriteString("\n\n")
+		b.WriteString("Endpoint URL:\n\n")
+		if len(m.inputs) > 1 {
+			b.WriteString("  " + m.inputs[1].View())
+		}
+		b.WriteString("\n\n")
+		if m.apiKey == "" || m.apiEndpoint == "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Tab to switch fields — Enter to continue"))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ✓ Configuration complete — press Enter to continue"))
+		}
+
+	case providerMiniMaxOAuth:
+		b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ✓ No API key required"))
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Sign in via browser during first use"))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Press Enter to continue"))
+
+	case providerCustom:
+		b.WriteString("Endpoint URL:\n\n")
+		if len(m.inputs) > 0 {
+			b.WriteString("  " + m.inputs[0].View())
+		}
+		b.WriteString("\n\n")
+		b.WriteString("API Key (optional):\n\n")
+		if len(m.inputs) > 1 {
+			b.WriteString("  " + m.inputs[1].View())
+		}
+		b.WriteString("\n\n")
+		if m.apiEndpoint == "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Tab to switch fields — Enter to continue"))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render("  ✓ Endpoint configured — press Enter to continue"))
+		}
 	}
 
+	return b.String()
+}
+
+// MiniMax OAuth device-code flow screen
+func (m model) renderMiniMaxOAuth() string {
+	var b strings.Builder
+	b.WriteString(headerStyle.Render("MiniMax OAuth Sign-In"))
+	b.WriteString("\n\n")
+
+	if m.oauthError != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("  ✗ " + m.oauthError))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Press Enter to retry  •  Esc to go back"))
+		return b.String()
+	}
+
+	if m.oauthToken != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("  ✓ Signed in successfully!"))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Token saved.  Press Enter to continue."))
+		return b.String()
+	}
+
+	if m.oauthURL == "" {
+		b.WriteString("  " + m.spinner.View() + " Connecting to MiniMax...")
+		return b.String()
+	}
+
+	b.WriteString("  Your browser should have opened automatically.\n")
+	b.WriteString("  If it didn't, visit:\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("  " + m.oauthURL))
+	b.WriteString("\n\n")
+	b.WriteString("  Click Authorize on the MiniMax page.\n\n")
+	b.WriteString("  " + m.spinner.View() + " Waiting for authorization...")
+	b.WriteString("\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Esc to cancel"))
 	return b.String()
 }
 
@@ -364,35 +473,35 @@ func (m model) renderChannels() string {
 	b.WriteString("\n\n")
 
 	// Telegram
-	tgStyle := lipgloss.NewStyle()
-	tgMarker := "○"
+	telegramStyle := lipgloss.NewStyle()
+	telegramMarker := "○"
 	if m.channelIndex == 2 {
-		tgMarker = "●"
-		tgStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+		telegramMarker = "●"
+		telegramStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
 	}
 	telegramStatus := "[ ] Disabled"
 	if m.telegramEnabled {
 		telegramStatus = "[✓] Enabled"
 	}
-	b.WriteString(tgStyle.Render(fmt.Sprintf("  %s Telegram Integration  %s", tgMarker, telegramStatus)))
+	b.WriteString(telegramStyle.Render(fmt.Sprintf("  %s Telegram Integration  %s", telegramMarker, telegramStatus)))
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Requires bot token file"))
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Uses a bot token file"))
 	b.WriteString("\n\n")
 
 	// Discord
-	dcStyle := lipgloss.NewStyle()
-	dcMarker := "○"
+	discordStyle := lipgloss.NewStyle()
+	discordMarker := "○"
 	if m.channelIndex == 3 {
-		dcMarker = "●"
-		dcStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
+		discordMarker = "●"
+		discordStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
 	}
 	discordStatus := "[ ] Disabled"
 	if m.discordEnabled {
 		discordStatus = "[✓] Enabled"
 	}
-	b.WriteString(dcStyle.Render(fmt.Sprintf("  %s Discord Integration  %s", dcMarker, discordStatus)))
+	b.WriteString(discordStyle.Render(fmt.Sprintf("  %s Discord Integration   %s", discordMarker, discordStatus)))
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Requires bot token file"))
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("    Uses a bot token file"))
 	b.WriteString("\n\n")
 
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("Note: Can be configured later"))
@@ -400,37 +509,35 @@ func (m model) renderChannels() string {
 	return b.String()
 }
 
-func (m model) renderWhatsAppSetup() string {
+func (m model) renderTelegramSetup() string {
 	var b strings.Builder
 
-	b.WriteString(headerStyle.Render("WhatsApp Setup"))
+	b.WriteString(headerStyle.Render("Telegram Setup"))
 	b.WriteString("\n\n")
-
-	if m.whatsappDone {
-		if m.whatsappError != "" {
-			b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  ✗ %s\n", m.whatsappStatus)))
-			b.WriteString("\n")
-			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(fmt.Sprintf("  Error: %s\n\n", m.whatsappError)))
-			b.WriteString("  Press Enter to continue.\n")
-		} else {
-			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render(fmt.Sprintf("  ✓ %s\n\n", m.whatsappStatus)))
-			b.WriteString("  Press Enter to continue.\n")
-		}
-		return b.String()
+	b.WriteString("  Telegram reads its bot token from a file.\n")
+	b.WriteString("  Enter the token file path below.\n\n")
+	b.WriteString("  " + m.telegramTokenInput.View())
+	b.WriteString("\n\n")
+	if m.telegramTokenInput.Err != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  ✗ %s\n\n", m.telegramTokenInput.Err)))
 	}
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Leave it empty to skip Telegram."))
+	return b.String()
+}
 
-	if m.whatsappQRCode != "" {
-		ascii := renderQRForTerminal(m.whatsappQRCode)
-		b.WriteString("  Scan this QR code with your WhatsApp app:\n\n")
-		b.WriteString(ascii)
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(fmt.Sprintf("  %s\n", m.whatsappStatus)))
-		b.WriteString("\n  Press Enter when done  •  Esc to skip\n")
-	} else {
-		b.WriteString(fmt.Sprintf("  %s %s\n\n", m.spinner.View(), m.whatsappStatus))
-		b.WriteString("  Press Esc to skip.\n")
+func (m model) renderDiscordSetup() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render("Discord Setup"))
+	b.WriteString("\n\n")
+	b.WriteString("  Discord reads its bot token from a file.\n")
+	b.WriteString("  Enter the token file path below.\n\n")
+	b.WriteString("  " + m.discordTokenInput.View())
+	b.WriteString("\n\n")
+	if m.discordTokenInput.Err != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  ✗ %s\n\n", m.discordTokenInput.Err)))
 	}
-
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Leave it empty to skip Discord."))
 	return b.String()
 }
 
@@ -467,6 +574,40 @@ func (m model) renderSignalSetup() string {
 		b.WriteString("\n  Press Enter when done  •  Esc to skip\n")
 	} else {
 		b.WriteString(fmt.Sprintf("  %s %s\n\n", m.spinner.View(), m.signalStatus))
+		b.WriteString("  Press Esc to skip.\n")
+	}
+
+	return b.String()
+}
+
+func (m model) renderWhatsAppSetup() string {
+	var b strings.Builder
+
+	b.WriteString(headerStyle.Render("WhatsApp Setup"))
+	b.WriteString("\n\n")
+
+	if m.whatsappDone {
+		if m.whatsappError != "" {
+			b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(fmt.Sprintf("  ✗ %s\n", m.whatsappStatus)))
+			b.WriteString("\n")
+			b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(fmt.Sprintf("  Error: %s\n\n", m.whatsappError)))
+			b.WriteString("  Press Enter to continue.\n")
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Render(fmt.Sprintf("  ✓ %s\n\n", m.whatsappStatus)))
+			b.WriteString("  Press Enter to continue.\n")
+		}
+		return b.String()
+	}
+
+	if m.whatsappQRCode != "" {
+		ascii := renderQRForTerminal(m.whatsappQRCode)
+		b.WriteString("  Scan this QR code with your WhatsApp app:\n\n")
+		b.WriteString(ascii)
+		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render(fmt.Sprintf("  %s\n", m.whatsappStatus)))
+		b.WriteString("\n  Press Enter when done  •  Esc to skip\n")
+	} else {
+		b.WriteString(fmt.Sprintf("  %s %s\n\n", m.spinner.View(), m.whatsappStatus))
 		b.WriteString("  Press Esc to skip.\n")
 	}
 
@@ -600,38 +741,6 @@ func (m model) renderUninstall() string {
 
 	b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("Warning: This action cannot be undone!"))
 
-	return b.String()
-}
-
-func (m model) renderTelegramSetup() string {
-	var b strings.Builder
-	b.WriteString("Telegram Setup\n\n")
-	b.WriteString("Enter the path to your Telegram bot token file.\n")
-	b.WriteString("Leave blank and press Enter to skip.\n\n")
-	b.WriteString(m.telegramTokenInput.View())
-	if m.telegramTokenInput.Err != nil {
-		b.WriteString("\n\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(
-			"Error: " + m.telegramTokenInput.Err.Error(),
-		))
-	}
-	b.WriteString("\n\nEnter: confirm  •  Esc: skip")
-	return b.String()
-}
-
-func (m model) renderDiscordSetup() string {
-	var b strings.Builder
-	b.WriteString("Discord Setup\n\n")
-	b.WriteString("Enter the path to your Discord bot token file.\n")
-	b.WriteString("Leave blank and press Enter to skip.\n\n")
-	b.WriteString(m.discordTokenInput.View())
-	if m.discordTokenInput.Err != nil {
-		b.WriteString("\n\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render(
-			"Error: " + m.discordTokenInput.Err.Error(),
-		))
-	}
-	b.WriteString("\n\nEnter: confirm  •  Esc: skip")
 	return b.String()
 }
 

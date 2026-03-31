@@ -20,11 +20,12 @@ const (
 	stepPrerequisites
 	stepProvider
 	stepConfiguration
+	stepMiniMaxOAuth
 	stepChannels
 	stepSignalSetup
-	stepWhatsAppSetup
 	stepTelegramSetup
 	stepDiscordSetup
+	stepWhatsAppSetup
 	stepService
 	stepInstalling
 	stepComplete
@@ -33,13 +34,13 @@ const (
 
 // Provider types
 const (
-	providerOllama      = "ollama"
-	providerOpenAI      = "openai"
-	providerAnthropic   = "anthropic"
-	providerAzure       = "azure"
-	providerMiniMax     = "minimax"
+	providerOllama       = "ollama"
+	providerOpenAI       = "openai"
+	providerAnthropic    = "anthropic"
+	providerAzure        = "azure_openai"
+	providerMiniMax      = "minimax"
 	providerMiniMaxOAuth = "minimax-portal"
-	providerCustom      = "custom"
+	providerCustom       = "custom"
 )
 
 var providers = []string{
@@ -152,39 +153,41 @@ type model struct {
 	configPath       string
 	port             int
 
-	// Channel configuration
-	signalEnabled   bool
-	whatsappEnabled bool
-	signalCLIPath   string
-	whatsappDBPath  string
-
-	// Telegram setup state
-	telegramEnabled    bool
-	telegramTokenFile  string
-	telegramTokenInput textinput.Model
-
-	// Discord setup state
-	discordEnabled    bool
-	discordTokenFile  string
-	discordTokenInput textinput.Model
-
 	// Quota configuration
 	quotaEnabled bool
 
+	// Channel configuration
+	signalEnabled      bool
+	whatsappEnabled    bool
+	telegramEnabled    bool
+	discordEnabled     bool
+	signalCLIPath      string
+	whatsappDBPath     string
+	telegramTokenFile  string
+	telegramTokenInput textinput.Model
+	discordTokenFile   string
+	discordTokenInput  textinput.Model
+
+	// MiniMax OAuth state
+	oauthDC    *deviceCodeResp
+	oauthToken *oauthToken
+	oauthError string
+	oauthURL   string
+
 	// Signal setup state
-	signalQRCode   string
-	signalStatus   string
-	signalAccount  string
-	signalDone     bool
-	signalError    string
-	signalLinker   *SignalLinker
+	signalQRCode string
+	signalStatus string
+	signalAccount string
+	signalDone   bool
+	signalError  string
+	signalLinker *SignalLinker
 
 	// WhatsApp setup state
-	whatsappQRCode  string
-	whatsappStatus  string
-	whatsappDone    bool
-	whatsappError   string
-	whatsappLinker  *WhatsAppLinker
+	whatsappQRCode string
+	whatsappStatus string
+	whatsappDone   bool
+	whatsappError  string
+	whatsappLinker *WhatsAppLinker
 
 	// Service options
 	enableService bool
