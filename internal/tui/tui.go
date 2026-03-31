@@ -108,6 +108,8 @@ type gatewayClient interface {
 	Compact(session string) (*client.CompactResult, error)
 	Skills() ([]client.SkillInfo, error)
 	MCPServers() ([]client.MCPServerInfo, error)
+	ProviderConfigure(providerID, apiKey, apiBase string) (client.ProviderConfigurePayload, error)
+	ProviderRemove(providerID string) (client.ProviderRemovePayload, error)
 }
 
 type Model struct {
@@ -615,6 +617,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return ModelSetMsg{ID: current}
 		}
+	case dialogcmp.ConfigureProviderMsg:
+		return m.handleConfigureProvider(msg)
+	case dialogcmp.RemoveProviderMsg:
+		return m.handleRemoveProvider(msg)
+	case dialogcmp.SwitchProviderMsg:
+		return m.handleSwitchProvider(msg)
 	case dialogcmp.CommandChosenMsg:
 		m.dialog = nil
 		m.editor.SetValue("")
@@ -806,6 +814,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.messages.AppendError("[" + p.Channel + "] " + p.Error)
 			}
+		case "models.updated":
+			var p client.ModelsUpdatedPayload
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
+			} else {
+				m.app.Model = p.Current
+				if _, ok := m.dialog.(providersDialog); ok {
+					m.dialog = providersDialog{dialogcmp.NewProvidersFromData(p.Models, p.Current, client.StatusPayload{}, m.providerConfig)}
+				}
+			}
 		}
 		if mapped != nil {
 			nextModel, cmd := m.Update(mapped)
@@ -936,6 +954,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.sendChatCmd(submitted))
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handleSwitchProvider(msg dialogcmp.SwitchProviderMsg) (tea.Model, tea.Cmd) {
+	m.dialog = nil
+	return m, nil
+}
+
+func (m Model) handleConfigureProvider(msg dialogcmp.ConfigureProviderMsg) (tea.Model, tea.Cmd) {
+	if pd, ok := m.dialog.(providersDialog); ok {
+		pd.ProvidersModel = pd.ProvidersModel.WithConfigureResult(nil)
+		m.dialog = pd
+	}
+	_, err := m.client.ProviderConfigure(msg.ProviderID, msg.APIKey, msg.APIBase)
+	if err != nil {
+		if pd, ok := m.dialog.(providersDialog); ok {
+			pd.ProvidersModel = pd.ProvidersModel.WithConfigureResult(err)
+			m.dialog = pd
+			return m, nil
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) handleRemoveProvider(msg dialogcmp.RemoveProviderMsg) (tea.Model, tea.Cmd) {
+	_, err := m.client.ProviderRemove(msg.ProviderID)
+	if err != nil {
+		return m, nil
+	}
+	return m, nil
 }
 
 func (m Model) handleCtrlC() (tea.Model, tea.Cmd) {
