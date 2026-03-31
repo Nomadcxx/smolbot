@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Nomadcxx/smolbot/pkg/provider"
@@ -292,4 +294,23 @@ func newMemoryStore(t *testing.T) *session.Store {
 		t.Fatalf("GetOrCreateSession: %v", err)
 	}
 	return store
+}
+
+func TestSessionLocksConcurrentAccessRace(t *testing.T) {
+	mem := NewMemoryConsolidator(nil, newMemoryStore(t), nil, t.TempDir(), 128000)
+	ctx := context.Background()
+	const goroutines = 10
+	const iterations = 50
+	var wg sync.WaitGroup
+	wg.Add(goroutines * iterations)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			for j := 0; j < iterations; j++ {
+				key := fmt.Sprintf("session-%d", j%5)
+				mem.MaybeConsolidate(ctx, key)
+				wg.Done()
+			}
+		}()
+	}
+	wg.Wait()
 }
