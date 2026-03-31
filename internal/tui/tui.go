@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -645,83 +646,122 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Event.Event {
 		case "chat.done":
 			var p client.ChatDonePayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			mapped = ChatDoneMsg{Content: p.Content}
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal chat.done payload: %v", err)
+			} else {
+				mapped = ChatDoneMsg{Content: p.Content}
+			}
 		case "chat.progress":
 			var p client.ProgressPayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			mapped = ChatProgressMsg{Content: p.Content}
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal chat.progress payload: %v", err)
+			} else {
+				mapped = ChatProgressMsg{Content: p.Content}
+			}
 		case "chat.error":
 			var p client.ChatErrorPayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			mapped = ChatErrorMsg{Message: p.Message}
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal chat.error payload: %v", err)
+			} else {
+				mapped = ChatErrorMsg{Message: p.Message}
+			}
 		case "chat.thinking":
 			var p client.ThinkingPayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			m.messages.SetThinking(m.messages.GetThinking() + p.Content)
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal chat.thinking payload: %v", err)
+			} else {
+				m.messages.SetThinking(m.messages.GetThinking() + p.Content)
+			}
 		case "chat.thinking.done":
 			var p client.ThinkingDonePayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			mapped = ThinkingDoneMsg{Content: p.Content}
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal chat.thinking.done payload: %v", err)
+			} else {
+				mapped = ThinkingDoneMsg{Content: p.Content}
+			}
 		case "chat.tool.start":
 			var p client.ToolStartPayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			m.messages.StartTool(p.ID, p.Name, p.Input)
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal chat.tool.start payload: %v", err)
+			} else {
+				m.messages.StartTool(p.ID, p.Name, p.Input)
+			}
 		case "chat.tool.done":
 			var p client.ToolDonePayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			status := "done"
-			if p.Error != "" {
-				status = "error"
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal chat.tool.done payload: %v", err)
+			} else {
+				status := "done"
+				if p.Error != "" {
+					status = "error"
+				}
+				m.messages.FinishTool(p.ID, p.Name, status, p.Output)
 			}
-			m.messages.FinishTool(p.ID, p.Name, status, p.Output)
 		case "context.compressed":
 			var p client.CompressionInfo
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			m.footer.SetCompression(&p)
-			m.sidebar.SetCompression(&p)
-			m.footer.SetCompacting(false)
-			m.messages.AppendSystem(fmt.Sprintf(
-				"Context compacted: %s → %s (%.0f%% reduction)",
-				formatTokens(p.OriginalTokens), formatTokens(p.CompressedTokens), p.ReductionPercent,
-			))
-			m.contextWarned = false
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal context.compressed payload: %v", err)
+			} else {
+				m.footer.SetCompression(&p)
+				m.sidebar.SetCompression(&p)
+				m.footer.SetCompacting(false)
+				m.messages.AppendSystem(fmt.Sprintf(
+					"Context compacted: %s → %s (%.0f%% reduction)",
+					formatTokens(p.OriginalTokens), formatTokens(p.CompressedTokens), p.ReductionPercent,
+				))
+				m.contextWarned = false
+			}
 		case "compact.start":
 			mapped = CompactStartMsg{}
 		case "compact.done":
 			m.footer.SetCompacting(false)
 		case "chat.usage":
 			var p client.UsagePayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			usage := client.UsageInfo{
-				PromptTokens:     p.PromptTokens,
-				CompletionTokens: p.CompletionTokens,
-				TotalTokens:      p.TotalTokens,
-				ContextWindow:    p.ContextWindow,
-			}
-			m.footer.SetUsage(usage)
-			m.sidebar.SetUsage(usage)
-			if p.ContextWindow > 0 && p.TotalTokens > 0 {
-				pct := int((float64(p.TotalTokens)/float64(p.ContextWindow))*100 + 0.5)
-				m.header.SetContextPercent(pct)
-				m.maybeWarnContextUsage(pct)
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal chat.usage payload: %v", err)
+			} else {
+				usage := client.UsageInfo{
+					PromptTokens:     p.PromptTokens,
+					CompletionTokens: p.CompletionTokens,
+					TotalTokens:      p.TotalTokens,
+					ContextWindow:    p.ContextWindow,
+				}
+				m.footer.SetUsage(usage)
+				m.sidebar.SetUsage(usage)
+				if p.ContextWindow > 0 && p.TotalTokens > 0 {
+					pct := int((float64(p.TotalTokens)/float64(p.ContextWindow))*100 + 0.5)
+					m.header.SetContextPercent(pct)
+					m.maybeWarnContextUsage(pct)
+				}
 			}
 		case "channel.inbound":
 			var p client.ChannelMessagePayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			mapped = ChannelInboundMsg{Channel: p.Channel, ChatID: p.ChatID, Content: p.Content}
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal channel.inbound payload: %v", err)
+			} else {
+				mapped = ChannelInboundMsg{Channel: p.Channel, ChatID: p.ChatID, Content: p.Content}
+			}
 		case "channel.outbound":
 			var p client.ChannelMessagePayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			mapped = ChannelOutboundMsg{Channel: p.Channel, ChatID: p.ChatID, Content: p.Content}
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal channel.outbound payload: %v", err)
+			} else {
+				mapped = ChannelOutboundMsg{Channel: p.Channel, ChatID: p.ChatID, Content: p.Content}
+			}
 		case "channel.progress":
 			var p client.ChannelMessagePayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			mapped = ChatProgressMsg{Content: p.Content}
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal channel.progress payload: %v", err)
+			} else {
+				mapped = ChatProgressMsg{Content: p.Content}
+			}
 		case "channel.error":
 			var p client.ChannelErrorPayload
-			_ = json.Unmarshal(msg.Event.Payload, &p)
-			m.messages.AppendError("[" + p.Channel + "] " + p.Error)
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				log.Printf("debug: failed to unmarshal channel.error payload: %v", err)
+			} else {
+				m.messages.AppendError("[" + p.Channel + "] " + p.Error)
+			}
 		}
 		if mapped != nil {
 			nextModel, cmd := m.Update(mapped)
