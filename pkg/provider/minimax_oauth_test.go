@@ -353,6 +353,44 @@ func TestMiniMaxOAuth_HTTPClientError(t *testing.T) {
 	}
 }
 
+func TestEnsureValidTokenRefreshesWhenExpiringWithinFiveMinutes(t *testing.T) {
+	// Token expires in 3 minutes — past the 2-min IsExpired threshold but inside
+	// the 5-minute proactive-refresh window in ensureValidToken.
+	p := NewMiniMaxOAuthProvider("minimax-portal")
+	p.SetToken(&TokenInfo{
+		AccessToken:  "expiring-soon-access",
+		RefreshToken: "expiring-soon-refresh",
+		ExpiresAt:    time.Now().Add(3 * time.Minute),
+	})
+
+	p.SetHTTPClient(&mockHTTPClient{
+		resp: &http.Response{
+			StatusCode: 200,
+			Body: io.NopCloser(strings.NewReader(
+				`{"access_token":"proactive-new-access","refresh_token":"proactive-new-refresh","expires_in":7200,"token_type":"Bearer","scope":"data:read"}`)),
+		},
+	})
+
+	tok, err := p.ensureValidToken(context.Background())
+	if err != nil {
+		t.Fatalf("ensureValidToken failed: %v", err)
+	}
+
+	// The proactive refresh path must return the refreshed token, not the expiring one.
+	if tok.AccessToken != "proactive-new-access" {
+		t.Errorf("AccessToken = %q, want %q", tok.AccessToken, "proactive-new-access")
+	}
+	if tok.RefreshToken != "proactive-new-refresh" {
+		t.Errorf("RefreshToken = %q, want %q", tok.RefreshToken, "proactive-new-refresh")
+	}
+
+	// The stored token must also have been updated to the refreshed one.
+	stored := p.GetToken()
+	if stored == nil || stored.AccessToken != "proactive-new-access" {
+		t.Errorf("stored token AccessToken = %q, want %q", stored.AccessToken, "proactive-new-access")
+	}
+}
+
 func TestTokenInfo_IsExpired(t *testing.T) {
 	token := &TokenInfo{
 		AccessToken: "tok",
