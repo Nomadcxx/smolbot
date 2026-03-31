@@ -206,6 +206,9 @@ func (a *Adapter) Login(ctx context.Context) error {
 }
 
 func (a *Adapter) LoginWithUpdates(ctx context.Context, report func(channel.Status) error) error {
+	if report == nil {
+		report = func(channel.Status) error { return nil }
+	}
 	out, err := a.runner.Run(ctx, a.cliPath(), a.baseArgs("link", "-n", "smolbot")...)
 	if err != nil {
 		return fmt.Errorf("signal login: %w", err)
@@ -215,14 +218,12 @@ func (a *Adapter) LoginWithUpdates(ctx context.Context, report func(channel.Stat
 	a.provisioningURI = strings.TrimSpace(out)
 	a.mu.Unlock()
 
-	if report != nil {
-		status, err := a.Status(ctx)
-		if err != nil {
-			return err
-		}
-		if err := report(status); err != nil {
-			return err
-		}
+	status, err := a.Status(ctx)
+	if err != nil {
+		return err
+	}
+	if err := report(status); err != nil {
+		return err
 	}
 
 	return nil
