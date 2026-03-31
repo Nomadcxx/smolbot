@@ -23,6 +23,20 @@ type ToolContext struct {
 	IsCronContext bool
 }
 
+type toolContextKey struct{}
+
+// WithToolContext stores a ToolContext in a Go context.
+func WithToolContext(ctx context.Context, tctx ToolContext) context.Context {
+	return context.WithValue(ctx, toolContextKey{}, tctx)
+}
+
+// ContextToolContext retrieves the ToolContext from a Go context.
+// Returns the zero value and false if not present.
+func ContextToolContext(ctx context.Context) (ToolContext, bool) {
+	tctx, ok := ctx.Value(toolContextKey{}).(ToolContext)
+	return tctx, ok
+}
+
 type Result struct {
 	Output   string
 	Content  string

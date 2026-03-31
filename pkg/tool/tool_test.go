@@ -57,6 +57,29 @@ func TestRegistryAppendsRetryHintOnToolError(t *testing.T) {
 	}
 }
 
+func TestWithToolContextRoundTrip(t *testing.T) {
+	want := ToolContext{
+		SessionKey: "sess-1",
+		Channel:    "whatsapp",
+		ChatID:     "chat-123",
+	}
+	ctx := WithToolContext(context.Background(), want)
+	got, ok := ContextToolContext(ctx)
+	if !ok {
+		t.Fatal("ContextToolContext returned ok=false, want true")
+	}
+	if got != want {
+		t.Fatalf("ContextToolContext() = %+v, want %+v", got, want)
+	}
+}
+
+func TestContextToolContextMissingReturnsZeroValue(t *testing.T) {
+	_, ok := ContextToolContext(context.Background())
+	if ok {
+		t.Fatal("ContextToolContext on empty context returned ok=true, want false")
+	}
+}
+
 type stubTool struct {
 	name   string
 	result *Result
