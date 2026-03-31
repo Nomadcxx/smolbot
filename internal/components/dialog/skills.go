@@ -14,6 +14,7 @@ type SkillsModel struct {
 	filtered []client.SkillInfo
 	filter   string
 	cursor   int
+	termWidth int
 }
 
 func NewSkills(skills []client.SkillInfo) SkillsModel {
@@ -97,7 +98,7 @@ func (m SkillsModel) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(72).
+		Width(dialogWidth(m.termWidth, 72)).
 		Render(strings.Join(lines, "\n"))
 }
 
@@ -111,4 +112,9 @@ func (m *SkillsModel) applyFilter() {
 	if m.cursor >= len(m.filtered) {
 		m.cursor = max(0, len(m.filtered)-1)
 	}
+}
+
+func (m SkillsModel) WithTerminalWidth(w int) SkillsModel {
+	m.termWidth = w
+	return m
 }

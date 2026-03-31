@@ -8,7 +8,9 @@ import (
 	"github.com/Nomadcxx/smolbot/internal/theme"
 )
 
-type KeybindingsModel struct{}
+type KeybindingsModel struct {
+	termWidth int
+}
 
 func NewKeybindings() KeybindingsModel {
 	return KeybindingsModel{}
@@ -66,6 +68,11 @@ func (m KeybindingsModel) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(72).
+		Width(dialogWidth(m.termWidth, 72)).
 		Render(strings.Join(lines, "\n"))
+}
+
+func (m KeybindingsModel) WithTerminalWidth(w int) KeybindingsModel {
+	m.termWidth = w
+	return m
 }

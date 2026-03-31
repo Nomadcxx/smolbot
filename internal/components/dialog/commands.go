@@ -17,6 +17,7 @@ type CommandsModel struct {
 	filtered []string
 	filter   string
 	cursor   int
+	termWidth int
 }
 
 var commandDescriptions = map[string]string{
@@ -105,7 +106,7 @@ func (m CommandsModel) View() string {
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(t.BorderFocus).
 			Padding(1, 2).
-			Width(64).
+			Width(dialogWidth(m.termWidth, 64)).
 			Render(strings.Join(lines, "\n"))
 	}
 
@@ -140,7 +141,7 @@ func (m CommandsModel) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(64).
+		Width(dialogWidth(m.termWidth, 64)).
 		Render(strings.Join(lines, "\n"))
 }
 
@@ -161,6 +162,11 @@ func (m CommandsModel) Current() string {
 
 func (m CommandsModel) Filter() string {
 	return m.filter
+}
+
+func (m CommandsModel) WithTerminalWidth(w int) CommandsModel {
+	m.termWidth = w
+	return m
 }
 
 func (m *CommandsModel) applyFilter() {

@@ -28,6 +28,7 @@ type SessionsModel struct {
 	filter   string
 	cursor   int
 	current  string
+	termWidth int
 }
 
 func NewSessions(sessions []client.SessionInfo, current string) SessionsModel {
@@ -130,7 +131,7 @@ func (m SessionsModel) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(64).
+		Width(dialogWidth(m.termWidth, 64)).
 		Render(strings.Join(lines, "\n"))
 }
 
@@ -148,4 +149,9 @@ func (m *SessionsModel) applyFilter() {
 
 func (m SessionsModel) String() string {
 	return fmt.Sprintf("SessionsDialog(%d)", len(m.filtered))
+}
+
+func (m SessionsModel) WithTerminalWidth(w int) SessionsModel {
+	m.termWidth = w
+	return m
 }

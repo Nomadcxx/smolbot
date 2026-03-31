@@ -55,6 +55,7 @@ type ModelsModel struct {
 	currentProvider string
 	pending         string
 	oauthFilter     OAuthProviderFilter
+	termWidth       int
 }
 
 func (m ModelsModel) Update(msg tea.Msg) (ModelsModel, tea.Cmd) {
@@ -143,7 +144,7 @@ func (m ModelsModel) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(64).
+		Width(dialogWidth(m.termWidth, 64)).
 		Render(strings.Join(lines, "\n"))
 }
 
@@ -348,4 +349,9 @@ func isSelectableModel(model client.ModelInfo) bool {
 
 func optionalModelDescription(model client.ModelInfo) string {
 	return model.Description
+}
+
+func (m ModelsModel) WithTerminalWidth(w int) ModelsModel {
+	m.termWidth = w
+	return m
 }

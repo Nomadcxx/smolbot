@@ -2,6 +2,16 @@ package dialog
 
 import "strings"
 
+func dialogWidth(termWidth, preferred int) int {
+	if termWidth <= 0 {
+		return preferred
+	}
+	if max := termWidth - 4; max < preferred {
+		return max
+	}
+	return preferred
+}
+
 const maxVisibleItems = 7
 
 func matchesQuery(query string, fields ...string) bool {

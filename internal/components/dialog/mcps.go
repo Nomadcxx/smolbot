@@ -12,6 +12,7 @@ import (
 type MCPServersModel struct {
 	servers []client.MCPServerInfo
 	cursor  int
+	termWidth int
 }
 
 func NewMCPServers(servers []client.MCPServerInfo) MCPServersModel {
@@ -82,6 +83,11 @@ func (m MCPServersModel) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(72).
+		Width(dialogWidth(m.termWidth, 72)).
 		Render(strings.Join(lines, "\n"))
+}
+
+func (m MCPServersModel) WithTerminalWidth(w int) MCPServersModel {
+	m.termWidth = w
+	return m
 }

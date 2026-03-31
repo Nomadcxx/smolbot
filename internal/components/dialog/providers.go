@@ -35,6 +35,7 @@ type ProvidersModel struct {
 	rows           []providerRenderRow
 	activeProvider string
 	activeModel    string
+	termWidth      int
 }
 
 func NewProviders(info []ProviderInfo, activeProvider, activeModel string) ProvidersModel {
@@ -308,8 +309,13 @@ func (m ProvidersModel) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(72).
+		Width(dialogWidth(m.termWidth, 72)).
 		Render(strings.Join(lines, "\n"))
+}
+
+func (m ProvidersModel) WithTerminalWidth(w int) ProvidersModel {
+	m.termWidth = w
+	return m
 }
 
 func (m ProvidersModel) renderRow(row providerRenderRow, t *theme.Theme) []string {

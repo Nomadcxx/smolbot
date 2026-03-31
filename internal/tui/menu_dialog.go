@@ -151,6 +151,8 @@ func (d menuDialog) View() string {
 		Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
+func (d menuDialog) SetTerminalWidth(int) Dialog { return d }
+
 func (d menuDialog) title() string {
 	switch d.page {
 	case menuPageThemes:

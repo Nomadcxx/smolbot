@@ -87,6 +87,7 @@ type flushProgressMsg struct{ Seq int }
 type Dialog interface {
 	Update(tea.Msg) (Dialog, tea.Cmd)
 	View() string
+	SetTerminalWidth(int) Dialog
 }
 
 type gatewayClient interface {
@@ -357,6 +358,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.header.SetCompact(m.height <= 30)
 		m.editor.SetCompact(m.height <= 30)
 		m.recalcLayout()
+		if m.dialog != nil {
+			m.dialog = m.dialog.SetTerminalWidth(msg.Width)
+		}
 		return m, nil
 	case ConnectedMsg:
 		m.connected = true
@@ -533,6 +537,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case SessionsLoadedMsg:
 		m.dialog = sessionDialog{dialogcmp.NewSessions(msg.Sessions, m.app.Session)}
+		m.dialog = m.dialog.SetTerminalWidth(m.width)
 		return m, nil
 	case SessionResetDoneMsg:
 		m.app.Session = msg.Key
@@ -550,15 +555,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			current = m.app.Model
 		}
 		m.dialog = modelsDialog{dialogcmp.NewModels(m.providerConfig, msg.Models, current)}
+		m.dialog = m.dialog.SetTerminalWidth(m.width)
 		return m, nil
 	case SkillsLoadedMsg:
 		m.dialog = skillsDialog{dialogcmp.NewSkills(msg.Skills)}
+		m.dialog = m.dialog.SetTerminalWidth(m.width)
 		return m, nil
 	case MCPServersLoadedMsg:
 		m.dialog = mcpServersDialog{dialogcmp.NewMCPServers(msg.Servers)}
+		m.dialog = m.dialog.SetTerminalWidth(m.width)
 		return m, nil
 	case ProvidersLoadedMsg:
 		m.dialog = providersDialog{dialogcmp.NewProvidersFromData(msg.Models, msg.Current, msg.Status, m.providerConfig)}
+		m.dialog = m.dialog.SetTerminalWidth(m.width)
 		return m, nil
 	case ModelSetMsg:
 		m.app.Model = msg.ID
@@ -811,6 +820,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.persistStateCmd()
 		case "f1", "ctrl+m":
 			m.dialog = newMenuDialog()
+			m.dialog = m.dialog.SetTerminalWidth(m.width)
 			return m, nil
 		case "c", "y":
 			if !m.editor.Focused() {
@@ -924,6 +934,7 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "/theme":
 		if args == "" {
 			m.dialog = newThemesMenuDialog()
+			m.dialog = m.dialog.SetTerminalWidth(m.width)
 			return m, nil
 		}
 		if theme.Set(args) {
@@ -972,6 +983,7 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		}
 	case "/keybindings":
 		m.dialog = keybindingsDialog{dialogcmp.NewKeybindings()}
+		m.dialog = m.dialog.SetTerminalWidth(m.width)
 		return m, nil
 	default:
 		m.messages.AppendError("Unknown command: " + cmd)
@@ -1046,11 +1058,19 @@ func (d sessionDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	return sessionDialog{next}, cmd
 }
 
+func (d sessionDialog) SetTerminalWidth(w int) Dialog {
+	return sessionDialog{d.SessionsModel.WithTerminalWidth(w)}
+}
+
 type modelsDialog struct{ dialogcmp.ModelsModel }
 
 func (d modelsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	next, cmd := d.ModelsModel.Update(msg)
 	return modelsDialog{next}, cmd
+}
+
+func (d modelsDialog) SetTerminalWidth(w int) Dialog {
+	return modelsDialog{d.ModelsModel.WithTerminalWidth(w)}
 }
 
 type commandsDialog struct {
@@ -1062,11 +1082,19 @@ func (d commandsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	return commandsDialog{CommandsModel: next}, cmd
 }
 
+func (d commandsDialog) SetTerminalWidth(w int) Dialog {
+	return commandsDialog{CommandsModel: d.CommandsModel.WithTerminalWidth(w)}
+}
+
 type skillsDialog struct{ dialogcmp.SkillsModel }
 
 func (d skillsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	next, cmd := d.SkillsModel.Update(msg)
 	return skillsDialog{next}, cmd
+}
+
+func (d skillsDialog) SetTerminalWidth(w int) Dialog {
+	return skillsDialog{d.SkillsModel.WithTerminalWidth(w)}
 }
 
 type mcpServersDialog struct{ dialogcmp.MCPServersModel }
@@ -1076,6 +1104,10 @@ func (d mcpServersDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	return mcpServersDialog{next}, cmd
 }
 
+func (d mcpServersDialog) SetTerminalWidth(w int) Dialog {
+	return mcpServersDialog{d.MCPServersModel.WithTerminalWidth(w)}
+}
+
 type providersDialog struct{ dialogcmp.ProvidersModel }
 
 func (d providersDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
@@ -1083,11 +1115,19 @@ func (d providersDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	return providersDialog{next}, cmd
 }
 
+func (d providersDialog) SetTerminalWidth(w int) Dialog {
+	return providersDialog{d.ProvidersModel.WithTerminalWidth(w)}
+}
+
 type keybindingsDialog struct{ dialogcmp.KeybindingsModel }
 
 func (d keybindingsDialog) Update(msg tea.Msg) (Dialog, tea.Cmd) {
 	next, cmd := d.KeybindingsModel.Update(msg)
 	return keybindingsDialog{next}, cmd
+}
+
+func (d keybindingsDialog) SetTerminalWidth(w int) Dialog {
+	return keybindingsDialog{d.KeybindingsModel.WithTerminalWidth(w)}
 }
 
 func formatStatusSummary(payload client.StatusPayload) string {
