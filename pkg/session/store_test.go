@@ -1,6 +1,7 @@
 package session
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Nomadcxx/smolbot/pkg/provider"
@@ -187,5 +188,34 @@ func TestListSessions(t *testing.T) {
 	}
 	if len(sessions) != 2 {
 		t.Fatalf("session count = %d, want 2", len(sessions))
+	}
+}
+
+func TestListSessionsIncludesPreview(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	msgs := []provider.Message{
+		{Role: "user", Content: "hello world"},
+	}
+	if err := store.SaveMessages("s1", msgs); err != nil {
+		t.Fatalf("SaveMessages: %v", err)
+	}
+
+	sessions, err := store.ListSessions()
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	if sessions[0].Preview == "" {
+		t.Fatal("expected non-empty preview, got empty")
+	}
+	if !strings.Contains(sessions[0].Preview, "hello") {
+		t.Fatalf("expected preview to contain 'hello', got %q", sessions[0].Preview)
 	}
 }

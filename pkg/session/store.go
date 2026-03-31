@@ -41,6 +41,7 @@ type Session struct {
 	Metadata  string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	Preview   string
 }
 
 type Store struct {
@@ -163,7 +164,21 @@ func (s *Store) MarkConsolidated(sessionKey string, upToID int64) error {
 }
 
 func (s *Store) ListSessions() ([]Session, error) {
-	rows, err := s.db.Query(`SELECT key, metadata, created_at, updated_at FROM sessions ORDER BY updated_at DESC, key ASC`)
+	rows, err := s.db.Query(`
+		SELECT s.key, s.metadata, s.created_at, s.updated_at,
+			COALESCE(
+				(SELECT substr(trim(m.content), 1, 80)
+				 FROM messages m
+				 WHERE m.session_key = s.key
+				   AND m.role IN ('user', 'assistant')
+				   AND trim(m.content) != ''
+				   AND trim(m.content) != ' '
+				 ORDER BY m.id DESC LIMIT 1
+				), ''
+			) AS preview
+		FROM sessions s
+		ORDER BY s.updated_at DESC, s.key ASC
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -172,7 +187,7 @@ func (s *Store) ListSessions() ([]Session, error) {
 	var sessions []Session
 	for rows.Next() {
 		var session Session
-		if err := rows.Scan(&session.Key, &session.Metadata, &session.CreatedAt, &session.UpdatedAt); err != nil {
+		if err := rows.Scan(&session.Key, &session.Metadata, &session.CreatedAt, &session.UpdatedAt, &session.Preview); err != nil {
 			return nil, fmt.Errorf("scan session: %w", err)
 		}
 		sessions = append(sessions, session)

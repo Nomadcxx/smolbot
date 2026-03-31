@@ -423,10 +423,14 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		}
 		items := make([]map[string]any, 0, len(sessions))
 		for _, item := range sessions {
-			items = append(items, map[string]any{
+			entry := map[string]any{
 				"key":       item.Key,
 				"updatedAt": item.UpdatedAt.Format(time.RFC3339),
-			})
+			}
+			if item.Preview != "" {
+				entry["preview"] = item.Preview
+			}
+			items = append(items, entry)
 		}
 		return map[string]any{"sessions": items}, nil
 	case "sessions.reset":
