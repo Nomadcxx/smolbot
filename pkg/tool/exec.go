@@ -90,7 +90,7 @@ func (t *ExecTool) Execute(ctx context.Context, args json.RawMessage, tctx ToolC
 
 	output, err := cmd.CombinedOutput()
 	if runCtx.Err() == context.DeadlineExceeded {
-		return &Result{Error: fmt.Sprintf("command timed out after %s", timeout)}, nil
+		return &Result{Error: formatTimeoutError(timeout, string(output))}, nil
 	}
 	if err != nil {
 		text := firstNonEmptyString(strings.TrimSpace(string(output)), err.Error())
@@ -170,6 +170,14 @@ func truncateOutput(output string) string {
 	head := output[:execOutputHeadBytes]
 	tail := output[len(output)-execOutputTailBytes:]
 	return fmt.Sprintf("%s\n\n... truncated %d bytes ...\n\n%s", head, len(output)-execOutputLimit, tail)
+}
+
+func formatTimeoutError(timeout time.Duration, output string) string {
+	msg := fmt.Sprintf("command timed out after %s", timeout)
+	if trimmed := strings.TrimSpace(output); trimmed != "" {
+		msg += fmt.Sprintf("; partial output: %s", truncateOutput(trimmed))
+	}
+	return msg
 }
 
 func firstNonEmptyString(values ...string) string {

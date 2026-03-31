@@ -88,6 +88,22 @@ func TestAdapterStartNormalizesInboundMessagesThroughSeam(t *testing.T) {
 	}
 }
 
+func TestAdapterStartFailsIfBinaryMissing(t *testing.T) {
+	cfg := config.SignalChannelConfig{
+		CLIPath: "/tmp/definitely-does-not-exist-signal-cli-binary",
+		Account: "+15551234567",
+	}
+	runner := &fakeRunner{}
+	adapter := NewAdapter(cfg, runner)
+	err := adapter.Start(context.Background(), func(context.Context, channel.InboundMessage) {})
+	if err == nil {
+		t.Fatal("expected error when signal-cli binary is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "signal-cli") {
+		t.Fatalf("expected error to mention signal-cli, got %q", err.Error())
+	}
+}
+
 func TestAdapterStartReceivesMultipleInboundMessagesFromStream(t *testing.T) {
 	runner := &fakeRunner{
 		receiveFn: func(ctx context.Context, _ string, args []string, handle func(rawInboundMessage) error) error {

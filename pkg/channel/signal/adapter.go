@@ -65,6 +65,9 @@ func (a *Adapter) Start(ctx context.Context, handler channel.Handler) error {
 	if handler == nil {
 		return errors.New("signal handler is required")
 	}
+	if _, err := exec.LookPath(a.cliPath()); err != nil {
+		return fmt.Errorf("signal-cli binary not found at %q — install signal-cli and set the path in config: %w", a.cliPath(), err)
+	}
 	args := a.receiveArgs()
 	receiveCtx, cancel := context.WithCancel(ctx)
 	resultCh := make(chan error, 1)

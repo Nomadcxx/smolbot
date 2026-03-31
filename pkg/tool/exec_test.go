@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/smolbot/pkg/config"
 )
@@ -116,4 +117,24 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func TestFormatTimeoutErrorIncludesPartialOutput(t *testing.T) {
+	err := formatTimeoutError(5*time.Second, "hello world partial output")
+	if !strings.Contains(err, "timed out after 5s") {
+		t.Fatalf("expected timeout message, got %q", err)
+	}
+	if !strings.Contains(err, "partial output") {
+		t.Fatalf("expected partial output in message, got %q", err)
+	}
+}
+
+func TestFormatTimeoutErrorEmptyOutput(t *testing.T) {
+	err := formatTimeoutError(5*time.Second, "")
+	if !strings.Contains(err, "timed out after 5s") {
+		t.Fatalf("expected timeout message, got %q", err)
+	}
+	if strings.Contains(err, "partial output") {
+		t.Fatalf("expected no partial output mention when output is empty, got %q", err)
+	}
 }
