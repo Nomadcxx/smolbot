@@ -54,7 +54,7 @@ func (c *Client) SessionsList() ([]SessionInfo, error) {
 }
 
 func (c *Client) SessionsReset(key string) error {
-	_, err := c.sendRequest("sessions.reset", map[string]string{"key": key})
+	_, err := c.sendRequest("sessions.reset", map[string]string{"session": key})
 	return err
 }
 
