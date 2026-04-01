@@ -863,6 +863,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						m.dialog = providersDialog{dialogcmp.NewProvidersFromData(p.Models, p.Current, client.StatusPayload{}, m.providerConfig)}
 					}
+				} else if m.returnToModelsAfterProvider {
+					// Dialog changed or closed before models.updated arrived — clear stale flag.
+					m.returnToModelsAfterProvider = false
 				}
 			}
 		}

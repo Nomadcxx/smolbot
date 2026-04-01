@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -173,7 +174,7 @@ func (m ModelsModel) View() string {
 			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▼ more below"))
 		}
 	}
-	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type filter • Ctrl+F fav • Ctrl+A add provider • Space mark • Enter save • Esc close"))
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type filter • Ctrl+F fav • Ctrl+X remove • Ctrl+A add provider • Space mark • Enter save • Esc close"))
 	return lipgloss.NewStyle().
 		Background(t.Panel).
 		Border(lipgloss.RoundedBorder()).
@@ -304,6 +305,17 @@ func buildModelRows(models []client.ModelInfo, currentProvider string, favorites
 		grouped[group] = append(grouped[group], model)
 	}
 	for _, group := range order {
+		// Sort within each provider group: Free first, newer release date first, alpha fallback.
+		sort.SliceStable(grouped[group], func(i, j int) bool {
+			a, b := grouped[group][i], grouped[group][j]
+			if a.IsFree != b.IsFree {
+				return a.IsFree
+			}
+			if a.ReleaseDate != b.ReleaseDate {
+				return a.ReleaseDate > b.ReleaseDate
+			}
+			return a.Name < b.Name
+		})
 		rows = append(rows, modelRenderRow{
 			kind:    "header",
 			group:   group,

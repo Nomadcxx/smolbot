@@ -2267,3 +2267,79 @@ func TestThemeCommandInvalidatesMessageRender(t *testing.T) {
 		t.Fatal("expected messages to be dirty after theme change")
 	}
 }
+
+func TestF2CyclesToNextRecentModel(t *testing.T) {
+model := New(app.Config{})
+model.app.Model = "gpt-4o"
+model.app.State.AddRecent("gpt-5")
+model.app.State.AddRecent("gpt-4o")
+model.client = &fakeClient{
+models:  []client.ModelInfo{{ID: "gpt-5"}, {ID: "gpt-4o"}},
+current: "gpt-4o",
+}
+
+updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF2}))
+got := updated.(Model)
+_ = got
+if cmd == nil {
+t.Fatal("expected F2 to produce a command when recents available")
+}
+msg := cmd()
+set, ok := msg.(ModelSetMsg)
+if !ok {
+t.Fatalf("expected ModelSetMsg, got %T", msg)
+}
+// recents are [gpt-5, gpt-4o]; current is gpt-4o → next is gpt-5
+if set.ID != "gpt-5" {
+t.Fatalf("expected F2 to cycle to gpt-5, got %q", set.ID)
+}
+}
+
+func TestF2OpensDialogWhenNoRecents(t *testing.T) {
+model := New(app.Config{})
+model.app.Model = "gpt-4o"
+model.client = &fakeClient{
+models:  []client.ModelInfo{{ID: "gpt-4o", Provider: "openai", Selectable: true}},
+current: "gpt-4o",
+}
+
+updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF2}))
+got := updated.(Model)
+_ = got
+if cmd == nil {
+t.Fatal("expected F2 to produce a command when no recents")
+}
+msg := cmd()
+if _, ok := msg.(ModelsLoadedMsg); !ok {
+t.Fatalf("expected ModelsLoadedMsg (opens dialog) when no recents, got %T", msg)
+}
+}
+
+func TestF2WrapsAroundRecentsList(t *testing.T) {
+	model := New(app.Config{})
+	// AddRecent prepends, so adding a/b/c gives recents = ["c","b","a"].
+	// Set current to "a" (last element) so next wraps to index 0 = "c".
+	model.app.State.AddRecent("a")
+	model.app.State.AddRecent("b")
+	model.app.State.AddRecent("c")
+	model.app.Model = "a"
+	model.client = &fakeClient{
+		models:  []client.ModelInfo{{ID: "a"}, {ID: "b"}, {ID: "c"}},
+		current: "a",
+	}
+
+	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF2}))
+	_ = updated
+	if cmd == nil {
+		t.Fatal("expected F2 to produce a command")
+	}
+	msg := cmd()
+	set, ok := msg.(ModelSetMsg)
+	if !ok {
+		t.Fatalf("expected ModelSetMsg on wrap, got %T", msg)
+	}
+	// recents = ["c","b","a"], current="a" at index 2 → next=(2+1)%3=0 → "c"
+	if set.ID != "c" {
+		t.Fatalf("expected F2 to wrap around to 'c', got %q", set.ID)
+	}
+}

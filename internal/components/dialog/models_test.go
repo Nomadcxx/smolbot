@@ -419,3 +419,33 @@ func TestModelsModelFilterIncludesFavoritesAndRecents(t *testing.T) {
 	}
 }
 
+
+func TestModelsSortedByFreeAndReleaseDateWithinGroup(t *testing.T) {
+models := []client.ModelInfo{
+{ID: "old-paid",  Name: "Old Paid",  Provider: "openai", Selectable: true, ReleaseDate: "2023-01", IsFree: false},
+{ID: "new-paid",  Name: "New Paid",  Provider: "openai", Selectable: true, ReleaseDate: "2024-06", IsFree: false},
+{ID: "free-old",  Name: "Free Old",  Provider: "openai", Selectable: true, ReleaseDate: "2023-03", IsFree: true},
+{ID: "free-new",  Name: "Free New",  Provider: "openai", Selectable: true, ReleaseDate: "2024-09", IsFree: true},
+}
+
+rows := buildModelRows(models, "openai", nil, nil)
+
+// Collect only model rows (skip header) in order
+var order []string
+for _, r := range rows {
+if r.kind == "model" {
+order = append(order, r.model.ID)
+}
+}
+
+// Expected: free-new (free+newer), free-old (free+older), new-paid (paid+newer), old-paid (paid+older)
+want := []string{"free-new", "free-old", "new-paid", "old-paid"}
+if len(order) != len(want) {
+t.Fatalf("expected %d model rows, got %d: %v", len(want), len(order), order)
+}
+for i, id := range want {
+if order[i] != id {
+t.Fatalf("row[%d]: expected %q, got %q (full order: %v)", i, id, order[i], order)
+}
+}
+}

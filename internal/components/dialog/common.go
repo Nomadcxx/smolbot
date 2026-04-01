@@ -29,13 +29,15 @@ func matchesQuery(query string, fields ...string) bool {
 }
 
 func fuzzyMatch(needle, haystack string) bool {
+	nr := []rune(needle)
+	hr := []rune(haystack)
 	ni := 0
-	for hi := 0; hi < len(haystack) && ni < len(needle); hi++ {
-		if haystack[hi] == needle[ni] {
+	for hi := 0; hi < len(hr) && ni < len(nr); hi++ {
+		if hr[hi] == nr[ni] {
 			ni++
 		}
 	}
-	return ni == len(needle)
+	return ni == len(nr)
 }
 
 func visibleBounds(total, cursor int) (int, int) {
