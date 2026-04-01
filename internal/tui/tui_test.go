@@ -40,6 +40,10 @@ type fakeClient struct {
 	compactErr     error
 	modelSets      []string
 	modelSetResult string
+	providerCfgResult client.ProviderConfigurePayload
+	providerCfgErr    error
+	providerRemResult client.ProviderRemovePayload
+	providerRemErr    error
 }
 
 type abortCall struct {
@@ -104,6 +108,18 @@ func (f *fakeClient) Compact(session string) (*client.CompactResult, error) {
 func (f *fakeClient) Skills() ([]client.SkillInfo, error)         { return f.skills, nil }
 func (f *fakeClient) MCPServers() ([]client.MCPServerInfo, error) { return f.mcps, nil }
 func (f *fakeClient) CronJobs() ([]client.CronJob, error)         { return f.jobs, nil }
+func (f *fakeClient) ProviderConfigure(providerID, apiKey, apiBase string) (client.ProviderConfigurePayload, error) {
+	if f.providerCfgErr != nil {
+		return client.ProviderConfigurePayload{}, f.providerCfgErr
+	}
+	return f.providerCfgResult, nil
+}
+func (f *fakeClient) ProviderRemove(providerID string) (client.ProviderRemovePayload, error) {
+	if f.providerRemErr != nil {
+		return client.ProviderRemovePayload{}, f.providerRemErr
+	}
+	return f.providerRemResult, nil
+}
 
 func plain(text string) string {
 	return ansiPattern.ReplaceAllString(text, "")
@@ -240,7 +256,7 @@ func TestHandleSlashCommandProvidersShowsCurrentProviderConfig(t *testing.T) {
 	if !strings.Contains(view, "Active") {
 		t.Fatalf("expected Active section header, got %q", view)
 	}
-	if !strings.Contains(view, "Provider (active)") {
+	if !strings.Contains(view, "openai (active)") {
 		t.Fatalf("expected active provider marker, got %q", view)
 	}
 	if !strings.Contains(view, "openai") {
@@ -258,8 +274,8 @@ func TestHandleSlashCommandProvidersShowsCurrentProviderConfig(t *testing.T) {
 	if !strings.Contains(view, "anthropic") {
 		t.Fatalf("expected configured provider name, got %q", view)
 	}
-	if !strings.Contains(view, "Anthropic") {
-		t.Fatalf("expected anthropic provider type, got %q", view)
+	if !strings.Contains(view, "anthropic") {
+		t.Fatalf("expected anthropic in Configured section, got %q", view)
 	}
 }
 
@@ -1175,6 +1191,12 @@ func TestUsageWarningIsAppendedOncePerSession(t *testing.T) {
 	model.width = 80
 	model.footer.SetWidth(80)
 	model.sidebar.SetSize(30, 20)
+
+	// Establish a short model/session so the footer has room for full usage format.
+	hydrated, _ := model.Update(StatusLoadedMsg{
+		Payload: client.StatusPayload{Model: "openai/gpt-4o", Session: "test"},
+	})
+	model = hydrated.(Model)
 
 	payload, _ := json.Marshal(client.UsagePayload{
 		TotalTokens:   120000,

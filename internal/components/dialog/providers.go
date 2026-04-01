@@ -636,9 +636,11 @@ func (m ProvidersModel) renderRowBrowse(row providerRenderRow, isCursor bool, t 
 		if isCursor {
 			prefix = "> "
 		}
-		name := row.label
+		var name string
 		if row.isActive {
 			name = row.value + " (active)"
+		} else {
+			name = row.value
 		}
 		var style lipgloss.Style
 		switch {

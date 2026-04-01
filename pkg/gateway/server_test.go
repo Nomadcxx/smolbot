@@ -556,17 +556,23 @@ func TestModelsListReturnsRichDiscoveryPayload(t *testing.T) {
 	if payload.Current != "gpt-5" {
 		t.Fatalf("current = %q, want gpt-5", payload.Current)
 	}
-	if len(payload.Models) != 3 {
-		t.Fatalf("len(models) = %d, want 3", len(payload.Models))
+	// openai now returns catalogue entries (7+ models) + openrouter stub + gpt-5 fallback.
+	// Verify at least the three categories are present rather than asserting an exact count.
+	if len(payload.Models) < 3 {
+		t.Fatalf("len(models) = %d, want >= 3", len(payload.Models))
 	}
 
+	foundOpenAICatalogue := false
 	foundOpenRouter := false
 	foundCurrent := false
 	for _, model := range payload.Models {
+		if model.Provider == "openai" && model.Source == "catalogue" {
+			foundOpenAICatalogue = true
+		}
+		if model.Provider == "openai" && model.ID == "gpt-5" {
+			foundCurrent = true
+		}
 		if model.Provider != "openrouter" {
-			if model.Provider == "openai" && model.ID == "gpt-5" {
-				foundCurrent = true
-			}
 			continue
 		}
 		foundOpenRouter = true
@@ -588,6 +594,9 @@ func TestModelsListReturnsRichDiscoveryPayload(t *testing.T) {
 		if model.Description == "" {
 			t.Fatal("expected openrouter description to be populated")
 		}
+	}
+	if !foundOpenAICatalogue {
+		t.Fatalf("expected openai catalogue model entries, got %#v", payload.Models)
 	}
 	if !foundOpenRouter {
 		t.Fatalf("expected openrouter model entry, got %#v", payload.Models)

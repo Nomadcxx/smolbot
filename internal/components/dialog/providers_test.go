@@ -27,11 +27,8 @@ func TestProvidersModelRendersActiveProviderSection(t *testing.T) {
 	if !strings.Contains(view, "Active") {
 		t.Fatalf("expected Active section, got %q", view)
 	}
-	if !strings.Contains(view, "Provider (active)") {
+	if !strings.Contains(view, "openai (active)") {
 		t.Fatalf("expected active provider marker, got %q", view)
-	}
-	if !strings.Contains(view, "openai") {
-		t.Fatalf("expected provider name, got %q", view)
 	}
 	if !strings.Contains(view, "Type:") {
 		t.Fatalf("expected Type field, got %q", view)
@@ -85,7 +82,7 @@ func TestProvidersModelDistinguishesConfiguredAndUnconfigured(t *testing.T) {
 	if !strings.Contains(view, "Not Configured") {
 		t.Fatalf("expected Not Configured section, got %q", view)
 	}
-	if !strings.Contains(view, "groq") {
+	if !strings.Contains(view, "Groq") {
 		t.Fatalf("expected unconfigured provider in Not Configured section, got %q", view)
 	}
 }
@@ -107,13 +104,9 @@ func TestProvidersModelEscToClose(t *testing.T) {
 func TestProvidersModelIgnoresOtherKeys(t *testing.T) {
 	model := NewProviders([]ProviderInfo{{Name: "openai", Type: "OpenAI Compatible", IsActive: true}}, "openai", "gpt-5")
 
-	viewBefore := model.View()
 	_, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if cmd != nil {
-		t.Fatal("expected enter to not produce a command")
-	}
-	if model.View() != viewBefore {
-		t.Fatal("expected model view to be unchanged")
+	if cmd == nil {
+		t.Fatal("expected enter on active provider to produce SwitchProviderMsg")
 	}
 }
 
@@ -139,7 +132,7 @@ func TestProvidersModelFromDataBuildsActiveAndConfiguredSections(t *testing.T) {
 	if !strings.Contains(view, "Active") {
 		t.Fatalf("expected Active section, got %q", view)
 	}
-	if !strings.Contains(view, "Provider (active)") {
+	if !strings.Contains(view, "openai (active)") {
 		t.Fatalf("expected active provider marker, got %q", view)
 	}
 	if !strings.Contains(view, "Configured") {
@@ -155,7 +148,7 @@ func TestProvidersModelHandlesEmptyProviders(t *testing.T) {
 	model := NewProviders([]ProviderInfo{}, "", "")
 	view := model.View()
 
-	if !strings.Contains(view, "No provider information available") {
+	if !strings.Contains(view, "No providers found") {
 		t.Fatalf("expected empty state message, got %q", view)
 	}
 }

@@ -51,7 +51,7 @@ func TestProviderDialogShowsActiveConfiguredUnconfiguredProviders(t *testing.T) 
 	if !strings.Contains(view, "Active") {
 		t.Fatalf("expected Active section, got %q", view)
 	}
-	if !strings.Contains(view, "Provider (active)") {
+	if !strings.Contains(view, "openai (active)") {
 		t.Fatalf("expected active provider marker, got %q", view)
 	}
 	if !strings.Contains(view, "openai") {
@@ -60,16 +60,16 @@ func TestProviderDialogShowsActiveConfiguredUnconfiguredProviders(t *testing.T) 
 	if !strings.Contains(view, "Configured") {
 		t.Fatalf("expected Configured section, got %q", view)
 	}
-	if !strings.Contains(view, "anthropic") {
+	if !strings.Contains(view, "Anthropic") {
 		t.Fatalf("expected anthropic in Configured section, got %q", view)
 	}
-	if !strings.Contains(view, "minimax") {
+	if !strings.Contains(view, "MiniMax") {
 		t.Fatalf("expected minimax in Configured section, got %q", view)
 	}
 	if !strings.Contains(view, "Not Configured") {
 		t.Fatalf("expected Not Configured section, got %q", view)
 	}
-	if !strings.Contains(view, "deepseek") {
+	if !strings.Contains(view, "DeepSeek") {
 		t.Fatalf("expected deepseek in Not Configured section, got %q", view)
 	}
 }

@@ -97,26 +97,22 @@ func TestGetAvailableModelsIncludesConfiguredCompatibleProviders(t *testing.T) {
 		t.Fatalf("len(byProvider) = %d, want 3 (%#v)", len(byProvider), models)
 	}
 
-	openAI, ok := findModel(models, "openai", "openai")
+	// openai has a catalogue: expect selectable catalogue entries (not a single stub)
+	gpt4o, ok := findModel(models, "openai", "gpt-4o")
 	if !ok {
-		t.Fatalf("expected provider-backed openai row, got %#v", models)
+		t.Fatalf("expected openai catalogue model gpt-4o, got %#v", models)
 	}
-	if openAI.Name != "OpenAI" {
-		t.Fatalf("openai name = %q, want OpenAI", openAI.Name)
+	if gpt4o.Source != "catalogue" {
+		t.Fatalf("gpt-4o source = %q, want catalogue", gpt4o.Source)
 	}
-	if openAI.Source != "config" {
-		t.Fatalf("openai source = %q, want config", openAI.Source)
+	if !gpt4o.Selectable {
+		t.Fatal("expected catalogue model to be selectable")
 	}
-	if openAI.Selectable {
-		t.Fatal("expected provider-backed openai row to be info-only")
-	}
-	if openAI.Capability != "openai-compatible" {
-		t.Fatalf("openai capability = %q, want openai-compatible", openAI.Capability)
-	}
-	if openAI.Description == "" {
-		t.Fatal("expected openai description to be populated")
+	if gpt4o.Capability != "chat" {
+		t.Fatalf("gpt-4o capability = %q, want chat", gpt4o.Capability)
 	}
 
+	// openrouter has no catalogue: expect a single config stub (non-selectable)
 	openRouter, ok := findModel(models, "openrouter", "openrouter")
 	if !ok {
 		t.Fatalf("expected provider-backed openrouter row, got %#v", models)
@@ -128,6 +124,7 @@ func TestGetAvailableModelsIncludesConfiguredCompatibleProviders(t *testing.T) {
 		t.Fatalf("openrouter name = %q, want OpenRouter", openRouter.Name)
 	}
 
+	// kilo is a custom endpoint with no catalogue: expect a single config stub
 	custom, ok := findModel(models, "kilo", "kilo")
 	if !ok {
 		t.Fatalf("expected provider-backed kilo row, got %#v", models)
@@ -139,6 +136,7 @@ func TestGetAvailableModelsIncludesConfiguredCompatibleProviders(t *testing.T) {
 		t.Fatalf("kilo name = %q, want Kilo", custom.Name)
 	}
 
+	// current model (gpt-5) is not in catalogue but is the active model: expect a fallback row
 	current, ok := findModel(models, "openai", "gpt-5")
 	if !ok {
 		t.Fatalf("expected current openai model row, got %#v", models)
