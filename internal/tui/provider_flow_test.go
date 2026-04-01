@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -8,10 +9,10 @@ import (
 	"github.com/Nomadcxx/smolbot/internal/app"
 	"github.com/Nomadcxx/smolbot/internal/client"
 	dialogcmp "github.com/Nomadcxx/smolbot/internal/components/dialog"
+	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 	cfgpkg "github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
-	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 )
 
 func TestProviderDialogShowsActiveConfiguredUnconfiguredProviders(t *testing.T) {
@@ -66,11 +67,11 @@ func TestProviderDialogShowsActiveConfiguredUnconfiguredProviders(t *testing.T) 
 	if !strings.Contains(view, "MiniMax") {
 		t.Fatalf("expected minimax in Configured section, got %q", view)
 	}
-	if !strings.Contains(view, "Not Configured") {
-		t.Fatalf("expected Not Configured section, got %q", view)
+	if !strings.Contains(view, "Not Configured") && !strings.Contains(view, "Popular") {
+		t.Fatalf("expected Not Configured or Popular section, got %q", view)
 	}
 	if !strings.Contains(view, "DeepSeek") {
-		t.Fatalf("expected deepseek in Not Configured section, got %q", view)
+		t.Fatalf("expected deepseek in unconfigured section, got %q", view)
 	}
 }
 
@@ -194,5 +195,97 @@ func TestMiniMaxProviderHasDefaultAPIBase(t *testing.T) {
 
 	if p.Name() != "minimax" {
 		t.Fatalf("expected provider name minimax, got %q", p.Name())
+	}
+}
+func TestTUICtrlAFromModelDialogTransitionsToProviderDialog(t *testing.T) {
+if !theme.Set("nord") {
+t.Fatal("expected nord theme to be available")
+}
+
+model := New(app.Config{})
+model.width = 80
+model.height = 40
+model.client = &fakeClient{
+models: []client.ModelInfo{
+{ID: "gpt-5", Name: "GPT-5", Provider: "openai", Selectable: true},
+},
+current: "gpt-5",
+}
+
+// Open model dialog
+_, cmd := model.handleSlashCommand("/model")
+updated, _ := model.Update(cmd())
+got := updated.(Model)
+
+// Verify model dialog is open
+if _, ok := got.dialog.(modelsDialog); !ok {
+t.Fatalf("expected models dialog to be open, got %T", got.dialog)
+}
+
+// Press Ctrl+A — should emit RequestProviderAddMsg and open provider dialog
+ctrlA := tea.Key{Code: 'a', Mod: tea.ModCtrl}
+updated2, cmd2 := got.Update(tea.KeyPressMsg(ctrlA))
+got2 := updated2.(Model)
+
+// After ctrl+a, model dialog is closed and requestProviderAdd is in flight
+if cmd2 == nil {
+t.Fatal("expected ctrl+a to produce a command")
+}
+msg := cmd2()
+if _, ok := msg.(dialogcmp.RequestProviderAddMsg); !ok {
+t.Fatalf("expected RequestProviderAddMsg from ctrl+a, got %T", msg)
+}
+
+// Feed the message back to TUI — it should set returnToModelsAfterProvider and start loading providers
+updated3, loadCmd := got2.Update(msg)
+got3 := updated3.(Model)
+if !got3.returnToModelsAfterProvider {
+t.Fatal("expected returnToModelsAfterProvider to be set after RequestProviderAddMsg")
+}
+if loadCmd == nil {
+t.Fatal("expected load providers command after RequestProviderAddMsg")
+}
+}
+
+func TestTUIReturnsToModelsAfterProviderConfig(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be available")
+	}
+
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 40
+	model.client = &fakeClient{
+		models: []client.ModelInfo{
+			{ID: "claude-opus", Name: "Claude Opus", Provider: "anthropic", Selectable: true},
+		},
+		current: "claude-opus",
+	}
+	// Set up state: returnToModelsAfterProvider=true with a providers dialog open
+	model.returnToModelsAfterProvider = true
+	model.dialog = providersDialog{dialogcmp.NewProviders(
+		[]dialogcmp.ProviderInfo{{Name: "anthropic", Type: "Anthropic", HasAuth: true}},
+		"anthropic", "claude-opus",
+	)}
+
+	// Simulate models.updated server event — the handler checks returnToModelsAfterProvider
+	// and replaces the providers dialog with a models dialog.
+	payload, _ := json.Marshal(client.ModelsUpdatedPayload{
+		Models:  []client.ModelInfo{{ID: "claude-opus", Name: "Claude Opus", Provider: "anthropic", Selectable: true}},
+		Current: "claude-opus",
+	})
+	eventMsg := EventMsg{Event: client.Event{
+		Type:    client.FrameEvent,
+		Event:   "models.updated",
+		Payload: payload,
+	}}
+	updated, _ := model.Update(eventMsg)
+	got := updated.(Model)
+
+	if got.returnToModelsAfterProvider {
+		t.Fatal("expected returnToModelsAfterProvider to be cleared after models.updated")
+	}
+	if _, ok := got.dialog.(modelsDialog); !ok {
+		t.Fatalf("expected models dialog to reopen after models.updated with returnToModelsAfterProvider=true, got %T", got.dialog)
 	}
 }

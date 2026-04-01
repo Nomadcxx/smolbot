@@ -254,6 +254,14 @@ func providerTypeName(providerID string) string {
 	return "OpenAI Compatible"
 }
 
+var popularProviders = map[string]bool{
+	"anthropic": true,
+	"openai":    true,
+	"gemini":    true,
+	"groq":      true,
+	"deepseek":  true,
+}
+
 func buildProviderRows(info []ProviderInfo, activeProvider, activeModel string) []providerRenderRow {
 	rows := []providerRenderRow{}
 
@@ -361,12 +369,37 @@ func buildProviderRows(info []ProviderInfo, activeProvider, activeModel string) 
 		}
 	}
 
-	if len(unconfiguredProviders) > 0 {
+	popularUnconfigured := []ProviderInfo{}
+	otherUnconfigured := []ProviderInfo{}
+	for _, p := range unconfiguredProviders {
+		if popularProviders[p.Name] {
+			popularUnconfigured = append(popularUnconfigured, p)
+		} else {
+			otherUnconfigured = append(otherUnconfigured, p)
+		}
+	}
+
+	if len(popularUnconfigured) > 0 {
 		rows = append(rows, providerRenderRow{
 			kind:    "section",
-			section: "Not Configured",
+			section: "Popular",
 		})
-		for _, p := range unconfiguredProviders {
+		for _, p := range popularUnconfigured {
+			rows = append(rows, providerRenderRow{
+				kind:      "provider",
+				label:     p.Name,
+				value:     p.Type,
+				isPartial: true,
+			})
+		}
+	}
+
+	if len(otherUnconfigured) > 0 {
+		rows = append(rows, providerRenderRow{
+			kind:    "section",
+			section: "Other",
+		})
+		for _, p := range otherUnconfigured {
 			rows = append(rows, providerRenderRow{
 				kind:      "provider",
 				label:     p.Name,
