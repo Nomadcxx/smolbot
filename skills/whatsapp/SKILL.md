@@ -1,9 +1,7 @@
 ---
----
 name: whatsapp
 description: "Operating procedures for the WhatsApp channel in smolbot. Use when sending messages, receiving inbound, handling errors, managing sessions, or troubleshooting WhatsApp connectivity."
 always: false
----
 ---
 
 ## WhatsApp Channel
@@ -21,6 +19,59 @@ smolbot → message tool → MessageRouter.Route() → WhatsApp Adapter.Send()
                                                     ↓
                                             WhatsApp WebSocket (port 443)
 ```
+
+### ⚡ Quick Start & Setup
+
+**1. Link your device (run once):**
+```
+smolbot channels login whatsapp
+```
+Scan the QR code with WhatsApp → Settings → Linked Devices → Link a Device.
+Session persists across restarts as long as `storePath` db file is intact.
+If the device becomes unlinked, run `smolbot channels login whatsapp` again.
+
+**2. Find your chat ID:**
+Send yourself a message from the phone. smolbot logs the inbound `chat_id` — use that exact string.
+
+**3. Minimal working config:**
+```json
+{
+  "whatsapp": {
+    "enabled": true,
+    "deviceName": "smolbot",
+    "storePath": "/home/nomadx/.smolbot/whatsapp.db",
+    "allowedChatIDs": ["61435311397@s.whatsapp.net"]
+  }
+}
+```
+
+**Chat ID format (DM):** International phone number (no leading `0`, no spaces, no `+`) + `@s.whatsapp.net`
+- 🇦🇺 Australia `04XXXXXXXX` → `614XXXXXXXX@s.whatsapp.net`
+- 🇺🇸 USA `+1 555 123 4567` → `15551234567@s.whatsapp.net`
+- 🇬🇧 UK `07XXX XXXXXX` → `447XXXXXXXXX@s.whatsapp.net`
+
+**Group chat ID format:** `123456789-987654321@g.us` (visible in smolbot logs when a group message arrives)
+
+---
+
+### 🚨 Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Send fails with `"unknown server"` | Wrong chat ID format (e.g. `0412...` instead of `61412...`, or wrong `@server`) | Reformat: strip leading `0`, prepend country code, append `@s.whatsapp.net` |
+| Messages sent OK but bot never replies | `allowedChatIDs` is empty or your JID isn't in it | Add your chat ID to `allowedChatIDs` in config |
+| Bot replies to nothing (no inbound) | Empty `allowedChatIDs` list — **all inbound is silently dropped** | Add at least one chat ID to the allowlist |
+| `"whatsapp login required"` or `"not logged in"` | Session expired or device was unlinked | Run `smolbot channels login whatsapp` |
+| QR code expires before scanning | 5-minute timeout elapsed | Run login command again |
+| `"stream: unknown"` | Protocol version mismatch with WhatsApp servers | Update smolbot binary (whatsmeow library needs update) |
+| No QR appears in TUI | Installer TUI goroutine issue (known bug) | Use `smolbot channels login whatsapp` directly instead |
+
+**⚠️ Critical: `allowedChatIDs` behaviour**
+- **Empty list** → all inbound messages are **dropped** (the bot hears nothing)
+- **Populated list** → only exact JID matches are processed
+- There is no "allow all" mode in production; you must always list at least one chat ID
+
+---
 
 ### Sending Messages
 
