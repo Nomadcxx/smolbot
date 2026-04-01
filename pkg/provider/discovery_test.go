@@ -281,3 +281,29 @@ func findModel(models []ModelInfo, providerID, modelID string) (ModelInfo, bool)
 	}
 	return ModelInfo{}, false
 }
+
+func TestCatalogueMetadataFlowsToModelInfo(t *testing.T) {
+cfg := &config.Config{}
+cfg.Providers = map[string]config.ProviderConfig{
+"anthropic": {APIKey: "test-key"},
+}
+
+models, err := GetAvailableModels(cfg)
+if err != nil {
+t.Fatalf("GetAvailableModels: %v", err)
+}
+
+for _, m := range models {
+if m.Provider != "anthropic" || m.Source != "catalogue" {
+continue
+}
+if m.ReleaseDate == "" {
+t.Errorf("model %q has empty ReleaseDate", m.ID)
+}
+if m.ContextWindow == 0 {
+t.Errorf("model %q has zero ContextWindow", m.ID)
+}
+return
+}
+t.Fatal("no anthropic catalogue models found")
+}

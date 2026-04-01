@@ -15,7 +15,16 @@ type OAuthProviderFilter struct {
 }
 
 func NewModels(providerConfig *cfgpkg.Config, models []client.ModelInfo, current string) ModelsModel {
-	m := ModelsModel{models: models, current: current}
+	return NewModelsWithState(providerConfig, models, current, nil, nil)
+}
+
+func NewModelsWithState(providerConfig *cfgpkg.Config, models []client.ModelInfo, current string, favorites []string, recents []string) ModelsModel {
+	m := ModelsModel{
+		models:    models,
+		current:   current,
+		favorites: append([]string(nil), favorites...),
+		recents:   append([]string(nil), recents...),
+	}
 	for _, model := range models {
 		if model.ID == current {
 			m.currentProvider = model.Provider
@@ -45,6 +54,16 @@ type ModelChosenMsg struct {
 	ID string
 }
 
+type ModelFavoriteToggledMsg struct {
+	ID string
+}
+
+type ModelRemovedFromRecentsMsg struct {
+	ID string
+}
+
+type RequestProviderAddMsg struct{}
+
 type ModelsModel struct {
 	models          []client.ModelInfo
 	rows            []modelRenderRow
@@ -56,6 +75,8 @@ type ModelsModel struct {
 	pending         string
 	oauthFilter     OAuthProviderFilter
 	termWidth       int
+	favorites       []string
+	recents         []string
 }
 
 func (m ModelsModel) Update(msg tea.Msg) (ModelsModel, tea.Cmd) {
@@ -89,6 +110,20 @@ func (m ModelsModel) Update(msg tea.Msg) (ModelsModel, tea.Cmd) {
 			}
 			id := focused.ID
 			return m, func() tea.Msg { return ModelChosenMsg{ID: id} }
+		case "ctrl+f":
+			if focused, ok := m.focusedModel(); ok {
+				id := focused.ID
+				return m, func() tea.Msg { return ModelFavoriteToggledMsg{ID: id} }
+			}
+			return m, nil
+		case "ctrl+x":
+			if focused, ok := m.focusedModel(); ok {
+				id := focused.ID
+				return m, func() tea.Msg { return ModelRemovedFromRecentsMsg{ID: id} }
+			}
+			return m, nil
+		case "ctrl+a":
+			return m, func() tea.Msg { return RequestProviderAddMsg{} }
 		case "backspace":
 			if len(m.filter) > 0 {
 				m.filter = m.filter[:len(m.filter)-1]
@@ -138,7 +173,7 @@ func (m ModelsModel) View() string {
 			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▼ more below"))
 		}
 	}
-	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type filter • Space mark • Enter save • Esc close"))
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type filter • Ctrl+F fav • Ctrl+A add provider • Space mark • Enter save • Esc close"))
 	return lipgloss.NewStyle().
 		Background(t.Panel).
 		Border(lipgloss.RoundedBorder()).
@@ -160,7 +195,7 @@ func (m *ModelsModel) applyFilter() {
 		}
 		filtered = append(filtered, model)
 	}
-	m.rows = buildModelRows(filtered, m.currentProvider)
+	m.rows = buildModelRows(filtered, m.currentProvider, m.favorites, m.recents)
 	m.selectable = m.selectable[:0]
 	for i, row := range m.rows {
 		if row.kind == "model" {
@@ -188,18 +223,77 @@ func (m *ModelsModel) applyFilter() {
 }
 
 type modelRenderRow struct {
-	kind    string
-	model   client.ModelInfo
-	group   string
-	current bool
-	focused bool
-	pending bool
+	kind       string
+	model      client.ModelInfo
+	group      string
+	current    bool
+	focused    bool
+	pending    bool
+	isFavorite bool
 }
 
-func buildModelRows(models []client.ModelInfo, currentProvider string) []modelRenderRow {
+func buildModelRows(models []client.ModelInfo, currentProvider string, favorites []string, recents []string) []modelRenderRow {
+	favSet := make(map[string]bool, len(favorites))
+	for _, id := range favorites {
+		favSet[id] = true
+	}
+
+	modelByID := make(map[string]client.ModelInfo, len(models))
+	for _, m := range models {
+		modelByID[m.ID] = m
+	}
+
+	shown := make(map[string]bool)
+	rows := make([]modelRenderRow, 0, len(models)+4)
+
+	// Favorites section
+	favRows := make([]modelRenderRow, 0)
+	for _, id := range favorites {
+		m, ok := modelByID[id]
+		if !ok {
+			continue
+		}
+		kind := "info"
+		if isSelectableModel(m) {
+			kind = "model"
+		}
+		favRows = append(favRows, modelRenderRow{kind: kind, model: m, group: "Favorites", isFavorite: true})
+		shown[id] = true
+	}
+	if len(favRows) > 0 {
+		rows = append(rows, modelRenderRow{kind: "header", group: "Favorites"})
+		rows = append(rows, favRows...)
+	}
+
+	// Recents section (exclude those already shown in favorites)
+	recentRows := make([]modelRenderRow, 0)
+	for _, id := range recents {
+		if shown[id] {
+			continue
+		}
+		m, ok := modelByID[id]
+		if !ok {
+			continue
+		}
+		kind := "info"
+		if isSelectableModel(m) {
+			kind = "model"
+		}
+		recentRows = append(recentRows, modelRenderRow{kind: kind, model: m, group: "Recent", isFavorite: favSet[id]})
+		shown[id] = true
+	}
+	if len(recentRows) > 0 {
+		rows = append(rows, modelRenderRow{kind: "header", group: "Recent"})
+		rows = append(rows, recentRows...)
+	}
+
+	// Provider groups — skip models already shown
 	grouped := make(map[string][]client.ModelInfo)
 	order := make([]string, 0)
 	for _, model := range models {
+		if shown[model.ID] {
+			continue
+		}
 		group := model.Provider
 		if group == "" {
 			group = "unknown"
@@ -209,8 +303,6 @@ func buildModelRows(models []client.ModelInfo, currentProvider string) []modelRe
 		}
 		grouped[group] = append(grouped[group], model)
 	}
-
-	rows := make([]modelRenderRow, 0, len(models)+len(order))
 	for _, group := range order {
 		rows = append(rows, modelRenderRow{
 			kind:    "header",
@@ -223,9 +315,10 @@ func buildModelRows(models []client.ModelInfo, currentProvider string) []modelRe
 				kind = "model"
 			}
 			rows = append(rows, modelRenderRow{
-				kind:  kind,
-				model: model,
-				group: group,
+				kind:       kind,
+				model:      model,
+				group:      group,
+				isFavorite: favSet[model.ID],
 			})
 		}
 	}
@@ -288,18 +381,39 @@ func (m ModelsModel) indexOfSelectableID(id string) int {
 	return -1
 }
 
+func (m ModelsModel) WithFavorites(favorites []string) ModelsModel {
+	m.favorites = append([]string(nil), favorites...)
+	m.applyFilter()
+	return m
+}
+
+func (m ModelsModel) WithRecents(recents []string) ModelsModel {
+	m.recents = append([]string(nil), recents...)
+	m.applyFilter()
+	return m
+}
+
 func (r modelRenderRow) render(t *theme.Theme) string {
 	switch r.kind {
 	case "header":
-		label := "Provider: " + r.group
-		if r.current {
-			label += " (current)"
-		}
+		var label string
 		style := lipgloss.NewStyle().Foreground(t.Primary).Bold(true)
-		if r.current {
-			style = style.Foreground(t.Success)
+		switch r.group {
+		case "Favorites":
+			label = style.Foreground(t.Warning).Render("★ Favorites")
+		case "Recent":
+			label = style.Foreground(t.TextMuted).Render("⏱ Recent")
+		default:
+			displayName := ProviderDisplayName(r.group)
+			if r.current {
+				style = style.Foreground(t.Success)
+			}
+			label = style.Render(displayName)
+			if r.current {
+				label += lipgloss.NewStyle().Foreground(t.Success).Render(" (current)")
+			}
 		}
-		return style.Render(label)
+		return label
 	default:
 		model := r.model
 		label := strings.TrimSpace(model.Name)
@@ -316,8 +430,14 @@ func (r modelRenderRow) render(t *theme.Theme) string {
 		if extra := optionalModelDescription(model); extra != "" {
 			descParts = append(descParts, extra)
 		}
-		if r.current {
-			label += lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render(" current")
+		if model.ReleaseDate != "" {
+			descParts = append(descParts, lipgloss.NewStyle().Foreground(t.TextMuted).Render(model.ReleaseDate))
+		}
+		if model.IsFree {
+			descParts = append(descParts, lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render("Free"))
+		}
+		if r.isFavorite {
+			descParts = append(descParts, lipgloss.NewStyle().Foreground(t.Warning).Render("★"))
 		}
 		if r.pending {
 			label += lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render(" pending")
@@ -325,10 +445,15 @@ func (r modelRenderRow) render(t *theme.Theme) string {
 		if r.kind == "info" {
 			label += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" info")
 		}
-		prefix := "  "
+		cursorChar := " "
 		if r.focused {
-			prefix = lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("> ")
+			cursorChar = lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render(">")
 		}
+		dotChar := " "
+		if r.current {
+			dotChar = lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render("●")
+		}
+		prefix := cursorChar + " " + dotChar + " "
 		row := prefix + label
 		if len(descParts) > 0 {
 			row += lipgloss.NewStyle().Foreground(t.TextMuted).Render("  " + strings.Join(descParts, " • "))
@@ -355,3 +480,4 @@ func (m ModelsModel) WithTerminalWidth(w int) ModelsModel {
 	m.termWidth = w
 	return m
 }
+

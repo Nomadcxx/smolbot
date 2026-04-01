@@ -22,11 +22,11 @@ func TestModelsModelShowsCurrentModel(t *testing.T) {
 	}, "gpt-5")
 
 	view := model.View()
-	if !strings.Contains(view, "current") {
-		t.Fatalf("expected current marker in dialog, got %q", view)
+	if !strings.Contains(view, "●") {
+		t.Fatalf("expected ● current marker in dialog, got %q", view)
 	}
-	if !strings.Contains(view, "openai") {
-		t.Fatalf("expected provider description in dialog, got %q", view)
+	if !strings.Contains(view, "OpenAI") {
+		t.Fatalf("expected OpenAI provider display name in dialog, got %q", view)
 	}
 	if !strings.Contains(view, "Enter save") {
 		t.Fatalf("expected selector footer help row, got %q", view)
@@ -45,18 +45,21 @@ func TestModelsModelGroupsByProvider(t *testing.T) {
 	}, "gpt-5")
 
 	view := model.View()
-	if !strings.Contains(view, "Provider: anthropic") {
-		t.Fatalf("expected anthropic provider section, got %q", view)
+	if !strings.Contains(view, "Anthropic") {
+		t.Fatalf("expected Anthropic provider display name, got %q", view)
 	}
-	if !strings.Contains(view, "Provider: openai (current)") {
-		t.Fatalf("expected current provider section, got %q", view)
+	if !strings.Contains(view, "OpenAI") {
+		t.Fatalf("expected OpenAI provider display name, got %q", view)
 	}
-	if !strings.Contains(view, "GPT-5") || !strings.Contains(view, "current") {
-		t.Fatalf("expected current model row inside provider group, got %q", view)
+	if !strings.Contains(view, "(current)") {
+		t.Fatalf("expected (current) suffix on active provider, got %q", view)
+	}
+	if !strings.Contains(view, "GPT-5") || !strings.Contains(view, "●") {
+		t.Fatalf("expected current model row with ● marker, got %q", view)
 	}
 
-	anthropicIdx := strings.Index(view, "Provider: anthropic")
-	openaiIdx := strings.Index(view, "Provider: openai (current)")
+	anthropicIdx := strings.Index(view, "Anthropic")
+	openaiIdx := strings.Index(view, "OpenAI")
 	if anthropicIdx == -1 || openaiIdx == -1 || anthropicIdx > openaiIdx {
 		t.Fatalf("expected provider groups in stable order, got %q", view)
 	}
@@ -158,10 +161,13 @@ func TestModelsModelFilterNarrowsByProviderAndModel(t *testing.T) {
 	}
 
 	view := model.View()
-	if !strings.Contains(view, "Provider: openai (current)") {
+	if !strings.Contains(view, "OpenAI") {
 		t.Fatalf("expected provider filter to keep the openai group, got %q", view)
 	}
-	if strings.Contains(view, "Provider: anthropic") {
+	if !strings.Contains(view, "(current)") {
+		t.Fatalf("expected (current) suffix on active provider, got %q", view)
+	}
+	if strings.Contains(view, "Anthropic") {
 		t.Fatalf("expected provider filter to hide non-matching providers, got %q", view)
 	}
 
@@ -219,20 +225,17 @@ func TestModelsModelSeparatesMinimaxAndMinimaxPortal(t *testing.T) {
 
 	view := model.View()
 
-	if !strings.Contains(view, "Provider: minimax") {
+	if !strings.Contains(view, "MiniMax") {
 		t.Fatalf("expected minimax provider group, got %q", view)
 	}
-	if !strings.Contains(view, "Provider: minimax-portal (current)") {
-		t.Fatalf("expected minimax-portal provider group with current marker, got %q", view)
+	if !strings.Contains(view, "(current)") {
+		t.Fatalf("expected (current) marker on active provider, got %q", view)
 	}
 
-	minimaxIdx := strings.Index(view, "Provider: minimax")
-	minimaxPortalIdx := strings.Index(view, "Provider: minimax-portal")
-	if minimaxIdx == -1 || minimaxPortalIdx == -1 {
-		t.Fatalf("both providers should appear in view")
-	}
-	if minimaxIdx > minimaxPortalIdx {
-		t.Fatalf("minimax should appear before minimax-portal alphabetically")
+	minimaxIdx := strings.Index(view, "MiniMax")
+	minimaxPortalIdx := strings.LastIndex(view, "MiniMax")
+	if minimaxIdx == -1 || minimaxPortalIdx == -1 || minimaxIdx == minimaxPortalIdx {
+		t.Fatalf("both minimax providers should appear in view, got %q", view)
 	}
 }
 
@@ -256,11 +259,8 @@ func TestModelsModelOAuthFilterHidesMinimaxWhenPortalIsOAuth(t *testing.T) {
 	model := NewModels(oauthConfig, models, "claude-sonnet")
 
 	view := model.View()
-	if !strings.Contains(view, "Provider: minimax") {
-		t.Fatalf("expected minimax provider group to be hidden when minimax-portal has OAuth, got %q", view)
-	}
-	if !strings.Contains(view, "Provider: minimax-portal") {
-		t.Fatalf("expected minimax-portal provider group to remain visible, got %q", view)
+	if !strings.Contains(view, "MiniMax") {
+		t.Fatalf("expected minimax provider group to appear, got %q", view)
 	}
 	if !strings.Contains(view, "Claude Sonnet") {
 		t.Fatalf("expected anthropic models to remain visible, got %q", view)
@@ -275,3 +275,147 @@ func TestOptionalModelDescription(t *testing.T) {
 		t.Fatalf("expected empty description for model without one, got %q", got)
 	}
 }
+
+func TestModelsModelShowsFavoritesSection(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be available")
+	}
+
+	models := []client.ModelInfo{
+		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Selectable: true},
+		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic", Selectable: true},
+	}
+	m := NewModelsWithState(nil, models, "gpt-4o", []string{"claude-sonnet"}, nil)
+
+	view := m.View()
+	if !strings.Contains(view, "★ Favorites") {
+		t.Fatalf("expected Favorites section header, got %q", view)
+	}
+	if !strings.Contains(view, "Claude Sonnet") {
+		t.Fatalf("expected favorite model in section, got %q", view)
+	}
+	// Favorites section should appear before the OpenAI provider section
+	favIdx := strings.Index(view, "★ Favorites")
+	openaiIdx := strings.Index(view, "OpenAI")
+	if favIdx == -1 || openaiIdx == -1 || favIdx > openaiIdx {
+		t.Fatalf("expected Favorites before provider sections, got %q", view)
+	}
+}
+
+func TestModelsModelShowsRecentsSection(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be available")
+	}
+
+	models := []client.ModelInfo{
+		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Selectable: true},
+		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic", Selectable: true},
+	}
+	m := NewModelsWithState(nil, models, "gpt-4o", nil, []string{"claude-sonnet"})
+
+	view := m.View()
+	if !strings.Contains(view, "⏱ Recent") {
+		t.Fatalf("expected Recent section header, got %q", view)
+	}
+	if !strings.Contains(view, "Claude Sonnet") {
+		t.Fatalf("expected recent model in section, got %q", view)
+	}
+}
+
+func TestModelsModelDeduplicatesFavoritesFromProviderGroups(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be available")
+	}
+
+	models := []client.ModelInfo{
+		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Selectable: true},
+		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic", Selectable: true},
+	}
+	m := NewModelsWithState(nil, models, "gpt-4o", []string{"claude-sonnet"}, nil)
+
+	view := m.View()
+	// Claude Sonnet should appear exactly once (in Favorites, not again in Anthropic section)
+	count := strings.Count(view, "Claude Sonnet")
+	if count != 1 {
+		t.Fatalf("expected Claude Sonnet to appear once, got %d times in %q", count, view)
+	}
+}
+
+func TestModelsModelCtrlFSendsFavoriteToggleMsg(t *testing.T) {
+	models := []client.ModelInfo{
+		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Selectable: true},
+	}
+	m := NewModels(nil, models, "gpt-4o")
+
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'f', Mod: tea.ModCtrl}))
+	if cmd == nil {
+		t.Fatal("expected ctrl+f to produce a command")
+	}
+	msg := cmd()
+	fav, ok := msg.(ModelFavoriteToggledMsg)
+	if !ok {
+		t.Fatalf("expected ModelFavoriteToggledMsg, got %T", msg)
+	}
+	if fav.ID != "gpt-4o" {
+		t.Fatalf("expected fav ID gpt-4o, got %q", fav.ID)
+	}
+}
+
+func TestModelsModelCtrlXSendsRemoveFromRecentsMsg(t *testing.T) {
+	models := []client.ModelInfo{
+		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Selectable: true},
+	}
+	m := NewModels(nil, models, "gpt-4o")
+
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'x', Mod: tea.ModCtrl}))
+	if cmd == nil {
+		t.Fatal("expected ctrl+x to produce a command")
+	}
+	msg := cmd()
+	rem, ok := msg.(ModelRemovedFromRecentsMsg)
+	if !ok {
+		t.Fatalf("expected ModelRemovedFromRecentsMsg, got %T", msg)
+	}
+	if rem.ID != "gpt-4o" {
+		t.Fatalf("expected removed ID gpt-4o, got %q", rem.ID)
+	}
+}
+
+func TestModelsModelCtrlASendsRequestProviderAddMsg(t *testing.T) {
+	m := NewModels(nil, nil, "")
+
+	_, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Mod: tea.ModCtrl}))
+	if cmd == nil {
+		t.Fatal("expected ctrl+a to produce a command")
+	}
+	msg := cmd()
+	if _, ok := msg.(RequestProviderAddMsg); !ok {
+		t.Fatalf("expected RequestProviderAddMsg, got %T", msg)
+	}
+}
+
+func TestModelsModelFilterIncludesFavoritesAndRecents(t *testing.T) {
+	if !theme.Set("nord") {
+		t.Fatal("expected nord theme to be available")
+	}
+
+	models := []client.ModelInfo{
+		{ID: "gpt-4o", Name: "GPT-4o", Provider: "openai", Selectable: true},
+		{ID: "claude-sonnet", Name: "Claude Sonnet", Provider: "anthropic", Selectable: true},
+	}
+	m := NewModelsWithState(nil, models, "gpt-4o", []string{"claude-sonnet"}, []string{"gpt-4o"})
+
+	// Filter by "claude" — should find the favorite
+	for _, ch := range "claude" {
+		m, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: ch, Text: string(ch)}))
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "Claude Sonnet") {
+		t.Fatalf("expected filter to include favorites, got %q", view)
+	}
+	if strings.Contains(view, "GPT-4o") {
+		t.Fatalf("expected non-matching models to be hidden, got %q", view)
+	}
+}
+

@@ -130,10 +130,10 @@ func TestModelPickerGroupsByProviderWithCurrentModelHighlighted(t *testing.T) {
 
 	view := plain(got.View().Content)
 
-	if !strings.Contains(view, "Provider: openai (current)") {
+	if !strings.Contains(view, "OpenAI (current)") {
 		t.Fatalf("expected current provider group marker, got %q", view)
 	}
-	if !strings.Contains(view, "Provider: anthropic") {
+	if !strings.Contains(view, "Anthropic") {
 		t.Fatalf("expected non-current provider group, got %q", view)
 	}
 	if !strings.Contains(view, "gpt-5") || !strings.Contains(view, "current") {

@@ -12,7 +12,7 @@ func dialogWidth(termWidth, preferred int) int {
 	return preferred
 }
 
-const maxVisibleItems = 7
+const maxVisibleItems = 10
 
 func matchesQuery(query string, fields ...string) bool {
 	tokens := strings.Fields(strings.ToLower(query))
@@ -20,21 +20,22 @@ func matchesQuery(query string, fields ...string) bool {
 		return true
 	}
 	haystack := strings.ToLower(strings.Join(fields, " "))
-	words := strings.FieldsFunc(haystack, func(r rune) bool {
-		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
-	})
 	for _, token := range tokens {
-		if len(token) == 1 {
-			if !hasWordPrefix(words, token) {
-				return false
-			}
-			continue
-		}
-		if !strings.Contains(haystack, token) && !hasWordPrefix(words, token) {
+		if !fuzzyMatch(token, haystack) {
 			return false
 		}
 	}
 	return true
+}
+
+func fuzzyMatch(needle, haystack string) bool {
+	ni := 0
+	for hi := 0; hi < len(haystack) && ni < len(needle); hi++ {
+		if haystack[hi] == needle[ni] {
+			ni++
+		}
+	}
+	return ni == len(needle)
 }
 
 func visibleBounds(total, cursor int) (int, int) {
@@ -53,11 +54,3 @@ func visibleBounds(total, cursor int) (int, int) {
 	return start, end
 }
 
-func hasWordPrefix(words []string, token string) bool {
-	for _, word := range words {
-		if strings.HasPrefix(word, token) {
-			return true
-		}
-	}
-	return false
-}

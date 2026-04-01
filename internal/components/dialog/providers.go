@@ -48,6 +48,14 @@ var providerMeta = map[string]providerMetaEntry{
 	"ollama":       {"Ollama", "Local models — no API key needed"},
 }
 
+// ProviderDisplayName returns a human-friendly name for a provider ID.
+func ProviderDisplayName(id string) string {
+	if meta, ok := providerMeta[id]; ok {
+		return meta.DisplayName
+	}
+	return id
+}
+
 type ProviderInfo struct {
 	Name        string
 	Type        string

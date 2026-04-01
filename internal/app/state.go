@@ -6,11 +6,65 @@ import (
 	"path/filepath"
 )
 
+const MaxRecents = 10
+
 type State struct {
-	Theme          string `json:"theme"`
-	LastSession    string `json:"lastSession"`
-	LastModel      string `json:"lastModel"`
-	SidebarVisible *bool  `json:"sidebarVisible,omitempty"`
+	Theme          string   `json:"theme"`
+	LastSession    string   `json:"lastSession"`
+	LastModel      string   `json:"lastModel"`
+	SidebarVisible *bool    `json:"sidebarVisible,omitempty"`
+	Favorites      []string `json:"favorites,omitempty"`
+	Recents        []string `json:"recents,omitempty"`
+}
+
+func (s *State) ToggleFavorite(modelID string) bool {
+	for i, id := range s.Favorites {
+		if id == modelID {
+			s.Favorites = append(s.Favorites[:i], s.Favorites[i+1:]...)
+			return false
+		}
+	}
+	s.Favorites = append(s.Favorites, modelID)
+	return true
+}
+
+func (s *State) IsFavorite(modelID string) bool {
+	for _, id := range s.Favorites {
+		if id == modelID {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *State) AddRecent(modelID string) {
+	s.RemoveRecent(modelID)
+	s.Recents = append([]string{modelID}, s.Recents...)
+	if len(s.Recents) > MaxRecents {
+		s.Recents = s.Recents[:MaxRecents]
+	}
+}
+
+func (s *State) RemoveRecent(modelID string) {
+	out := s.Recents[:0]
+	for _, id := range s.Recents {
+		if id != modelID {
+			out = append(out, id)
+		}
+	}
+	s.Recents = out
+}
+
+func (s *State) RecentModelIDs() []string {
+	cp := make([]string, len(s.Recents))
+	copy(cp, s.Recents)
+	return cp
+}
+
+func (s *State) FavoriteModelIDs() []string {
+	cp := make([]string, len(s.Favorites))
+	copy(cp, s.Favorites)
+	return cp
 }
 
 func statePath() string {

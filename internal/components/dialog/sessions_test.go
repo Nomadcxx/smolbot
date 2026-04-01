@@ -48,8 +48,8 @@ func TestSessionsModelShowsCurrentMarkerAndFooterHelp(t *testing.T) {
 }
 
 func TestSessionsModelShowsOverflowCues(t *testing.T) {
-	sessions := make([]client.SessionInfo, 0, 10)
-	for i := 0; i < 10; i++ {
+	sessions := make([]client.SessionInfo, 0, 12)
+	for i := 0; i < 12; i++ {
 		sessions = append(sessions, client.SessionInfo{Key: "tui:session-" + string(rune('a'+i))})
 	}
 
@@ -60,7 +60,7 @@ func TestSessionsModelShowsOverflowCues(t *testing.T) {
 		t.Fatalf("expected lower overflow cue, got %q", view)
 	}
 
-	for i := 0; i < 7; i++ {
+	for i := 0; i < 9; i++ {
 		model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	}
 

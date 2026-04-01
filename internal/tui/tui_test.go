@@ -1799,7 +1799,7 @@ func TestSessionDialogShowsCurrentMarker(t *testing.T) {
 func TestSessionDialogShowsOverflowCues(t *testing.T) {
 	model := New(app.Config{})
 	model.width = 80
-	model.height = 24
+	model.height = 50
 	model.client = &fakeClient{
 		sessions: []client.SessionInfo{
 			{Key: "tui:00", Preview: "preview 00"},
@@ -1812,6 +1812,9 @@ func TestSessionDialogShowsOverflowCues(t *testing.T) {
 			{Key: "tui:07", Preview: "preview 07"},
 			{Key: "tui:08", Preview: "preview 08"},
 			{Key: "tui:09", Preview: "preview 09"},
+			{Key: "tui:10", Preview: "preview 10"},
+			{Key: "tui:11", Preview: "preview 11"},
+			{Key: "tui:12", Preview: "preview 12"},
 		},
 	}
 
@@ -1821,7 +1824,7 @@ func TestSessionDialogShowsOverflowCues(t *testing.T) {
 	if !strings.Contains(plain(got.View().Content), "▼ more below") {
 		t.Fatalf("expected session overflow cue below initial window, got %q", plain(got.View().Content))
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 7; i++ {
 		updated, _ = got.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 		got = updated.(Model)
 	}
@@ -1850,7 +1853,7 @@ func TestModelDialogShowsCurrentModel(t *testing.T) {
 	if !strings.Contains(view, "GPT-5") || !strings.Contains(view, "gpt-5") {
 		t.Fatalf("expected model dialog to show model label and id, got %q", view)
 	}
-	if !strings.Contains(view, "openai") || !strings.Contains(view, "current") {
+	if !strings.Contains(view, "openai") && !strings.Contains(view, "OpenAI") || !strings.Contains(view, "current") {
 		t.Fatalf("expected model dialog to show provider and current marker, got %q", view)
 	}
 }

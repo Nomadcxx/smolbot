@@ -104,6 +104,9 @@ func TestCommandPaletteShowsOverflowCues(t *testing.T) {
 		"/help",
 		"/quit",
 		"/theme nord",
+		"/compact",
+		"/skills",
+		"/mcps",
 	})
 
 	view := model.View()
@@ -114,7 +117,7 @@ func TestCommandPaletteShowsOverflowCues(t *testing.T) {
 		t.Fatalf("expected footer help row, got %q", view)
 	}
 
-	for i := 0; i < 7; i++ {
+	for i := 0; i < 9; i++ {
 		model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'j', Text: "j"}))
 	}
 

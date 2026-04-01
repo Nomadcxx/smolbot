@@ -25,6 +25,9 @@ func TestSkillsModelRendersAndFilters(t *testing.T) {
 	}
 
 	model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Text: "m"}))
+	model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'e', Text: "e"}))
+	model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'm', Text: "m"}))
+	model, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'o', Text: "o"}))
 	view = plainDialog(model.View())
 	if !strings.Contains(view, "hybrid-memory-ops") || strings.Contains(view, "brainstorming") {
 		t.Fatalf("expected filter to narrow results, got %q", view)

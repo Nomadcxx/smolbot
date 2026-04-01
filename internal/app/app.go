@@ -21,6 +21,7 @@ type App struct {
 	Model          string
 	SidebarVisible bool
 	Connected      bool
+	State          State
 }
 
 func New(cfg Config) *App {
@@ -48,6 +49,7 @@ func New(cfg Config) *App {
 		Session:        session,
 		Model:          state.LastModel,
 		SidebarVisible: state.SidebarVisible == nil || *state.SidebarVisible,
+		State:          state,
 	}
 }
 

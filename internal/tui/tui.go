@@ -147,6 +147,8 @@ type Model struct {
 	messagesWidth        int
 	sidebar              sidebarcmp.Model
 	clipboardWrite       func(string) error
+
+	returnToModelsAfterProvider bool
 }
 
 func New(cfg app.Config) Model {
@@ -238,12 +240,12 @@ func (m Model) reconnectCmd(delay time.Duration) tea.Cmd {
 
 func (m Model) saveStateCmd() tea.Cmd {
 	return func() tea.Msg {
-		_ = app.SaveState(app.State{
-			Theme:          m.app.Theme,
-			LastSession:    m.app.Session,
-			LastModel:      m.app.Model,
-			SidebarVisible: boolPtr(m.sidebarVisible),
-		})
+		state := m.app.State
+		state.Theme = m.app.Theme
+		state.LastSession = m.app.Session
+		state.LastModel = m.app.Model
+		state.SidebarVisible = boolPtr(m.sidebarVisible)
+		_ = app.SaveState(state)
 		if m.client != nil {
 			m.client.Close()
 		}
@@ -253,12 +255,12 @@ func (m Model) saveStateCmd() tea.Cmd {
 
 func (m Model) persistStateCmd() tea.Cmd {
 	return func() tea.Msg {
-		_ = app.SaveState(app.State{
-			Theme:          m.app.Theme,
-			LastSession:    m.app.Session,
-			LastModel:      m.app.Model,
-			SidebarVisible: boolPtr(m.sidebarVisible),
-		})
+		state := m.app.State
+		state.Theme = m.app.Theme
+		state.LastSession = m.app.Session
+		state.LastModel = m.app.Model
+		state.SidebarVisible = boolPtr(m.sidebarVisible)
+		_ = app.SaveState(state)
 		return nil
 	}
 }
@@ -270,6 +272,20 @@ func (m Model) syncModelCmd() tea.Cmd {
 			return nil
 		}
 		return ModelCurrentMsg{Current: current}
+	}
+}
+
+func (m Model) loadProvidersCmd() tea.Cmd {
+	return func() tea.Msg {
+		models, current, err := m.client.ModelsList()
+		if err != nil {
+			return ChatErrorMsg{Message: err.Error()}
+		}
+		status, err := m.client.Status(m.app.Session)
+		if err != nil {
+			return ChatErrorMsg{Message: err.Error()}
+		}
+		return ProvidersLoadedMsg{Models: models, Current: current, Status: status}
 	}
 }
 
@@ -557,7 +573,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if current == "" {
 			current = m.app.Model
 		}
-		m.dialog = modelsDialog{dialogcmp.NewModels(m.providerConfig, msg.Models, current)}
+		m.dialog = modelsDialog{dialogcmp.NewModelsWithState(m.providerConfig, msg.Models, current, m.app.State.FavoriteModelIDs(), m.app.State.RecentModelIDs())}
 		m.dialog = m.dialog.SetTerminalWidth(m.width)
 		return m, nil
 	case SkillsLoadedMsg:
@@ -574,6 +590,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ModelSetMsg:
 		m.app.Model = msg.ID
+		m.app.State.AddRecent(msg.ID)
 		m.footer.SetModel(msg.ID)
 		m.sidebar.SetModel(msg.ID)
 		m.recalcLayout()
@@ -617,6 +634,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return ModelSetMsg{ID: current}
 		}
+	case dialogcmp.ModelFavoriteToggledMsg:
+		m.app.State.ToggleFavorite(msg.ID)
+		if d, ok := m.dialog.(modelsDialog); ok {
+			d.ModelsModel = d.ModelsModel.WithFavorites(m.app.State.FavoriteModelIDs())
+			m.dialog = d
+		}
+		return m, m.persistStateCmd()
+	case dialogcmp.ModelRemovedFromRecentsMsg:
+		m.app.State.RemoveRecent(msg.ID)
+		if d, ok := m.dialog.(modelsDialog); ok {
+			d.ModelsModel = d.ModelsModel.WithRecents(m.app.State.RecentModelIDs())
+			m.dialog = d
+		}
+		return m, m.persistStateCmd()
+	case dialogcmp.RequestProviderAddMsg:
+		m.dialog = nil
+		m.returnToModelsAfterProvider = true
+		return m, m.loadProvidersCmd()
 	case dialogcmp.ConfigureProviderMsg:
 		return m.handleConfigureProvider(msg)
 	case dialogcmp.RemoveProviderMsg:
@@ -821,7 +856,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.app.Model = p.Current
 				if _, ok := m.dialog.(providersDialog); ok {
-					m.dialog = providersDialog{dialogcmp.NewProvidersFromData(p.Models, p.Current, client.StatusPayload{}, m.providerConfig)}
+					if m.returnToModelsAfterProvider {
+						m.returnToModelsAfterProvider = false
+						m.dialog = modelsDialog{dialogcmp.NewModelsWithState(m.providerConfig, p.Models, p.Current, m.app.State.FavoriteModelIDs(), m.app.State.RecentModelIDs())}
+						m.dialog = m.dialog.SetTerminalWidth(m.width)
+					} else {
+						m.dialog = providersDialog{dialogcmp.NewProvidersFromData(p.Models, p.Current, client.StatusPayload{}, m.providerConfig)}
+					}
 				}
 			}
 		}
@@ -924,6 +965,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dialog = newMenuDialog()
 			m.dialog = m.dialog.SetTerminalWidth(m.width)
 			return m, nil
+		case "f2":
+			recents := m.app.State.RecentModelIDs()
+			next := nextRecentModel(recents, m.app.Model)
+			if next == "" {
+				return m, func() tea.Msg {
+					models, current, err := m.client.ModelsList()
+					if err != nil {
+						return ChatErrorMsg{Message: err.Error()}
+					}
+					return ModelsLoadedMsg{Models: models, Current: current}
+				}
+			}
+			return m, func() tea.Msg {
+				current, err := m.client.ModelsSet(next)
+				if err != nil {
+					return ChatErrorMsg{Message: err.Error()}
+				}
+				return ModelSetMsg{ID: current}
+			}
 		case "c", "y":
 			if !m.editor.Focused() {
 				if cmd := m.copyLastAssistantCmd(); cmd != nil {
@@ -959,6 +1019,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleSwitchProvider(msg dialogcmp.SwitchProviderMsg) (tea.Model, tea.Cmd) {
 	m.dialog = nil
 	return m, nil
+}
+
+func nextRecentModel(recents []string, current string) string {
+	if len(recents) < 2 {
+		return ""
+	}
+	for i, id := range recents {
+		if id == current {
+			return recents[(i+1)%len(recents)]
+		}
+	}
+	return recents[0]
 }
 
 func (m Model) handleConfigureProvider(msg dialogcmp.ConfigureProviderMsg) (tea.Model, tea.Cmd) {

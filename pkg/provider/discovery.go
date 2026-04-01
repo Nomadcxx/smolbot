@@ -10,13 +10,16 @@ import (
 
 // ModelInfo represents a model row returned to the client.
 type ModelInfo struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Provider    string `json:"provider"`
-	Description string `json:"description,omitempty"`
-	Source      string `json:"source,omitempty"`
-	Capability  string `json:"capability,omitempty"`
-	Selectable  bool   `json:"selectable"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Provider      string `json:"provider"`
+	Description   string `json:"description,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Capability    string `json:"capability,omitempty"`
+	Selectable    bool   `json:"selectable"`
+	ReleaseDate   string `json:"releaseDate,omitempty"`
+	IsFree        bool   `json:"isFree,omitempty"`
+	ContextWindow int    `json:"contextWindow,omitempty"`
 }
 
 // GetAvailableModels returns a provider-aware model catalog for the current configuration.
@@ -52,12 +55,15 @@ func GetAvailableModels(cfg *config.Config) ([]ModelInfo, error) {
 		}
 		for _, entry := range CatalogueModels(providerID) {
 			models = appendUniqueModel(models, seen, ModelInfo{
-				ID:          entry.ID,
-				Name:        entry.Name,
-				Provider:    providerID,
-				Capability:  entry.Capability,
-				Source:      "catalogue",
-				Selectable:  true,
+				ID:            entry.ID,
+				Name:          entry.Name,
+				Provider:      providerID,
+				Capability:    entry.Capability,
+				Source:        "catalogue",
+				Selectable:    true,
+				ReleaseDate:   entry.ReleaseDate,
+				IsFree:        entry.IsFree,
+				ContextWindow: entry.ContextWindow,
 			})
 		}
 	}

@@ -127,13 +127,16 @@ type SessionInfo struct {
 }
 
 type ModelInfo struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Provider    string `json:"provider"`
-	Description string `json:"description,omitempty"`
-	Source      string `json:"source,omitempty"`
-	Capability  string `json:"capability,omitempty"`
-	Selectable  bool   `json:"selectable"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Provider      string `json:"provider"`
+	Description   string `json:"description,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Capability    string `json:"capability,omitempty"`
+	Selectable    bool   `json:"selectable"`
+	ReleaseDate   string `json:"releaseDate,omitempty"`
+	IsFree        bool   `json:"isFree,omitempty"`
+	ContextWindow int    `json:"contextWindow,omitempty"`
 }
 
 type HistoryMessage struct {
