@@ -137,7 +137,7 @@ func TestModelPickerGroupsByProviderWithCurrentModelHighlighted(t *testing.T) {
 	if !strings.Contains(view, "Anthropic") {
 		t.Fatalf("expected non-current provider group, got %q", view)
 	}
-	if !strings.Contains(view, "gpt-5") || !strings.Contains(view, "current") {
+	if !strings.Contains(view, "GPT-5") || !strings.Contains(view, "current") {
 		t.Fatalf("expected current model with current marker, got %q", view)
 	}
 }

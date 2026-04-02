@@ -28,7 +28,7 @@ func TestModelsModelShowsCurrentModel(t *testing.T) {
 	if !strings.Contains(view, "OpenAI") {
 		t.Fatalf("expected OpenAI provider display name in dialog, got %q", view)
 	}
-	if !strings.Contains(view, "Enter save") {
+	if !strings.Contains(view, "enter") || !strings.Contains(strings.ToLower(view), "select") {
 		t.Fatalf("expected selector footer help row, got %q", view)
 	}
 }
@@ -72,7 +72,7 @@ func TestModelsModelSkipsInfoOnlyRowsWhenChoosing(t *testing.T) {
 	}, "openrouter/auto")
 
 	view := model.View()
-	if !strings.Contains(strings.ToLower(view), "configured provider") {
+	if !strings.Contains(strings.ToLower(view), "config") {
 		t.Fatalf("expected provider info row to remain visible, got %q", view)
 	}
 

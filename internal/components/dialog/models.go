@@ -3,12 +3,18 @@ package dialog
 import (
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/Nomadcxx/smolbot/internal/client"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 	cfgpkg "github.com/Nomadcxx/smolbot/pkg/config"
+)
+
+const (
+	minModelDialogWidth = 40
+	maxModelDialogWidth = 80
 )
 
 type OAuthProviderFilter struct {
@@ -26,11 +32,16 @@ func NewModelsWithState(providerConfig *cfgpkg.Config, models []client.ModelInfo
 		favorites: append([]string(nil), favorites...),
 		recents:   append([]string(nil), recents...),
 	}
+	// Find the provider for the current model
 	for _, model := range models {
 		if model.ID == current {
 			m.currentProvider = model.Provider
 			break
 		}
+	}
+	// Fallback: extract provider from model ID prefix (e.g., "ollama/model:tag" -> "ollama")
+	if m.currentProvider == "" && strings.Contains(current, "/") {
+		m.currentProvider = strings.Split(current, "/")[0]
 	}
 	m.oauthFilter = buildOAuthFilter(providerConfig)
 	m.applyFilter()
@@ -143,21 +154,66 @@ func (m ModelsModel) Update(msg tea.Msg) (ModelsModel, tea.Cmd) {
 	return m, nil
 }
 
+func (m ModelsModel) calculateOptimalWidth() int {
+	maxW := minModelDialogWidth
+	for _, model := range m.models {
+		// "Name  Provider" + cursor/dot prefix (4) + padding
+		itemWidth := utf8.RuneCountInString(model.Name) + utf8.RuneCountInString(model.Provider) + 8
+		if itemWidth > maxW {
+			maxW = itemWidth
+		}
+	}
+	if maxW > maxModelDialogWidth {
+		maxW = maxModelDialogWidth
+	}
+	return maxW
+}
+
 func (m ModelsModel) View() string {
 	t := theme.Current()
 	if t == nil {
 		return "models"
 	}
 
+	innerWidth := m.calculateOptimalWidth()
+	// Clamp to terminal width minus border/padding
+	if m.termWidth > 0 {
+		maxInner := m.termWidth - 8
+		if maxInner < minModelDialogWidth {
+			maxInner = minModelDialogWidth
+		}
+		if innerWidth > maxInner {
+			innerWidth = maxInner
+		}
+	}
+
+	keyStyle := lipgloss.NewStyle().Foreground(t.Text).Bold(true)
+	mutedStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+
+	// Styled search input (Phase 27)
+	searchContent := m.filter
+	cursor := ""
+	if m.filter == "" {
+		searchContent = mutedStyle.Italic(true).Render("Search models...")
+	} else {
+		cursor = lipgloss.NewStyle().Foreground(t.Primary).Render("█")
+	}
+	searchBox := lipgloss.NewStyle().
+		Foreground(t.Text).
+		Background(t.Panel).
+		Width(innerWidth - 2).
+		Padding(0, 1).
+		Render(searchContent + cursor)
+
 	lines := []string{
 		lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("Models"),
-		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Filter: " + m.filter),
+		searchBox,
 		"",
 	}
 
 	rows := m.renderRows()
 	if len(rows) == 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("No models"))
+		lines = append(lines, mutedStyle.Italic(true).Render("No models"))
 	} else {
 		cursorRow := m.focusedRowIndex()
 		if cursorRow < 0 {
@@ -165,22 +221,35 @@ func (m ModelsModel) View() string {
 		}
 		start, end := visibleBounds(len(rows), cursorRow)
 		if start > 0 {
-			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▲ more above"))
+			lines = append(lines, mutedStyle.Render("▲ more above"))
 		}
 		for i := start; i < end; i++ {
-			lines = append(lines, rows[i].render(t))
+			lines = append(lines, rows[i].render(t, innerWidth))
 		}
 		if end < len(rows) {
-			lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▼ more below"))
+			lines = append(lines, mutedStyle.Render("▼ more below"))
 		}
 	}
-	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type filter • Ctrl+F fav • Ctrl+X remove • Ctrl+A add provider • Space mark • Enter save • Esc close"))
+
+	// Styled navigation hints (Phase 26)
+	hints := []string{
+		keyStyle.Render("↑↓") + mutedStyle.Render(" navigate"),
+		keyStyle.Render("enter") + mutedStyle.Render(" select"),
+		keyStyle.Render("ctrl+f") + mutedStyle.Render(" fav"),
+		keyStyle.Render("ctrl+a") + mutedStyle.Render(" add"),
+		keyStyle.Render("esc") + mutedStyle.Render(" close"),
+	}
+	if m.filter != "" {
+		hints = append(hints, keyStyle.Render("backspace")+mutedStyle.Render(" clear"))
+	}
+	lines = append(lines, "", mutedStyle.Render(strings.Join(hints, "  •  ")))
+
 	return lipgloss.NewStyle().
 		Background(t.Panel).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(dialogWidth(m.termWidth, 64)).
+		Width(innerWidth).
 		Render(strings.Join(lines, "\n"))
 }
 
@@ -405,11 +474,12 @@ func (m ModelsModel) WithRecents(recents []string) ModelsModel {
 	return m
 }
 
-func (r modelRenderRow) render(t *theme.Theme) string {
+func (r modelRenderRow) render(t *theme.Theme, width int) string {
 	switch r.kind {
 	case "header":
 		var label string
-		style := lipgloss.NewStyle().Foreground(t.Primary).Bold(true)
+		// Phase 25: use Accent for provider headers, themed colors for special sections
+		style := lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
 		switch r.group {
 		case "Favorites":
 			label = style.Foreground(t.Warning).Render("★ Favorites")
@@ -428,35 +498,50 @@ func (r modelRenderRow) render(t *theme.Theme) string {
 		return label
 	default:
 		model := r.model
-		label := strings.TrimSpace(model.Name)
-		if label == "" {
-			label = strings.TrimSpace(model.ID)
+		name := strings.TrimSpace(model.Name)
+		if name == "" {
+			name = strings.TrimSpace(model.ID)
 		}
-		descParts := []string{}
+
+		// Phase 24: calculate available space for name and provider
+		providerText := model.Provider
+		providerLen := utf8.RuneCountInString(providerText)
+		// prefix = "> ● " = 4 chars + 1 left padding
+		prefixLen := 5
+		// right side = "  Provider" + possible badges
+		rightLen := providerLen + 2
+		if r.isFavorite {
+			rightLen += 3 // " ★"
+		}
+		nameMaxWidth := width - prefixLen - rightLen - 4 // 4 for padding/border
+		if nameMaxWidth < 8 {
+			nameMaxWidth = 8
+		}
+		// Truncate name if needed (rune-safe)
+		nameRunes := []rune(name)
+		if len(nameRunes) > nameMaxWidth {
+			nameRunes = nameRunes[:nameMaxWidth-1]
+			name = string(nameRunes) + "…"
+		}
+
 		if r.kind == "info" {
-			label = strings.TrimSpace(label + " configured provider")
+			name = strings.TrimSpace(name + " (config)")
 		}
-		if model.ID != "" && model.ID != label {
-			descParts = append(descParts, model.ID)
-		}
-		if extra := optionalModelDescription(model); extra != "" {
-			descParts = append(descParts, extra)
-		}
-		if model.ReleaseDate != "" {
-			descParts = append(descParts, lipgloss.NewStyle().Foreground(t.TextMuted).Render(model.ReleaseDate))
+
+		// Build suffix: provider + extras
+		providerStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
+		suffix := providerStyle.Render("  " + providerText)
+		if r.isFavorite {
+			suffix += lipgloss.NewStyle().Foreground(t.Warning).Render(" ★")
 		}
 		if model.IsFree {
-			descParts = append(descParts, lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render("Free"))
-		}
-		if r.isFavorite {
-			descParts = append(descParts, lipgloss.NewStyle().Foreground(t.Warning).Render("★"))
+			suffix += lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render(" Free")
 		}
 		if r.pending {
-			label += lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render(" pending")
+			name += lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render(" pending")
 		}
-		if r.kind == "info" {
-			label += lipgloss.NewStyle().Foreground(t.TextMuted).Render(" info")
-		}
+
+		// Cursor and current-model indicator
 		cursorChar := " "
 		if r.focused {
 			cursorChar = lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render(">")
@@ -465,15 +550,17 @@ func (r modelRenderRow) render(t *theme.Theme) string {
 		if r.current {
 			dotChar = lipgloss.NewStyle().Foreground(t.Success).Bold(true).Render("●")
 		}
-		prefix := cursorChar + " " + dotChar + " "
-		row := prefix + label
-		if len(descParts) > 0 {
-			row += lipgloss.NewStyle().Foreground(t.TextMuted).Render("  " + strings.Join(descParts, " • "))
+
+		nameStyle := lipgloss.NewStyle().Foreground(t.Text)
+		if r.focused {
+			nameStyle = nameStyle.Foreground(t.Primary).Bold(true)
 		}
 		if r.kind == "info" {
-			row = lipgloss.NewStyle().Foreground(t.TextMuted).Render(row)
+			nameStyle = nameStyle.Foreground(t.TextMuted)
 		}
-		return row
+
+		prefix := cursorChar + " " + dotChar + " "
+		return prefix + nameStyle.Render(name) + suffix
 	}
 }
 

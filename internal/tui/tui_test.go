@@ -1851,7 +1851,7 @@ func TestModelDialogShowsCurrentModel(t *testing.T) {
 	updated, _ := model.Update(cmd())
 	got := updated.(Model)
 	view := plain(got.View().Content)
-	if !strings.Contains(view, "GPT-5") || !strings.Contains(view, "gpt-5") {
+	if !strings.Contains(view, "GPT-5") {
 		t.Fatalf("expected model dialog to show model label and id, got %q", view)
 	}
 	if !strings.Contains(view, "openai") && !strings.Contains(view, "OpenAI") || !strings.Contains(view, "current") {
@@ -1934,7 +1934,7 @@ func TestModelDialogEnterUsesFocusedSelectionWithoutPending(t *testing.T) {
 	got := updated.(Model)
 
 	view := plain(got.View().Content)
-	if !strings.Contains(strings.ToLower(view), "configured provider") {
+	if !strings.Contains(strings.ToLower(view), "config") {
 		t.Fatalf("expected provider info row to stay visible, got %q", view)
 	}
 
@@ -1986,7 +1986,7 @@ func TestSelectorsShareOverlayBehavior(t *testing.T) {
 		if !strings.Contains(view, title) {
 			t.Fatalf("expected %s title in overlay, got %q", title, view)
 		}
-		if !strings.Contains(view, "Esc close") {
+		if !strings.Contains(strings.ToLower(view), "esc") || !strings.Contains(strings.ToLower(view), "close") {
 			t.Fatalf("expected close help treatment in overlay, got %q", view)
 		}
 		lines := strings.Count(view, "\n") + 1

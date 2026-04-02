@@ -87,6 +87,18 @@ type flushProgressMsg struct{ Seq int }
 type clearMetadataMsg struct{}
 type spinnerTickMsg struct{}
 
+type InterruptKeyState int
+
+const (
+	InterruptKeyIdle       InterruptKeyState = iota
+	InterruptKeyFirstPress
+)
+
+const interruptDebounceTimeout = 1 * time.Second
+
+type InterruptDebounceTimeoutMsg struct{}
+type ChatAbortedMsg struct{}
+
 type Dialog interface {
 	Update(tea.Msg) (Dialog, tea.Cmd)
 	View() string
@@ -130,6 +142,7 @@ type Model struct {
 	reconnectWait        time.Duration
 	streaming            bool
 	currentRunID         string
+	interruptKeyState    InterruptKeyState
 	contextWarned        bool
 	usageAlertKey        string
 	flashSeq             int
@@ -335,6 +348,18 @@ func (m Model) spinnerTickCmd() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return spinnerTickMsg{} })
 }
 
+func (m Model) abortSessionCmd() tea.Cmd {
+	runID := m.currentRunID
+	session := m.app.Session
+	return func() tea.Msg {
+		err := m.client.ChatAbort(session, runID)
+		if err != nil {
+			return ChatErrorMsg{Message: "abort failed: " + err.Error()}
+		}
+		return ChatAbortedMsg{}
+	}
+}
+
 func (m Model) flashClearCmd(seq int) tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return flashClearMsg{Seq: seq} })
 }
@@ -411,7 +436,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCtrlC()
 	case ChatStartedMsg:
 		m.currentRunID = msg.RunID
-		return m, m.spinnerTickCmd()
+		return m, tea.Batch(m.spinnerTickCmd(), m.status.StatusSpinnerTick())
 	case ChatDoneMsg:
 		m.resetProgressFlush()
 		m.streaming = false
@@ -462,6 +487,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.messages.AdvanceSpinner()
 		return m, m.spinnerTickCmd()
+	case status.SpinnerTickMsg:
+		if !m.streaming {
+			return m, nil
+		}
+		m.status.AdvanceSpinner(msg)
+		return m, nil
+	case InterruptDebounceTimeoutMsg:
+		m.interruptKeyState = InterruptKeyIdle
+		m.status.SetInterruptHint(false)
+		return m, nil
+	case ChatAbortedMsg:
+		m.streaming = false
+		m.currentRunID = ""
+		m.status.SetStreaming(false)
+		m.status.SetInterruptHint(false)
+		m.interruptKeyState = InterruptKeyIdle
+		m.messages.AppendSystem("Request aborted")
+		return m, nil
 	case ChatProgressMsg:
 		m.progressBuffer += msg.Content
 		if m.progressFlushPending {
@@ -961,6 +1004,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m.handleCtrlC()
 		case "esc":
+			// Double-ESC to interrupt active streaming request
+			if m.streaming {
+				switch m.interruptKeyState {
+				case InterruptKeyIdle:
+					m.interruptKeyState = InterruptKeyFirstPress
+					m.status.SetInterruptHint(true)
+					return m, tea.Tick(interruptDebounceTimeout, func(time.Time) tea.Msg {
+						return InterruptDebounceTimeoutMsg{}
+					})
+				case InterruptKeyFirstPress:
+					m.interruptKeyState = InterruptKeyIdle
+					m.status.SetInterruptHint(false)
+					return m, m.abortSessionCmd()
+				}
+			}
 			if m.editor.Focused() {
 				m.editor.Blur()
 				return m, nil

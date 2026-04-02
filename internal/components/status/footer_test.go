@@ -67,7 +67,7 @@ func TestStatusKeepsReconnectingAndStreamingExplicit(t *testing.T) {
 	model.SetConnected(true)
 	model.SetStreaming(true)
 	view = stripANSIStatus(model.View())
-	if !strings.Contains(view, "streaming") {
+	if !strings.Contains(view, "working") {
 		t.Fatalf("expected streaming state to stay explicit, got %q", view)
 	}
 }
