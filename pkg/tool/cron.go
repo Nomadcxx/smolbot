@@ -36,6 +36,13 @@ func (t *CronTool) Description() string {
 	return "Create, inspect, update, and delete scheduled jobs."
 }
 
+// DeferredTool: cron is specialized and hidden until discovered.
+func (t *CronTool) IsDeferred() bool          { return true }
+func (t *CronTool) IsAlwaysLoad() bool         { return false }
+func (t *CronTool) DeferredKeywords() []string {
+	return []string{"schedule", "cron", "timer", "recurring", "job", "reminder"}
+}
+
 func (t *CronTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

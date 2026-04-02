@@ -27,6 +27,16 @@ func (t *MessageTool) Description() string {
 	return "Send a message through the configured channel router."
 }
 
+// ConcurrencySafe: each message is routed independently.
+func (t *MessageTool) IsConcurrencySafe() bool { return true }
+
+// DeferredTool: message is specialized and hidden until discovered.
+func (t *MessageTool) IsDeferred() bool          { return true }
+func (t *MessageTool) IsAlwaysLoad() bool         { return false }
+func (t *MessageTool) DeferredKeywords() []string {
+	return []string{"message", "channel", "send", "notify", "whatsapp", "telegram", "signal"}
+}
+
 func (t *MessageTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

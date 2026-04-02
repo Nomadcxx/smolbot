@@ -125,3 +125,33 @@ func (m Message) StringContent() string {
 		return string(raw)
 	}
 }
+
+// ModelCapabilities describes features a model supports.
+type ModelCapabilities struct {
+	SupportsParallelTools bool
+}
+
+// parallelToolProviders is the set of provider prefixes that support parallel tool calls.
+var parallelToolProviders = map[string]bool{
+	"openai":      true,
+	"anthropic":   true,
+	"azure":       true,
+	"deepseek":    true,
+	"groq":        true,
+	"openrouter":  true,
+	"aihubmix":    true,
+	"siliconflow": true,
+	"gemini":      true,
+}
+
+// CapabilitiesForModel returns model capabilities inferred from the provider prefix in the model ID.
+// Conservative default: parallel tools disabled for unknown or local providers (ollama, vllm, etc.).
+func CapabilitiesForModel(modelID string) ModelCapabilities {
+	prefix := modelID
+	if idx := strings.Index(modelID, "/"); idx > 0 {
+		prefix = modelID[:idx]
+	}
+	return ModelCapabilities{
+		SupportsParallelTools: parallelToolProviders[strings.ToLower(prefix)],
+	}
+}

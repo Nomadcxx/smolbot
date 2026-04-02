@@ -102,6 +102,17 @@ func (t *ListDirTool) Description() string {
 	return "List directory contents with file size and type information."
 }
 
+// ConcurrencySafe: read_file and list_dir are read-only.
+func (t *ReadFileTool) IsConcurrencySafe() bool { return true }
+func (t *ListDirTool) IsConcurrencySafe() bool  { return true }
+
+// DeferredTool: write_file is less common and deferred until discovered.
+func (t *WriteFileTool) IsDeferred() bool         { return true }
+func (t *WriteFileTool) IsAlwaysLoad() bool        { return false }
+func (t *WriteFileTool) DeferredKeywords() []string {
+	return []string{"file", "create", "new", "write", "save"}
+}
+
 func (t *ReadFileTool) Parameters() map[string]any {
 	return filesystemParameters("path", "offset", "limit", "extraAllowedDirs")
 }

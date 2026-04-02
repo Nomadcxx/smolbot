@@ -25,6 +25,13 @@ func (t *WaitTool) Description() string {
 	return "Wait for outstanding delegated child agents to finish and return compact summaries."
 }
 
+// DeferredTool: wait is only useful once agents have been spawned.
+func (t *WaitTool) IsDeferred() bool          { return true }
+func (t *WaitTool) IsAlwaysLoad() bool         { return false }
+func (t *WaitTool) DeferredKeywords() []string {
+	return []string{"agent", "wait", "join", "result", "finish"}
+}
+
 func (t *WaitTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

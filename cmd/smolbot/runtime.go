@@ -1122,6 +1122,7 @@ func registerRuntimeTools(registry *tool.Registry, cfg *config.Config) {
 	registry.Register(tool.NewSpawnTool(uuid.NewString))
 	registry.Register(tool.NewTaskTool(uuid.NewString))
 	registry.Register(tool.NewWaitTool())
+	registry.Register(tool.NewToolSearchTool(registry))
 }
 
 func (a *runtimeApp) Close() error {

@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -157,9 +156,17 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	}
 	activeModel := firstNonEmptyString(req.Model, a.config.Agents.Defaults.Model)
 	reasoningEffort := firstNonEmptyString(req.ReasoningEffort, a.config.Agents.Defaults.ReasoningEffort)
-	toolDefs := a.tools.DefinitionsExcluding(req.DisabledTools)
+
+	// Per-run discovered tools (unlocked via tool_search within this session run).
+	discoveredTools := make(map[string]bool)
+
+	modelCaps := provider.CapabilitiesForModel(activeModel)
+	executor := newToolExecutor(a.tools, modelCaps.SupportsParallelTools, req)
 
 	for i := 0; i < maxIterations; i++ {
+		// Rebuild visible tools each iteration so newly-discovered tools are included.
+		toolDefs := a.tools.GetVisibleTools(discoveredTools, req.DisabledTools)
+
 		iterationStart := time.Now()
 		activeProviderName := providerNameForModel(a.provider, activeModel)
 		sanitized := provider.SanitizeMessages(conversation, activeProviderName)
@@ -202,78 +209,46 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 			conversation = append(conversation, assistantMsg)
 			newMessages = append(newMessages, assistantMsg)
 
-			for _, toolCall := range resp.ToolCalls {
-				emit(cb, Event{Type: EventToolHint, Content: toolCall.Function.Name})
-				emit(cb, Event{Type: EventToolStart, Content: toolCall.Function.Name, Data: map[string]any{
-					"input": toolCall.Function.Arguments,
-					"id":    toolCall.ID,
-				}})
-
-				result, err := a.tools.Execute(runCtx, toolCall.Function.Name, json.RawMessage(toolCall.Function.Arguments), tool.ToolContext{
-					SessionKey:    req.SessionKey,
-					Channel:       req.Channel,
-					ChatID:        req.ChatID,
-					Workspace:     a.workspace,
-					Spawner:       a.spawner,
-					MessageRouter: a.messageRouter,
-					IsCronContext: req.IsCronContext,
-					EmitEvent: func(name string, payload map[string]any) {
-						switch name {
-						case string(EventAgentSpawned):
-							emit(cb, Event{Type: EventAgentSpawned, Data: payload})
-						case string(EventAgentCompleted):
-							emit(cb, Event{Type: EventAgentCompleted, Data: payload})
-						case string(EventAgentWaitStarted):
-							emit(cb, Event{Type: EventAgentWaitStarted, Data: payload})
-						case string(EventAgentWaitCompleted):
-							emit(cb, Event{Type: EventAgentWaitCompleted, Data: payload})
-						}
-					},
-				})
-				if err != nil {
-					errMsg := provider.Message{
-						Role:       "tool",
-						Content:    fmt.Sprintf("error: %v", err),
-						ToolCallID: toolCall.ID,
-						Name:       toolCall.Function.Name,
+			tctx := tool.ToolContext{
+				SessionKey:    req.SessionKey,
+				Channel:       req.Channel,
+				ChatID:        req.ChatID,
+				Workspace:     a.workspace,
+				Spawner:       a.spawner,
+				MessageRouter: a.messageRouter,
+				IsCronContext: req.IsCronContext,
+				DiscoverTools: func(names []string) {
+					for _, name := range names {
+						discoveredTools[name] = true
 					}
-					conversation = append(conversation, errMsg)
-					newMessages = append(newMessages, errMsg)
-					if saveErr := a.sessions.SaveMessages(req.SessionKey, normalizeMessagesForSave(newMessages)); saveErr != nil {
-						return "", saveErr
+				},
+				EmitEvent: func(name string, payload map[string]any) {
+					switch name {
+					case string(EventAgentSpawned):
+						emit(cb, Event{Type: EventAgentSpawned, Data: payload})
+					case string(EventAgentCompleted):
+						emit(cb, Event{Type: EventAgentCompleted, Data: payload})
+					case string(EventAgentWaitStarted):
+						emit(cb, Event{Type: EventAgentWaitStarted, Data: payload})
+					case string(EventAgentWaitCompleted):
+						emit(cb, Event{Type: EventAgentWaitCompleted, Data: payload})
 					}
-					return "", err
-				}
+				},
+			}
 
-				output := truncateString(firstNonEmptyString(result.Output, result.Content), 16000)
-				errText := truncateString(result.Error, 16000)
-				content := firstNonEmptyString(output, errText)
-				toolMsg := provider.Message{
-					Role:       "tool",
-					Content:    content,
-					ToolCallID: toolCall.ID,
-					Name:       toolCall.Function.Name,
+			execResults, err := executor.ExecuteAll(runCtx, resp.ToolCalls, tctx, cb)
+			for _, res := range execResults {
+				conversation = append(conversation, res.message)
+				newMessages = append(newMessages, res.message)
+				if res.delivered {
+					suppressFinalResponse = true
 				}
-				conversation = append(conversation, toolMsg)
-				newMessages = append(newMessages, toolMsg)
-
-				delivered := false
-				if toolCall.Function.Name == "message" && result != nil {
-					delivered = sameTargetDelivery(req, result.Metadata)
-					if delivered {
-						suppressFinalResponse = true
-					}
+			}
+			if err != nil {
+				if saveErr := a.sessions.SaveMessages(req.SessionKey, normalizeMessagesForSave(newMessages)); saveErr != nil {
+					return "", saveErr
 				}
-				emit(cb, Event{
-					Type:    EventToolDone,
-					Content: toolCall.Function.Name,
-					Data: map[string]any{
-						"deliveredToRequestTarget": delivered,
-						"id":                       toolCall.ID,
-						"output":                   output,
-						"error":                    errText,
-					},
-				})
+				return "", err
 			}
 			continue
 		}

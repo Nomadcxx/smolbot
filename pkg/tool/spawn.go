@@ -32,6 +32,16 @@ func (t *SpawnTool) Description() string {
 	return "Spawn a child agent session with reduced tool access."
 }
 
+// ConcurrencySafe: each spawn starts an independent agent session.
+func (t *SpawnTool) IsConcurrencySafe() bool { return true }
+
+// DeferredTool: spawn is advanced and hidden until discovered.
+func (t *SpawnTool) IsDeferred() bool          { return true }
+func (t *SpawnTool) IsAlwaysLoad() bool         { return false }
+func (t *SpawnTool) DeferredKeywords() []string {
+	return []string{"agent", "parallel", "delegate", "spawn", "child"}
+}
+
 func (t *SpawnTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

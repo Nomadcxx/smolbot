@@ -36,6 +36,13 @@ func (t *TaskTool) Description() string {
 	return "Delegate a structured task to a background child agent."
 }
 
+// DeferredTool: task is advanced and hidden until discovered.
+func (t *TaskTool) IsDeferred() bool          { return true }
+func (t *TaskTool) IsAlwaysLoad() bool         { return false }
+func (t *TaskTool) DeferredKeywords() []string {
+	return []string{"agent", "task", "delegate", "background", "subtask"}
+}
+
 func (t *TaskTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",

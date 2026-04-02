@@ -22,6 +22,9 @@ type ToolContext struct {
 	MessageRouter MessageRouter
 	IsCronContext bool
 	EmitEvent     func(name string, payload map[string]any)
+	// DiscoverTools makes deferred tools available for the rest of the session.
+	// Called by the tool_search meta-tool with a list of tool names to unlock.
+	DiscoverTools func(names []string)
 }
 
 type toolContextKey struct{}
@@ -50,6 +53,21 @@ type Tool interface {
 	Description() string
 	Parameters() map[string]any
 	Execute(ctx context.Context, args json.RawMessage, tctx ToolContext) (*Result, error)
+}
+
+// ConcurrencySafer is an optional interface a Tool can implement to declare it
+// is safe to execute concurrently with other safe tools (no shared mutable state,
+// no file writes, purely read-only or independent network requests).
+type ConcurrencySafer interface {
+	IsConcurrencySafe() bool
+}
+
+// DeferredTool is an optional interface a Tool can implement to opt into
+// deferment: the tool is hidden from the model until discovered via tool_search.
+type DeferredTool interface {
+	IsDeferred() bool
+	IsAlwaysLoad() bool  // true = always include regardless of deferment (e.g. tool_search itself)
+	DeferredKeywords() []string
 }
 
 type Spawner interface {
@@ -199,6 +217,92 @@ func (r *Registry) CancelSession(sessionKey string) {
 	if r.cancelSession != nil {
 		r.cancelSession(sessionKey)
 	}
+}
+
+// IsConcurrencySafe reports whether the named tool implements ConcurrencySafer and
+// returns true. Unknown tools default to false (conservative).
+func (r *Registry) IsConcurrencySafe(name string) bool {
+	r.mu.RLock()
+	t, ok := r.tools[name]
+	r.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	if cs, ok := t.(ConcurrencySafer); ok {
+		return cs.IsConcurrencySafe()
+	}
+	return false
+}
+
+// GetVisibleTools returns tool definitions for the current request, filtering out
+// deferred tools that have not yet been discovered, while always including
+// AlwaysLoad tools. The disabled list is excluded as with DefinitionsExcluding.
+func (r *Registry) GetVisibleTools(discovered map[string]bool, disabled []string) []provider.ToolDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	blocked := make(map[string]struct{}, len(disabled))
+	for _, name := range disabled {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			blocked[name] = struct{}{}
+		}
+	}
+
+	defs := make([]provider.ToolDef, 0, len(r.tools))
+	for _, t := range r.tools {
+		if _, skip := blocked[t.Name()]; skip {
+			continue
+		}
+		if dt, ok := t.(DeferredTool); ok {
+			if dt.IsAlwaysLoad() {
+				// always include (e.g. tool_search)
+			} else if dt.IsDeferred() && !discovered[t.Name()] {
+				continue
+			}
+		}
+		defs = append(defs, provider.ToolDef{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Parameters:  t.Parameters(),
+		})
+	}
+	sort.Slice(defs, func(i, j int) bool {
+		return defs[i].Name < defs[j].Name
+	})
+	return defs
+}
+
+// SearchDeferredTools returns all deferred tools whose name, description, or keywords
+// contain at least one word from the query string.
+func (r *Registry) SearchDeferredTools(query string) []Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	query = strings.ToLower(query)
+	words := strings.Fields(query)
+	if len(words) == 0 {
+		return nil
+	}
+
+	var matches []Tool
+	for _, t := range r.tools {
+		dt, ok := t.(DeferredTool)
+		if !ok || !dt.IsDeferred() {
+			continue
+		}
+		searchText := strings.ToLower(t.Name() + " " + t.Description() + " " + strings.Join(dt.DeferredKeywords(), " "))
+		for _, word := range words {
+			if strings.Contains(searchText, word) {
+				matches = append(matches, t)
+				break
+			}
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Name() < matches[j].Name()
+	})
+	return matches
 }
 
 func CoerceArgs[T any](input map[string]any) (T, error) {

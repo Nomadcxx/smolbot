@@ -94,6 +94,23 @@ func (t *WebFetchTool) Description() string {
 	return "Fetch external content with SSRF protection and untrusted-content marking."
 }
 
+// ConcurrencySafe: web requests are independent with no shared mutable state.
+func (t *WebSearchTool) IsConcurrencySafe() bool { return true }
+func (t *WebFetchTool) IsConcurrencySafe() bool  { return true }
+
+// DeferredTool: web tools are deferred until discovered.
+func (t *WebSearchTool) IsDeferred() bool          { return true }
+func (t *WebSearchTool) IsAlwaysLoad() bool         { return false }
+func (t *WebSearchTool) DeferredKeywords() []string {
+	return []string{"search", "web", "internet", "query", "lookup"}
+}
+
+func (t *WebFetchTool) IsDeferred() bool          { return true }
+func (t *WebFetchTool) IsAlwaysLoad() bool         { return false }
+func (t *WebFetchTool) DeferredKeywords() []string {
+	return []string{"fetch", "url", "http", "web", "download", "page"}
+}
+
 func (t *WebSearchTool) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
