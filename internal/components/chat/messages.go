@@ -47,6 +47,8 @@ type MessagesModel struct {
 	rendererWidth int
 	rendererStyle string
 	expandedTools map[string]bool
+	verbose       bool // collapsed tool rendering (default); true = verbose/per-tool
+	spinnerFrame  int  // cycles 0-3 for animated group indicators
 	cache         []messageCache
 	messageBody   string
 	plainLines    []string
@@ -213,6 +215,22 @@ func (m *MessagesModel) ToggleToolExpand(index int) {
 	key := strconv.Itoa(index)
 	m.expandedTools[key] = !m.expandedTools[key]
 	m.dirty = true
+}
+
+// ToggleVerbose switches between collapsed and per-tool rendering.
+func (m *MessagesModel) ToggleVerbose() {
+	m.verbose = !m.verbose
+	m.sync(m.viewport.AtBottom())
+}
+
+// IsVerbose returns the current verbose state.
+func (m *MessagesModel) IsVerbose() bool {
+	return m.verbose
+}
+
+// AdvanceSpinner increments the spinner frame for animated group indicators.
+func (m *MessagesModel) AdvanceSpinner() {
+	m.spinnerFrame = (m.spinnerFrame + 1) % 4
 }
 
 func (m *MessagesModel) ScrollToBottom() {
@@ -413,9 +431,8 @@ func (m *MessagesModel) renderTranscript() (string, []string, []int) {
 		duration := m.thinkingDuration()
 		blocks = append(blocks, renderThinkingBlock(m.thinking, duration, t.TranscriptThinking, m.width))
 	}
-	for i, tool := range m.tools {
-		expanded := m.expandedTools[strconv.Itoa(i)]
-		blocks = append(blocks, renderToolCall(tool, m.width, expanded))
+	for _, block := range m.renderToolBlocks(t) {
+		blocks = append(blocks, block)
 	}
 
 	rendered := strings.Join(blocks, "\n\n")
@@ -426,6 +443,38 @@ func (m *MessagesModel) renderTranscript() (string, []string, []int) {
 		lines, offsets = visibleTranscriptLines(rendered)
 	}
 	return rendered, lines, offsets
+}
+
+// renderToolBlocks renders tools using the collapse engine.
+// In verbose mode, renders each tool individually (existing behavior).
+// In collapsed mode (default), groups consecutive collapsible tools.
+func (m *MessagesModel) renderToolBlocks(t *theme.Theme) []string {
+	if len(m.tools) == 0 {
+		return nil
+	}
+
+	if m.verbose {
+		result := make([]string, 0, len(m.tools))
+		for i, tool := range m.tools {
+			expanded := m.expandedTools[strconv.Itoa(i)]
+			result = append(result, renderToolCall(tool, m.width, expanded))
+		}
+		return result
+	}
+
+	collapsed := CollapseTools(m.tools)
+	result := make([]string, 0, len(collapsed))
+	for _, block := range collapsed {
+		if block.IsGroup {
+			line := RenderToolGroupWithSpinner(block.Group, t, m.width, false, m.spinnerFrame)
+			if line != "" {
+				result = append(result, line)
+			}
+		} else {
+			result = append(result, renderStandaloneToolCompact(*block.Tool, m.width, t))
+		}
+	}
+	return result
 }
 
 func visibleTranscriptLines(rendered string) ([]string, []int) {

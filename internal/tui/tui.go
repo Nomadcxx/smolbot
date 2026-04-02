@@ -84,6 +84,7 @@ type ClipboardCopiedMsg struct{ Text string }
 type ClipboardErrorMsg struct{ Err error }
 type flashClearMsg struct{ Seq int }
 type flushProgressMsg struct{ Seq int }
+type clearMetadataMsg struct{}
 
 type Dialog interface {
 	Update(tea.Msg) (Dialog, tea.Cmd)
@@ -412,6 +413,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentRunID = ""
 		m.status.SetStreaming(false)
 		m.messages.AppendAssistant(msg.Content)
+		m.footer.ResetToolCounts()
 		return m, tea.Batch(m.syncStatusCmd(false), m.loadCronJobsCmd())
 	case CompactStartMsg:
 		m.footer.SetCompacting(true)
@@ -496,6 +498,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Seq == m.flashSeq {
 			m.status.ClearFlash()
 		}
+		return m, nil
+	case clearMetadataMsg:
+		m.footer.SetMetadata("")
 		return m, nil
 	case ChannelInboundMsg:
 		label := "[" + msg.Channel + "] " + msg.Content
@@ -728,6 +733,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				m.messages.StartTool(p.ID, p.Name, p.Input)
+				m.footer.IncrementToolRunning()
 			}
 		case "chat.tool.done":
 			var p client.ToolDonePayload
@@ -737,6 +743,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				status := "done"
 				if p.Error != "" {
 					status = "error"
+					m.footer.ToolError()
+				} else {
+					m.footer.ToolDone()
 				}
 				m.messages.FinishTool(p.ID, p.Name, status, p.Output)
 			}
@@ -987,6 +996,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return ModelSetMsg{ID: current}
 			}
+		case "ctrl+o":
+			m.messages.ToggleVerbose()
+			if m.messages.IsVerbose() {
+				m.footer.SetMetadata("verbose ON")
+			} else {
+				m.footer.SetMetadata("verbose OFF")
+			}
+			return m, clearMetadataAfterDelay(500 * time.Millisecond)
 		case "c", "y":
 			if !m.editor.Focused() {
 				if cmd := m.copyLastAssistantCmd(); cmd != nil {
@@ -1034,6 +1051,11 @@ func nextRecentModel(recents []string, current string) string {
 		}
 	}
 	return recents[0]
+}
+
+// clearMetadataAfterDelay returns a command that clears footer metadata after d.
+func clearMetadataAfterDelay(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return clearMetadataMsg{} })
 }
 
 func (m Model) handleConfigureProvider(msg dialogcmp.ConfigureProviderMsg) (tea.Model, tea.Cmd) {

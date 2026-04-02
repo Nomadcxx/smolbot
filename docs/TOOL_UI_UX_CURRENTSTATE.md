@@ -262,60 +262,224 @@ This is the only dynamic status the footer currently tracks.
 
 ---
 
-## 7. Claude Code's Approach (Reference)
+## 7. Claude Code's Approach (Deep Reference)
 
 Claude Code takes the opposite approach — **minimal by default, detail on demand**.
+The system is implemented across ~1,600 lines in two major subsystems:
+an aggregation engine and a rendering layer.
 
-### 7.1 Tool Grouping & Aggregation
+### 7.1 Architecture Overview
 
-Multiple tools of the same type from the same API response are automatically grouped:
 ```
-● Read 3 files, searched 2 patterns…
-  ⎿ Searching src/ for "TODO"
-```
-
-Instead of 5 separate blocks, one natural-language line.
-
-Source: `CollapsedReadSearchContent.tsx:294-482`
-
-### 7.2 Information Hierarchy
-
-| Level | What's Shown | When |
-|-------|-------------|------|
-| **Minimal** | `● Reading…` | Single active tool |
-| **Standard** | `● Read 3 files, searched 2 patterns…` | Multiple completed tools |
-| **Hint line** | `⎿ Searching src/ for "TODO"` | Current operation detail |
-| **Expanded** | Full tool inputs + outputs | User presses Ctrl+O |
-| **Verbose** | Every tool separately with full detail | `--verbose` flag |
-
-### 7.3 Verb Tense as Status
-
-- Active: "Reading 3 files…" (present participle)
-- Complete: "Read 3 files" (past tense)
-- Error: Same wording, red indicator
-
-### 7.4 Footer/Inline Summary
-
-NOT a rigid `✓ Read ×8 | Write ×6` — instead a natural-language sentence:
-```
-Read 3 files, searched 2 patterns, ran 1 bash command
+API Response (tool_use blocks)
+    |
+collapseReadSearch.ts -- classifies, accumulates, emits groups
+    |
+CollapsedReadSearchContent.tsx -- renders groups as natural-language
+    |
+Individual tool UIs (FileRead, FileWrite, Bash, etc.)
+    |
+ToolUseLoader.tsx -- 2-char animated status indicator
 ```
 
-Counts built dynamically using max-ref tracking (prevents jitter during streaming):
+Two **separate** grouping systems exist:
+1. **collapseReadSearch** (~1,109 lines): Groups consecutive collapsible tools into
+   natural-language summaries. This is the primary system.
+2. **groupToolUses** (separate file): Groups 2+ identical tools from the same API
+   response — only for tools with a `renderGroupedToolUse` method (currently just AgentTool).
+
+### 7.2 Tool Classification
+
+Every tool use passes through `getToolSearchOrReadInfo()` which returns:
+
+```typescript
+type SearchOrReadResult = {
+  isCollapsible: boolean       // Can this tool be absorbed into a group?
+  isSearch: boolean            // grep, ripgrep, file search
+  isRead: boolean              // file read, cat
+  isList: boolean              // ls, directory listing
+  isREPL: boolean              // bash/shell execution
+  isMemoryWrite: boolean       // memory/context operations
+  isAbsorbedSilently: boolean  // absorbed without incrementing display counts
+}
+```
+
+Classification determines whether a tool joins the current group or breaks it.
+
+### 7.3 GroupAccumulator Data Structure
+
+```typescript
+// collapseReadSearch.ts:581
+type GroupAccumulator = {
+  readCount: number        // file reads
+  searchCount: number      // grep/search operations
+  listCount: number        // directory listings
+  bashCount: number        // shell/REPL executions
+  mcpCount: number         // MCP tool calls
+  memoryCount: number      // memory operations (subtracted from display later)
+  filePaths: Set<string>   // unique files touched (for dedup)
+  searchPatterns: string[] // patterns searched for
+  toolUses: ToolUse[]      // all tool uses in this group
+  isActive: boolean        // group still accumulating (tools running)
+}
+```
+
+Key design: `filePaths` is a `Set<string>` — when rendering "Read N files", N comes
+from `filePaths.size` (unique files), not raw `readCount`. This prevents inflation
+when the same file is read multiple times.
+
+### 7.4 Collapse Algorithm Flow
+
+```
+for each block in API response:
+    if block is assistant text:
+        -> flush current GroupAccumulator (emit as collapsed group)
+        -> emit text block as-is
+        -> start new GroupAccumulator
+
+    if block is tool_use:
+        classify via getToolSearchOrReadInfo()
+        if isCollapsible:
+            -> add to current GroupAccumulator
+            -> increment relevant count (readCount, searchCount, etc.)
+            -> add filePath to Set (if applicable)
+        else:
+            -> flush current GroupAccumulator
+            -> emit tool_use as standalone block (full rendering)
+            -> start new GroupAccumulator
+
+    if block is tool_result:
+        -> attach to corresponding tool_use (already classified)
+
+end: flush final GroupAccumulator
+```
+
+Non-collapsible tools (write_file, edit_file, complex bash) **always break the group**
+and render individually with full detail. This is crucial — only "read-like" operations
+get collapsed.
+
+### 7.5 Natural-Language Rendering
+
+`CollapsedReadSearchContent.tsx` (483 lines) renders each group:
+
+```typescript
+// pushPart() builds comma-separated parts
+const parts: string[] = []
+
+if (searchCount > 0) pushPart(`searched for ${searchCount} pattern${s}`)
+if (readCount > 0) pushPart(`read ${readCount} file${s}`)
+if (listCount > 0) pushPart(`listed ${listCount} director${ies}`)
+if (bashCount > 0) pushPart(`ran ${bashCount} bash command${s}`)
+if (mcpCount > 0) pushPart(`used ${mcpCount} MCP tool${s}`)
+
+// Memory operations subtracted AFTER accumulation
+readCount -= memoryReadCount
+searchCount -= memorySearchCount
+```
+
+Result: `"Read 3 files, searched 2 patterns, ran 1 bash command"`
+
+#### Verb Tense as Status
+
+| Group State | Tense | Example |
+|-------------|-------|---------|
+| Active (tools running) | Present participle | "Reading 3 files, searching 2 patterns..." |
+| Complete (all done) | Past tense | "Read 3 files, searched 2 patterns" |
+| Error | Past tense, red indicator | "Read 3 files" (with red dot) |
+
+### 7.6 Anti-Jitter Pattern (Max-Ref Tracking)
+
+During streaming, tool counts can fluctuate as the API response arrives.
+Claude Code prevents display jitter with `useRef`:
+
 ```tsx
-maxReadCountRef.current = Math.max(maxReadCountRef.current, rawReadCount);
+const maxReadCountRef = useRef(0)
+maxReadCountRef.current = Math.max(maxReadCountRef.current, rawReadCount)
+// Display uses maxReadCountRef.current, never rawReadCount
 ```
 
-### 7.5 Status Indicator
+This ensures counts only ever go **up** during streaming. Once "Read 3 files" appears,
+it never flickers back to "Read 2 files" even if intermediate renders have fewer tools.
 
-2-character wide indicator replaces the entire tool block:
-- `●` (blinking) — running
-- `✓` (green) — success
-- `✕` (red) — error
+### 7.7 ToolUseLoader — Status Indicator
 
-### 7.6 Expansion: Ctrl+O
+A 2-character wide component replaces entire tool blocks:
 
-Collapsed groups show a `Ctrl+O to expand` hint. Pressing it reveals full details for that group.
+```tsx
+// ToolUseLoader.tsx (41 lines)
+<Box minWidth={2}>
+  {isLoading ? <Text><Blink>●</Blink></Text> :   // running (animated)
+   isSuccess ? <Text color="green">●</Text> :     // success
+   <Text color="red">●</Text>}                    // error
+</Box>
+```
+
+`minWidth={2}` prevents layout shift when the blinking animation toggles.
+
+### 7.8 Hint Line System
+
+Below collapsed groups, a hint line shows the current operation:
+
+```
+● Reading 3 files...
+  ⎿ Reading src/index.ts (3s · 124 lines)
+```
+
+The `⎿` prefix indicates a detail line under the group summary.
+
+**Anti-flicker**: `MIN_HINT_DISPLAY_MS = 700ms` — fast operations that complete
+in <700ms don't show a hint line at all, preventing rapid flickering.
+
+### 7.9 Progressive Disclosure — 4 Levels
+
+| Level | Trigger | What's Shown |
+|-------|---------|-------------|
+| **Minimal** | Default (single active tool) | `● Reading...` (2-char indicator + gerund) |
+| **Standard** | Default (group complete) | `● Read 3 files, searched 2 patterns` |
+| **Expanded** | `Ctrl+O` | Per-tool detail within group (file paths, line counts) |
+| **Verbose** | `--verbose` flag / `Ctrl+O` global | Every tool separately with full input/output |
+
+`Ctrl+O` toggles a global `verbose` state. All tool groups re-render — collapsed groups
+expand to show individual tools, individual tools show full I/O.
+
+Sub-agent contexts receive `style: 'condensed'` hint, making their tool rendering
+even more compact than the main conversation.
+
+### 7.10 Individual Tool UIs
+
+Even at expanded/verbose level, each tool type has a **purpose-built compact UI**:
+
+| Tool | Compact Display | Detail Display |
+|------|----------------|----------------|
+| **FileRead** | `Read src/main.go` | `Read 124 lines from src/main.go` |
+| **FileWrite** | `Wrote src/main.go` | First 10 lines + `... +N lines` |
+| **Bash** | `Ran command` | `go test ./... (5s · 42 lines)` with exit code |
+| **Grep** | `Searched for "TODO"` | `Found 12 matches in 4 files` |
+| **Agent** | `Agent completed task` | Sub-agent transcript (condensed) |
+
+Key: even "expanded" tools show **summary metadata** (line counts, durations, file counts),
+not raw output. Raw output only appears in verbose mode.
+
+### 7.11 Dedup Pattern
+
+File reads deduplicate by path:
+```typescript
+const uniqueFiles = new Set(toolUses.map(t => t.filePath))
+const displayCount = uniqueFiles.size  // not toolUses.length
+```
+
+If the agent reads `main.go` 3 times, it shows "Read 1 file" not "Read 3 files".
+
+### 7.12 Memory Subtraction
+
+Memory/context operations (e.g., reading from memory bank) are tracked in the
+GroupAccumulator but **subtracted from display counts**:
+
+```typescript
+const displayReadCount = totalReadCount - memoryReadCount
+```
+
+This prevents user confusion — "Read 5 files" means 5 real files, not 3 files + 2 memory reads.
 
 ---
 
@@ -324,19 +488,121 @@ Collapsed groups show a `Ctrl+O to expand` hint. Pressing it reveals full detail
 | Aspect | smolbot (current) | Claude Code | Gap |
 |--------|-------------------|-------------|-----|
 | Default rendering | Full block per tool | Grouped single-line | **Critical** |
-| Same-type grouping | None | Auto-groups 2+ | **Critical** |
-| Footer tool counts | None | Natural-language aggregate | **Critical** |
+| Same-type grouping | None | Auto-groups consecutive collapsible tools | **Critical** |
+| Footer tool counts | None | Natural-language aggregate in-line | **Critical** |
 | Vertical space (8 reads) | ~64 lines | ~2 lines | **Critical** |
-| Progressive disclosure | Toggle expand only | 4 levels (min→verbose) | **High** |
-| Verb tense status | Static labels | Active/complete tense | **Medium** |
-| Max-ref jitter prevention | N/A (no aggregation) | useRef max-tracking | **Medium** |
-| Expansion keybind | (toggle via cursor?) | Ctrl+O | **Medium** |
-| Condensed tool results | Not supported | `style: 'condensed'` | **Medium** |
-| AI-powered summaries | None | Haiku 1-liners (optional) | **Low** |
+| Tool classification | None — all tools rendered identically | `SearchOrReadResult` classifies each tool | **Critical** |
+| GroupAccumulator | None | Stateful accumulator with counts + file dedup | **Critical** |
+| Progressive disclosure | Toggle expand per-tool only | 4 levels (minimal to verbose) | **High** |
+| Verb tense status | Static labels (INPUT/OUTPUT) | Active participle / past tense | **High** |
+| Individual tool UIs | Same bordered block for all tools | Purpose-built compact UI per tool type | **High** |
+| Anti-jitter (streaming) | N/A (no aggregation) | `useRef` max-tracking | **Medium** |
+| Expansion keybind | None documented | `Ctrl+O` global toggle | **Medium** |
+| Hint line (current op) | None | `⎿` prefix with operation detail, 700ms anti-flicker | **Medium** |
+| Metadata in tool display | None (no line counts, durations) | Line counts, durations, file counts | **Medium** |
+| Condensed sub-agent tools | Not supported | `style: 'condensed'` context hint | **Medium** |
+| File read dedup | N/A | `Set<filePath>.size` for unique count | **Medium** |
+| Memory subtraction | N/A | Memory ops subtracted from display counts | **Low** |
 
 ---
 
-## Appendix: Key Source Files
+## 9. Architectural Mapping: React/Ink to Go/Bubbletea
+
+Key differences to account for when reimplementing:
+
+### 9.1 State Management
+
+| Claude Code (React/Ink) | smolbot (Go/Bubbletea) |
+|-------------------------|------------------------|
+| `useRef` for max-tracking | Field on model struct (`maxReadCount int`) |
+| `useState` + re-render | `tea.Msg` dispatched to `Update()` |
+| Component-local state | Model struct fields |
+| `useMemo`/`useCallback` | Computed in `View()` or cached in model |
+
+### 9.2 Proposed Go Types
+
+```go
+// Tool classification (equivalent of SearchOrReadResult)
+type ToolClass int
+const (
+    ToolClassCollapsible ToolClass = iota  // read, search, list
+    ToolClassStandalone                     // write, edit, complex bash
+)
+
+type ToolKind int
+const (
+    ToolKindRead ToolKind = iota
+    ToolKindSearch
+    ToolKindList
+    ToolKindBash
+    ToolKindMCP
+    ToolKindMemory
+    ToolKindOther
+)
+
+// Equivalent of GroupAccumulator
+type ToolGroup struct {
+    ReadCount     int
+    SearchCount   int
+    ListCount     int
+    BashCount     int
+    MCPCount      int
+    MemoryCount   int
+    FilePaths     map[string]bool  // Set equivalent for dedup
+    SearchQueries []string
+    Tools         []ToolCall       // all tools in group
+    IsActive      bool             // still accumulating
+    MaxReadCount  int              // anti-jitter: only increases
+    MaxSearchCount int
+}
+
+// Classification function
+func classifyTool(name string, input string) (ToolClass, ToolKind)
+
+// Collapse engine
+func collapseToolGroups(tools []ToolCall, assistantBreaks []int) []ToolGroup
+
+// Natural language rendering
+func (g ToolGroup) Summary(active bool) string
+// active=true:  "Reading 3 files, searching 2 patterns..."
+// active=false: "Read 3 files, searched 2 patterns"
+```
+
+### 9.3 Integration Points
+
+| Component | Change Required |
+|-----------|----------------|
+| `messages.go` | Replace per-tool rendering with group-based rendering |
+| `toolblock.go` | New compact group renderer alongside existing block renderer |
+| `message.go` | Add `classifyTool()`, per-tool compact summaries |
+| `footer.go` | Add tool activity counters (running/done/error counts) |
+| `tui.go` | Handle `Ctrl+O` toggle, pass verbose state to renderers |
+| `messages.go` | New `collapseToolGroups()` in `renderTranscript()` pipeline |
+
+### 9.4 Rendering Strategy
+
+```
+renderTranscript() [messages.go]
+    |
+    +-- for each message: render as before
+    |
+    +-- for tools: collapseToolGroups(m.tools, breakpoints)
+            |
+            +-- CollapsibleGroup -> renderToolGroup() [NEW]
+            |       |
+            |       +-- verbose=false: "● Read 3 files, searched 2 patterns"
+            |       +-- verbose=true:  individual tool blocks (existing)
+            |
+            +-- StandaloneBlock -> renderToolCall() [existing, enhanced]
+                    |
+                    +-- write_file: show first 10 lines + "... +N lines"
+                    +-- edit_file: show diff (existing)
+                    +-- exec: show "5s · 42 lines" metadata
+```
+
+---
+
+## Appendix A: Key Source Files — smolbot
 
 | File | Role |
 |------|------|
@@ -346,3 +612,16 @@ Collapsed groups show a `Ctrl+O to expand` hint. Pressing it reveals full detail
 | `internal/components/chat/diff.go` | Unified diff rendering for edit_file |
 | `internal/components/status/footer.go` | Footer/status bar rendering |
 | `internal/tui/tui.go` | Event dispatch, tool start/done handlers |
+
+## Appendix B: Key Source Files — Claude Code
+
+| File | Role |
+|------|------|
+| `src/utils/collapseReadSearch.ts` (~1,109 lines) | Aggregation engine: classify, accumulate, emit groups |
+| `src/components/messages/CollapsedReadSearchContent.tsx` (483 lines) | Render groups as natural-language sentences |
+| `src/components/ToolUseLoader.tsx` (41 lines) | 2-char animated status indicator |
+| `src/utils/groupToolUses.ts` | Secondary grouping for identical tools (AgentTool) |
+| `src/components/tools/FileReadTool.tsx` | Individual FileRead compact UI |
+| `src/components/tools/FileWriteTool.tsx` | Individual FileWrite compact UI |
+| `src/components/tools/BashTool.tsx` | Individual Bash compact UI with duration |
+| `src/components/tools/GrepTool.tsx` | Individual Grep compact UI with match counts |

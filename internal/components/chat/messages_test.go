@@ -28,27 +28,24 @@ func TestMessagesModelRendersToolLifecycle(t *testing.T) {
 	model.StartTool("tc1", "read_file", `{"path": "/etc/smolbot.yaml", "offset": 0, "limit": 20}`)
 
 	runningView := model.View()
-	if !strings.Contains(runningView, "Read smolbot.yaml") {
-		t.Fatalf("expected dispatch title in running view, got %q", runningView)
+	// Collapsed mode: active group shows animated indicator + active summary
+	if !strings.Contains(runningView, "Reading") {
+		t.Fatalf("expected 'Reading' in running view (collapsed), got %q", runningView)
 	}
-	if !strings.Contains(runningView, "running") {
-		t.Fatalf("expected running state in running view, got %q", runningView)
-	}
-	if !strings.Contains(runningView, "/etc/smolbot.yaml") {
-		t.Fatalf("expected tool input to be preserved while running, got %q", runningView)
+	// Hint line shows the file being read
+	if !strings.Contains(runningView, "smolbot.yaml") {
+		t.Fatalf("expected file hint in running view, got %q", runningView)
 	}
 
 	model.FinishTool("tc1", "read_file", "done", "loaded config")
 
 	view := model.View()
-	if !strings.Contains(view, "Read smolbot.yaml") {
-		t.Fatalf("expected dispatch title in view, got %q", view)
+	// Collapsed mode: done group shows checkmark + summary
+	if !strings.Contains(view, "Read") {
+		t.Fatalf("expected 'Read' in done view (collapsed), got %q", view)
 	}
-	if !strings.Contains(view, "loaded config") {
-		t.Fatalf("expected tool output in view, got %q", view)
-	}
-	if !strings.Contains(view, "/etc/smolbot.yaml") {
-		t.Fatalf("expected tool input to persist after done, got %q", view)
+	if !strings.Contains(view, "file") {
+		t.Fatalf("expected 'file' count in done view, got %q", view)
 	}
 }
 
@@ -283,9 +280,18 @@ func TestToolInputIsDisplayedInToolBlock(t *testing.T) {
 	model.AppendUser("read the config")
 	model.StartTool("tc2", "read_file", `{"path": "/etc/smolbot.yaml"}`)
 	model.FinishTool("tc2", "read_file", "done", "config loaded")
+
+	// Collapsed mode: summary line visible
 	view := model.View()
-	if !strings.Contains(view, "PATH: /etc/smolbot.yaml") {
-		t.Fatalf("expected tool input to appear in view, got %q", view)
+	if !strings.Contains(view, "Read 1 file") {
+		t.Fatalf("expected collapsed summary in view, got %q", view)
+	}
+
+	// Verbose mode: input path should appear
+	model.ToggleVerbose()
+	verboseView := model.View()
+	if !strings.Contains(verboseView, "PATH: /etc/smolbot.yaml") {
+		t.Fatalf("expected tool input to appear in verbose view, got %q", verboseView)
 	}
 }
 

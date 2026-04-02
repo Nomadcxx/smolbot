@@ -618,3 +618,202 @@ func formatDuration(d time.Duration) string {
 	}
 	return fmt.Sprintf("%.1fs", d.Seconds())
 }
+
+// --- Phase 7: Compact Standalone Tool Renderers ---
+
+// renderStandaloneToolCompact renders a single standalone tool with a brief summary.
+// Verbose mode and unknown tools fall back to the full renderToolCall.
+func renderStandaloneToolCompact(tc ToolCall, width int, t *theme.Theme) string {
+if t == nil {
+return tc.Name
+}
+switch normalizeToolName(tc.Name) {
+case "write_file", "writefile", "file_write":
+return renderWriteCompact(tc, t)
+case "edit_file", "editfile", "file_edit":
+return renderEditCompact(tc, t)
+case "exec", "bash", "shell", "run":
+return renderExecCompact(tc, t)
+case "web_fetch", "fetch", "curl":
+return renderFetchCompact(tc, t)
+case "message":
+return renderMessageCompact(tc, t)
+default:
+return renderGenericCompact(tc, t)
+}
+}
+
+// toolIndicatorCompact returns the status glyph and its foreground color.
+func toolIndicatorCompact(status string, t *theme.Theme) (string, color.Color) {
+switch strings.ToLower(status) {
+case "running":
+return "●", t.Warning
+case "error":
+return "✗", t.Error
+default:
+return "✓", t.Success
+}
+}
+
+func compactPrefix(status string, t *theme.Theme) string {
+glyph, col := toolIndicatorCompact(status, t)
+return lipgloss.NewStyle().Foreground(col).Render(glyph)
+}
+
+func renderWriteCompact(tc ToolCall, t *theme.Theme) string {
+path := extractJSONField(tc.Input, "path")
+baseName := filepath.Base(path)
+if baseName == "" || baseName == "." {
+baseName = path
+}
+
+content := extractJSONField(tc.Input, "content")
+lineCount := 0
+if content != "" {
+lineCount = strings.Count(content, "\n") + 1
+}
+
+var verb string
+switch strings.ToLower(tc.Status) {
+case "running":
+verb = "Writing"
+case "error":
+verb = "Failed to write"
+default:
+verb = "Wrote"
+}
+
+meta := ""
+if lineCount > 0 {
+meta = fmt.Sprintf(" (%d lines)", lineCount)
+}
+return compactPrefix(tc.Status, t) + " " + fmt.Sprintf("%s %s%s", verb, baseName, meta)
+}
+
+func renderEditCompact(tc ToolCall, t *theme.Theme) string {
+path := extractJSONField(tc.Input, "path")
+baseName := filepath.Base(path)
+if baseName == "" || baseName == "." {
+baseName = path
+}
+
+var verb string
+switch strings.ToLower(tc.Status) {
+case "running":
+verb = "Editing"
+case "error":
+verb = "Failed to edit"
+default:
+verb = "Edited"
+}
+
+oldText := extractJSONField(tc.Input, "old_string")
+newText := extractJSONField(tc.Input, "new_string")
+delta := strings.Count(newText, "\n") - strings.Count(oldText, "\n")
+
+meta := ""
+if delta > 0 {
+meta = fmt.Sprintf(" (+%d lines)", delta)
+} else if delta < 0 {
+meta = fmt.Sprintf(" (%d lines)", delta)
+}
+return compactPrefix(tc.Status, t) + " " + fmt.Sprintf("%s %s%s", verb, baseName, meta)
+}
+
+func renderExecCompact(tc ToolCall, t *theme.Theme) string {
+command := extractJSONField(tc.Input, "command")
+const maxCmdLen = 50
+if len(command) > maxCmdLen {
+command = command[:maxCmdLen-3] + "..."
+}
+
+var verb string
+switch strings.ToLower(tc.Status) {
+case "running":
+verb = "Running"
+case "error":
+verb = "Failed"
+default:
+verb = "Ran"
+}
+
+meta := ""
+if tc.Output != "" && strings.ToLower(tc.Status) != "running" {
+outputLines := strings.Count(tc.Output, "\n")
+if outputLines > 0 {
+meta = fmt.Sprintf(" (%d lines)", outputLines)
+}
+}
+
+cmdStyled := lipgloss.NewStyle().Foreground(t.TextMuted).Render("`" + command + "`")
+return compactPrefix(tc.Status, t) + " " + fmt.Sprintf("%s %s%s", verb, cmdStyled, meta)
+}
+
+func renderFetchCompact(tc ToolCall, t *theme.Theme) string {
+url := extractJSONField(tc.Input, "url")
+const maxURLLen = 60
+if len(url) > maxURLLen {
+url = url[:maxURLLen-3] + "..."
+}
+
+var verb string
+switch strings.ToLower(tc.Status) {
+case "running":
+verb = "Fetching"
+case "error":
+verb = "Failed to fetch"
+default:
+verb = "Fetched"
+}
+
+meta := ""
+if len(tc.Output) > 0 && strings.ToLower(tc.Status) != "running" {
+size := len(tc.Output)
+switch {
+case size > 1024*1024:
+meta = fmt.Sprintf(" (%.1fMB)", float64(size)/1024/1024)
+case size > 1024:
+meta = fmt.Sprintf(" (%.1fKB)", float64(size)/1024)
+default:
+meta = fmt.Sprintf(" (%d bytes)", size)
+}
+}
+return compactPrefix(tc.Status, t) + " " + fmt.Sprintf("%s %s%s", verb, url, meta)
+}
+
+func renderMessageCompact(tc ToolCall, t *theme.Theme) string {
+channel := extractJSONField(tc.Input, "channel")
+chatID := extractJSONField(tc.Input, "chat_id")
+if len(chatID) > 20 {
+chatID = chatID[:17] + "..."
+}
+
+var verb string
+switch strings.ToLower(tc.Status) {
+case "running":
+verb = "Sending to"
+case "error":
+verb = "Failed to send to"
+default:
+verb = "Sent to"
+}
+
+target := channel
+if chatID != "" {
+target = channel + ":" + chatID
+}
+return compactPrefix(tc.Status, t) + " " + fmt.Sprintf("%s %s", verb, target)
+}
+
+func renderGenericCompact(tc ToolCall, t *theme.Theme) string {
+var text string
+switch strings.ToLower(tc.Status) {
+case "running":
+text = "Running " + tc.Name
+case "error":
+text = tc.Name + " failed"
+default:
+text = tc.Name + " completed"
+}
+return compactPrefix(tc.Status, t) + " " + text
+}

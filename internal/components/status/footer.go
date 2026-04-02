@@ -26,6 +26,13 @@ type FooterModel struct {
 	metadataWidth     int
 	usageFullWidth    int
 	usageCompactWidth int
+
+	// Tool activity tracking
+	toolsRunning      int
+	toolsDone         int
+	toolsError        int
+	toolActivityText  string
+	toolActivityWidth int
 }
 
 func NewFooter(a *app.App) FooterModel {
@@ -79,6 +86,76 @@ func (m *FooterModel) IsCompacting() bool {
 
 func (m *FooterModel) SetCompactionFrame(frame int) {
 	m.compactFrame = frame
+}
+
+// SetToolCounts sets all tool activity counters at once.
+func (m *FooterModel) SetToolCounts(running, done, errored int) {
+	m.toolsRunning = running
+	m.toolsDone = done
+	m.toolsError = errored
+	m.syncToolActivity()
+}
+
+// IncrementToolRunning increments the running tool count.
+func (m *FooterModel) IncrementToolRunning() {
+	m.toolsRunning++
+	m.syncToolActivity()
+}
+
+// ToolDone moves one tool from running to done.
+func (m *FooterModel) ToolDone() {
+	if m.toolsRunning > 0 {
+		m.toolsRunning--
+	}
+	m.toolsDone++
+	m.syncToolActivity()
+}
+
+// ToolError moves one tool from running to error.
+func (m *FooterModel) ToolError() {
+	if m.toolsRunning > 0 {
+		m.toolsRunning--
+	}
+	m.toolsError++
+	m.syncToolActivity()
+}
+
+// ResetToolCounts clears all tool counters (called at start of each turn).
+func (m *FooterModel) ResetToolCounts() {
+	m.toolsRunning = 0
+	m.toolsDone = 0
+	m.toolsError = 0
+	m.toolActivityText = ""
+	m.toolActivityWidth = 0
+}
+
+func (m *FooterModel) syncToolActivity() {
+	t := theme.Current()
+	if t == nil {
+		m.toolActivityText = ""
+		m.toolActivityWidth = 0
+		return
+	}
+
+	var parts []string
+
+	if m.toolsDone > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(t.Success).Render(fmt.Sprintf("✓%d", m.toolsDone)))
+	}
+	if m.toolsRunning > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(t.Warning).Render(fmt.Sprintf("●%d", m.toolsRunning)))
+	}
+	if m.toolsError > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(t.Error).Render(fmt.Sprintf("✗%d", m.toolsError)))
+	}
+
+	if len(parts) == 0 {
+		m.toolActivityText = ""
+		m.toolActivityWidth = 0
+		return
+	}
+	m.toolActivityText = strings.Join(parts, " ")
+	m.toolActivityWidth = lipgloss.Width(m.toolActivityText)
 }
 
 func (m *FooterModel) syncUsageLayout() {
@@ -160,6 +237,11 @@ func (m *FooterModel) View() string {
 	if m.metadataText != "" {
 		parts = append(parts, m.metadataText)
 		leftWidth += 3 + m.metadataWidth
+	}
+	// Add tool activity if any tools were used this turn
+	if m.toolActivityText != "" {
+		parts = append(parts, m.toolActivityText)
+		leftWidth += 3 + m.toolActivityWidth
 	}
 	// Add compression indicator if available
 	if comp := m.renderCompression(t); comp != "" {

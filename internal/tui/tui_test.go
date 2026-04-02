@@ -1462,12 +1462,13 @@ func TestEventMsgUpdatesToolLifecycle(t *testing.T) {
 	})
 	got = updated.(Model)
 
+	// Collapsed mode: read_file renders as a group summary
 	view := got.messages.View()
-	if !strings.Contains(view, "read_file") {
-		t.Fatalf("expected tool name in view, got %q", view)
+	if !strings.Contains(view, "Read") {
+		t.Fatalf("expected collapsed summary in view, got %q", view)
 	}
-	if !strings.Contains(view, "loaded config") {
-		t.Fatalf("expected tool output in view, got %q", view)
+	if !strings.Contains(view, "file") {
+		t.Fatalf("expected 'file' count in view, got %q", view)
 	}
 }
 

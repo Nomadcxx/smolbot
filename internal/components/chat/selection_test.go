@@ -178,9 +178,10 @@ func TestSelectionPreservesToolRendering(t *testing.T) {
 	model.StartTool("tc1", "read_file", `{"path": "/etc/smolbot.yaml", "offset": 0, "limit": 20}`)
 	model.FinishTool("tc1", "read_file", "done", "loaded config")
 
-	line := firstLineContaining(model.plainLines, "loaded config")
+	// Collapsed mode: summary line contains "Read 1 file"
+	line := firstLineContaining(model.plainLines, "Read 1 file")
 	if line < 0 {
-		t.Fatalf("expected tool output line in %#v", model.plainLines)
+		t.Fatalf("expected collapsed summary line in %#v", model.plainLines)
 	}
 	if !model.HandleMouseDown(2, line) {
 		t.Fatal("expected mouse down to start selection")
@@ -196,8 +197,9 @@ func TestSelectionPreservesToolRendering(t *testing.T) {
 	if !strings.Contains(view, "✓") {
 		t.Fatalf("expected tool state chrome to remain during selection, got %q", view)
 	}
-	if !strings.Contains(view, "Read smolbot.yaml") {
-		t.Fatalf("expected tool title to remain during selection, got %q", view)
+	// plainLines holds stripped text; the ANSI-rendered view has escape codes between words.
+	if firstLineContaining(model.plainLines, "Read 1 file") < 0 {
+		t.Fatalf("expected collapsed summary to remain during selection, plainLines=%#v", model.plainLines)
 	}
 	if !strings.Contains(view, ansiBgHex(colorHex(theme.Current().Accent))) {
 		t.Fatalf("expected selection background in rendered view, got %q", view)
