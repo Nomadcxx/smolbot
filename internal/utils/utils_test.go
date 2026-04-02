@@ -79,3 +79,95 @@ func TestBufferedWriterManualFlush(t *testing.T) {
 		t.Errorf("expected [10 20], got %v", got)
 	}
 }
+
+func TestMinDisplayValueImmediateSet(t *testing.T) {
+	mdv := NewMinDisplayValue("initial", 100*time.Millisecond)
+
+	// Wait for min duration then set
+	time.Sleep(110 * time.Millisecond)
+	mdv.Set("updated")
+
+	got := mdv.Get()
+	if got != "updated" {
+		t.Errorf("expected 'updated', got '%s'", got)
+	}
+}
+
+func TestMinDisplayValueQueuesPending(t *testing.T) {
+	mdv := NewMinDisplayValue("initial", 200*time.Millisecond)
+
+	// Set immediately (before min duration)
+	mdv.Set("pending")
+
+	// Should still return initial
+	got := mdv.Get()
+	if got != "initial" {
+		t.Errorf("expected 'initial' (pending queued), got '%s'", got)
+	}
+
+	if !mdv.HasPending() {
+		t.Error("should have pending value")
+	}
+}
+
+func TestMinDisplayValuePendingApplied(t *testing.T) {
+	mdv := NewMinDisplayValue("initial", 50*time.Millisecond)
+
+	// Set immediately (queued)
+	mdv.Set("pending")
+
+	// Wait for min duration
+	time.Sleep(60 * time.Millisecond)
+
+	// Now Get() should apply pending
+	got := mdv.Get()
+	if got != "pending" {
+		t.Errorf("expected 'pending', got '%s'", got)
+	}
+
+	if mdv.HasPending() {
+		t.Error("pending should be cleared after Get()")
+	}
+}
+
+func TestMinDisplayValueForceSet(t *testing.T) {
+	mdv := NewMinDisplayValue("initial", 1*time.Second)
+
+	// ForceSet ignores min duration
+	mdv.ForceSet("forced")
+
+	got := mdv.Get()
+	if got != "forced" {
+		t.Errorf("expected 'forced', got '%s'", got)
+	}
+}
+
+func TestMinDisplayValueReset(t *testing.T) {
+	mdv := NewMinDisplayValue("initial", 100*time.Millisecond)
+	mdv.Set("pending") // Queue a pending value
+
+	mdv.Reset("reset")
+
+	got := mdv.Get()
+	if got != "reset" {
+		t.Errorf("expected 'reset', got '%s'", got)
+	}
+	if mdv.HasPending() {
+		t.Error("pending should be cleared after Reset()")
+	}
+}
+
+func TestMinDisplayValueTimeUntilUpdate(t *testing.T) {
+	mdv := NewMinDisplayValue("initial", 100*time.Millisecond)
+
+	// No pending = 0 duration
+	if mdv.TimeUntilUpdate() != 0 {
+		t.Error("expected 0 with no pending")
+	}
+
+	mdv.Set("pending")
+	remaining := mdv.TimeUntilUpdate()
+	if remaining <= 0 || remaining > 100*time.Millisecond {
+		t.Errorf("expected positive remaining time, got %v", remaining)
+	}
+}

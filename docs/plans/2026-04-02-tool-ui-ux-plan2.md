@@ -1,7 +1,7 @@
 # Tool UI/UX Implementation Plan 2: Advanced Patterns
 
 **Created**: 2026-04-02  
-**Status**: Draft  
+**Status**: ✅ COMPLETE  
 **Depends On**: `docs/plans/2026-04-02-tool-ui-ux.md` (Plan 1)
 
 ---
@@ -12,6 +12,20 @@ This second plan covers **advanced Claude Code patterns** discovered through dee
 
 Plan 1 covers: Tool classification, grouping, collapsing, footer tracking, Ctrl+O expansion.  
 Plan 2 covers: Error handling, themes, metadata display, keyboard nav, sub-agents, streaming UX.
+
+---
+
+## Implementation Status
+
+| Phase | Component | Status | Files |
+|-------|-----------|--------|-------|
+| 11 | Error Handling UI | ✅ Complete | `internal/components/chat/errors.go` |
+| 12 | Theme Extensions | ✅ Complete | `internal/theme/agent_colors.go`, `internal/theme/theme.go` |
+| 13 | Tool Metadata | ✅ Complete | `internal/format/format.go` |
+| 14 | Keyboard Nav | ✅ Complete | `internal/tui/tui.go`, `internal/components/dialog/keybindings.go` |
+| 15 | Sub-Agent UI | ✅ Complete | `internal/components/chat/agent_progress.go` |
+| 16 | Streaming UX | ✅ Complete | `internal/utils/debounce.go`, `internal/utils/circular_buffer.go`, `internal/utils/min_display.go`, `internal/components/scroll/scroll.go` |
+| 17 | Integration | ✅ Complete | All wired and tested |
 
 ---
 
