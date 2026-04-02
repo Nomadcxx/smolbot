@@ -1449,42 +1449,53 @@ func FormatRateLimit(status RateLimitStatus, theme Theme) string {
 
 ## Phase 17: Integration & Polish
 
-### 17.1 Files to Create
+### 17.1 Files to Create (NEW)
 
 | File | Purpose |
 |------|---------|
+| `internal/theme/agent_colors.go` | Agent color manager (8 colors for sub-agents) |
+| `internal/theme/detect.go` | Auto dark/light detection (OPTIONAL) |
+| `internal/theme/themes/daltonized.go` | Color-blind friendly theme (OPTIONAL) |
+| `internal/format/format.go` | Duration, size, token formatting utilities |
 | `internal/components/chat/errors.go` | Error truncation, categorization |
-| `internal/theme/theme.go` | Theme definitions |
-| `internal/theme/agent_colors.go` | Agent color manager |
-| `internal/theme/detect.go` | Auto dark/light detection |
-| `internal/format/duration.go` | Duration formatting |
-| `internal/format/size.go` | File size formatting |
-| `internal/format/tokens.go` | Token/cost formatting |
-| `internal/format/path.go` | Path truncation |
-| `internal/format/diff.go` | Diff stats formatting |
-| `internal/keybindings/keybindings.go` | Keybinding system |
-| `internal/components/chat/agent_progress.go` | Agent progress UI |
-| `internal/utils/debounce.go` | Debounce utilities |
-| `internal/utils/circular_buffer.go` | Circular buffer |
-| `internal/utils/min_display.go` | Anti-flicker |
-| `internal/components/scroll/scroll.go` | Sticky scroll |
+| `internal/utils/debounce.go` | Buffered writer, min display time |
+| `internal/utils/circular_buffer.go` | Fixed-capacity circular buffer |
+| `internal/components/scroll/scroll.go` | Sticky scroll state |
 
 ### 17.2 Files to Modify
 
 | File | Changes |
 |------|---------|
-| `internal/components/chat/toolblock.go` | Use error truncation, themes |
-| `internal/components/chat/messages.go` | Integrate keybindings, scroll |
-| `internal/components/status/footer.go` | Rate limit display, agent colors |
-| `internal/tui/tui.go` | Theme initialization, keybinding resolver |
+| `internal/theme/theme.go` | Add 8 AgentXxx color fields |
+| `internal/theme/themes/register.go` | Add default agent color assignments |
+| `internal/components/chat/toolblock.go` | Use error truncation, formatting |
+| `internal/components/chat/messages.go` | Integrate Ctrl+O toggle, verbose mode |
+| `internal/components/status/footer.go` | Rate limit display (OPTIONAL) |
+| `internal/tui/tui.go` | Add Ctrl+O/Ctrl+E key handlers |
+| `internal/components/dialog/keybindings.go` | Document new keybindings |
 
-### 17.3 Testing Strategy
+### 17.3 What Already Exists (No Changes Needed)
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| Theme registry | ✅ Complete | `internal/theme/manager.go` |
+| 9 built-in themes | ✅ Complete | `internal/theme/themes/*.go` |
+| Color definitions (60+) | ✅ Complete | `internal/theme/theme.go` |
+| Theme persistence | ✅ Complete | `internal/app/state.go` |
+| `/theme` command | ✅ Complete | `internal/tui/tui.go` |
+| j/k navigation | ✅ Complete | Dialog components |
+| Lipgloss integration | ✅ Complete | All components |
+
+### 17.4 Testing Strategy
 
 Each phase should include:
 1. **Unit tests** for new utilities (formatting, buffers, etc.)
-2. **Integration tests** for keybinding resolution
-3. **Visual tests** for theme rendering (screenshot comparison)
-4. **Edge case tests** for truncation, overflow, etc.
+2. **Integration tests** for theme color assignments
+3. **Edge case tests** for truncation, overflow, etc.
+
+**Existing test patterns to follow**:
+- `internal/theme/theme_test.go` - Theme registration tests
+- `internal/theme/themes/diff_test.go` - Color configuration tests
 
 ---
 

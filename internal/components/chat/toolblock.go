@@ -182,7 +182,8 @@ summary = group.ActiveSummary()
 summary = group.Summary()
 }
 if len(summary) > 0 {
-summary = strings.ToUpper(summary[:1]) + summary[1:]
+runes := []rune(summary)
+summary = strings.ToUpper(string(runes[:1])) + string(runes[1:])
 }
 
 // Append error count suffix

@@ -85,6 +85,7 @@ type ClipboardErrorMsg struct{ Err error }
 type flashClearMsg struct{ Seq int }
 type flushProgressMsg struct{ Seq int }
 type clearMetadataMsg struct{}
+type spinnerTickMsg struct{}
 
 type Dialog interface {
 	Update(tea.Msg) (Dialog, tea.Cmd)
@@ -330,6 +331,10 @@ func (m Model) compactTickCmd() tea.Cmd {
 	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return CompactionTickMsg{} })
 }
 
+func (m Model) spinnerTickCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return spinnerTickMsg{} })
+}
+
 func (m Model) flashClearCmd(seq int) tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return flashClearMsg{Seq: seq} })
 }
@@ -406,7 +411,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCtrlC()
 	case ChatStartedMsg:
 		m.currentRunID = msg.RunID
-		return m, nil
+		return m, m.spinnerTickCmd()
 	case ChatDoneMsg:
 		m.resetProgressFlush()
 		m.streaming = false
@@ -451,6 +456,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.compactionFrame++
 		m.footer.SetCompactionFrame(m.compactionFrame)
 		return m, m.compactTickCmd()
+	case spinnerTickMsg:
+		if m.currentRunID == "" {
+			return m, nil
+		}
+		m.messages.AdvanceSpinner()
+		return m, m.spinnerTickCmd()
 	case ChatProgressMsg:
 		m.progressBuffer += msg.Content
 		if m.progressFlushPending {
