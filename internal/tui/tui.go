@@ -1015,6 +1015,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.footer.SetMetadata("verbose OFF")
 			}
 			return m, clearMetadataAfterDelay(500 * time.Millisecond)
+		case "ctrl+e":
+			m.messages.ToggleVerbose()
+			if m.messages.IsVerbose() {
+				m.footer.SetMetadata("verbose ON")
+			} else {
+				m.footer.SetMetadata("verbose OFF")
+			}
+			return m, clearMetadataAfterDelay(500 * time.Millisecond)
 		case "c", "y":
 			if !m.editor.Focused() {
 				if cmd := m.copyLastAssistantCmd(); cmd != nil {

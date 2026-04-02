@@ -51,6 +51,15 @@ func register(name string, colors [15]string, opts ...themeOption) {
 		CompressionSuccess:        lipgloss.Color(colors[7]),  // Accent
 		CompressionWarning:        lipgloss.Color(colors[11]), // Warning
 		TokenHighUsage:            lipgloss.Color(colors[10]), // Error
+		// Agent colors derived from base palette — provide 8 distinct identities.
+		AgentBlue:   lipgloss.Color(colors[13]), // Info
+		AgentGreen:  lipgloss.Color(colors[12]), // Success
+		AgentYellow: lipgloss.Color(colors[11]), // Warning
+		AgentRed:    lipgloss.Color(colors[10]), // Error
+		AgentPurple: lipgloss.Color(colors[7]),  // Accent
+		AgentOrange: lipgloss.Color(darkenHex(colors[11], 0.85)),
+		AgentPink:   lipgloss.Color(darkenHex(colors[10], 0.70)),
+		AgentCyan:   lipgloss.Color(darkenHex(colors[13], 0.80)),
 	}
 
 	for _, opt := range opts {

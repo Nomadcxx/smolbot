@@ -64,4 +64,14 @@ type Theme struct {
 	CompressionSuccess color.Color // Moderate compression (40-60%)
 	CompressionWarning color.Color // High compression (>60%)
 	TokenHighUsage     color.Color // Token usage critical (>90%)
+
+	// Agent/sub-agent colors — 8 distinct colors for concurrent agent identification.
+	AgentRed    color.Color
+	AgentBlue   color.Color
+	AgentGreen  color.Color
+	AgentYellow color.Color
+	AgentPurple color.Color
+	AgentOrange color.Color
+	AgentPink   color.Color
+	AgentCyan   color.Color
 }

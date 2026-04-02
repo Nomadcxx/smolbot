@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/Nomadcxx/smolbot/internal/format"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 	"github.com/pmezard/go-difflib/difflib"
 )
@@ -229,6 +230,11 @@ func toolOutputSummary(status, output string, expanded bool) string {
 			return "running..."
 		}
 		return ""
+	}
+
+	// Apply error-specific truncation limits for error status.
+	if strings.EqualFold(strings.TrimSpace(status), "error") {
+		output = applyErrorTruncation(output)
 	}
 
 	if expanded {
@@ -638,6 +644,8 @@ case "web_fetch", "fetch", "curl":
 return renderFetchCompact(tc, t)
 case "message":
 return renderMessageCompact(tc, t)
+case "spawn", "spawn_agent":
+return renderSpawnCompact(tc, t)
 default:
 return renderGenericCompact(tc, t)
 }
@@ -685,7 +693,7 @@ verb = "Wrote"
 
 meta := ""
 if lineCount > 0 {
-meta = fmt.Sprintf(" (%d lines)", lineCount)
+meta = " (" + format.FormatTokens(lineCount) + " lines)"
 }
 return compactPrefix(tc.Status, t) + " " + fmt.Sprintf("%s %s%s", verb, baseName, meta)
 }
@@ -768,15 +776,7 @@ verb = "Fetched"
 
 meta := ""
 if len(tc.Output) > 0 && strings.ToLower(tc.Status) != "running" {
-size := len(tc.Output)
-switch {
-case size > 1024*1024:
-meta = fmt.Sprintf(" (%.1fMB)", float64(size)/1024/1024)
-case size > 1024:
-meta = fmt.Sprintf(" (%.1fKB)", float64(size)/1024)
-default:
-meta = fmt.Sprintf(" (%d bytes)", size)
-}
+meta = " (" + format.FormatFileSize(int64(len(tc.Output))) + ")"
 }
 return compactPrefix(tc.Status, t) + " " + fmt.Sprintf("%s %s%s", verb, url, meta)
 }
@@ -816,4 +816,24 @@ default:
 text = tc.Name + " completed"
 }
 return compactPrefix(tc.Status, t) + " " + text
+}
+
+func renderSpawnCompact(tc ToolCall, t *theme.Theme) string {
+agentType := extractJSONField(tc.Input, "type")
+if agentType == "" {
+agentType = extractJSONField(tc.Input, "agent_type")
+}
+if agentType == "" {
+agentType = "agent"
+}
+var verb string
+switch strings.ToLower(tc.Status) {
+case "running":
+verb = "Spawning"
+case "error":
+verb = "Failed to spawn"
+default:
+verb = "Spawned"
+}
+return compactPrefix(tc.Status, t) + " " + fmt.Sprintf("%s %s", verb, agentType)
 }
