@@ -33,6 +33,10 @@ func NewSpinner() SpinnerModel {
 	return SpinnerModel{}
 }
 
+func (s SpinnerModel) Init() tea.Cmd {
+	return s.Tick()
+}
+
 func (s SpinnerModel) Tick() tea.Cmd {
 	return tea.Tick(SpinnerTickInterval, func(t time.Time) tea.Msg {
 		return SpinnerTickMsg(t)

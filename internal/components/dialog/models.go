@@ -15,6 +15,8 @@ import (
 const (
 	minModelDialogWidth = 40
 	maxModelDialogWidth = 80
+	numVisibleModels    = 10
+	maxRecentModels     = 5
 )
 
 type OAuthProviderFilter struct {
@@ -190,20 +192,18 @@ func (m ModelsModel) View() string {
 	keyStyle := lipgloss.NewStyle().Foreground(t.Text).Bold(true)
 	mutedStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
 
-	// Styled search input (Phase 27)
+	// Styled search input (Phase 27) — cursor always visible
+	cursorChar := lipgloss.NewStyle().Foreground(t.Primary).Render("█")
 	searchContent := m.filter
-	cursor := ""
 	if m.filter == "" {
 		searchContent = mutedStyle.Italic(true).Render("Search models...")
-	} else {
-		cursor = lipgloss.NewStyle().Foreground(t.Primary).Render("█")
 	}
 	searchBox := lipgloss.NewStyle().
 		Foreground(t.Text).
 		Background(t.Panel).
 		Width(innerWidth - 2).
 		Padding(0, 1).
-		Render(searchContent + cursor)
+		Render(searchContent + cursorChar)
 
 	lines := []string{
 		lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("Models"),
@@ -490,7 +490,9 @@ func (r modelRenderRow) render(t *theme.Theme, width int) string {
 			if r.current {
 				style = style.Foreground(t.Success)
 			}
-			label = style.Render(displayName)
+			label = lipgloss.NewStyle().MarginTop(1).PaddingLeft(1).Render(
+				style.Render(displayName),
+			)
 			if r.current {
 				label += lipgloss.NewStyle().Foreground(t.Success).Render(" (current)")
 			}

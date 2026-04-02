@@ -441,7 +441,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetProgressFlush()
 		m.streaming = false
 		m.currentRunID = ""
+		m.interruptKeyState = InterruptKeyIdle
 		m.status.SetStreaming(false)
+		m.status.SetInterruptHint(false)
 		m.messages.AppendAssistant(msg.Content)
 		m.footer.ResetToolCounts()
 		return m, tea.Batch(m.syncStatusCmd(false), m.loadCronJobsCmd())
@@ -520,7 +522,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetProgressFlush()
 		m.streaming = false
 		m.currentRunID = ""
+		m.interruptKeyState = InterruptKeyIdle
 		m.status.SetStreaming(false)
+		m.status.SetInterruptHint(false)
 		m.messages.AppendError(msg.Message)
 		return m, nil
 	case flushProgressMsg:
@@ -732,9 +736,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connected = false
 		m.streaming = false
 		m.currentRunID = ""
+		m.interruptKeyState = InterruptKeyIdle
 		m.status.SetConnected(false)
 		m.status.SetStreaming(false)
 		m.status.SetReconnecting(true)
+		m.status.SetInterruptHint(false)
 		m.footer.SetUsage(client.UsageInfo{})
 		if m.reconnectWait == 0 {
 			m.reconnectWait = time.Second
