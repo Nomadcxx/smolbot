@@ -13,14 +13,16 @@ const (
 	SpinnerWidth        = 3
 )
 
-// Ellipsis frames: build up then wind down for a smooth pulse.
+// Ellipsis frames: smooth wave animation.
 var ellipsisFrames = []string{
-	"   ",
-	".  ",
-	".. ",
-	"...",
-	".. ",
-	".  ",
+	"∙∙∙",
+	"●∙∙",
+	"∙●∙",
+	"∙∙●",
+	"∙∙∙",
+	"∙∙●",
+	"∙●∙",
+	"●∙∙",
 }
 
 type SpinnerTickMsg time.Time
@@ -56,8 +58,10 @@ func (s SpinnerModel) View() string {
 	if t == nil {
 		return ellipsisFrames[s.frame]
 	}
+	// Use primary/accent colors for the spinner animation
 	return lipgloss.NewStyle().
-		Foreground(t.TextMuted).
+		Foreground(t.Primary).
+		Bold(true).
 		Width(SpinnerWidth).
 		Render(ellipsisFrames[s.frame])
 }

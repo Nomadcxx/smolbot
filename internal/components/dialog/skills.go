@@ -58,8 +58,10 @@ func (m SkillsModel) View() string {
 		return "skills"
 	}
 
+	width := dialogWidth(m.termWidth, 72) - 6 // Account for padding/border
+	headerStyle := lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Width(width).Align(lipgloss.Center)
 	lines := []string{
-		lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("Skills"),
+		headerStyle.Render("//// SKILLS ////"),
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Filter: " + m.filter),
 		"",
 	}
@@ -92,7 +94,8 @@ func (m SkillsModel) View() string {
 	if end < len(m.filtered) {
 		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▼ more below"))
 	}
-	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type to filter • Esc close"))
+	hintsStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Width(width).Align(lipgloss.Center)
+	lines = append(lines, "", hintsStyle.Render("Type to filter • Esc close"))
 	return lipgloss.NewStyle().
 		Background(t.Panel).
 		Border(lipgloss.RoundedBorder()).

@@ -39,13 +39,22 @@ type providerMetaEntry struct {
 }
 
 var providerMeta = map[string]providerMetaEntry{
-	"anthropic":    {"Anthropic", "Claude models — console.anthropic.com"},
-	"openai":       {"OpenAI", "GPT & o-series — platform.openai.com"},
-	"gemini":       {"Google Gemini", "Gemini models — aistudio.google.com"},
-	"groq":         {"Groq", "Fast inference — console.groq.com"},
-	"deepseek":     {"DeepSeek", "DeepSeek models — platform.deepseek.com"},
-	"minimax":      {"MiniMax", "MiniMax models — platform.minimax.io"},
-	"ollama":       {"Ollama", "Local models — no API key needed"},
+	"anthropic":      {"Anthropic", "Claude models — console.anthropic.com"},
+	"openai":         {"OpenAI", "GPT & o-series — platform.openai.com"},
+	"gemini":         {"Google Gemini", "Gemini models — aistudio.google.com"},
+	"groq":           {"Groq", "Fast inference — console.groq.com"},
+	"deepseek":       {"DeepSeek", "DeepSeek models — platform.deepseek.com"},
+	"minimax":        {"MiniMax", "MiniMax models — platform.minimax.io"},
+	"minimax-portal": {"MiniMax Portal", "MiniMax models via OAuth — minimax.io"},
+	"ollama":         {"Ollama", "Local models — no API key needed"},
+	"openrouter":     {"OpenRouter", "Multi-provider routing — openrouter.ai"},
+	"vllm":           {"vLLM", "Local inference — no API key needed"},
+}
+
+// providersWithoutAPIKey lists providers that don't require an API key
+var providersWithoutAPIKey = map[string]bool{
+	"ollama": true,
+	"vllm":   true,
 }
 
 // ProviderDisplayName returns a human-friendly name for a provider ID.
@@ -537,7 +546,8 @@ func (m ProvidersModel) updateConfigure(msg tea.Msg) (ProvidersModel, tea.Cmd) {
 		if m.configWorking {
 			return m, nil
 		}
-		if strings.TrimSpace(m.configAPIKey) == "" {
+		// Skip API key requirement for local providers
+		if !providersWithoutAPIKey[m.configTarget] && strings.TrimSpace(m.configAPIKey) == "" {
 			m.configError = "API key is required"
 			return m, nil
 		}
@@ -608,6 +618,10 @@ func defaultAPIBase(providerID string) string {
 	switch providerID {
 	case "openai":
 		return "https://api.openai.com/v1"
+	case "ollama":
+		return "http://localhost:11434"
+	case "vllm":
+		return "http://localhost:8000"
 	default:
 		return ""
 	}
@@ -645,8 +659,10 @@ func (m ProvidersModel) View() string {
 }
 
 func (m ProvidersModel) viewBrowse(t *theme.Theme) string {
+	width := dialogWidth(m.termWidth, 72) - 6 // Account for padding/border
+	headerStyle := lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Width(width).Align(lipgloss.Center)
 	lines := []string{
-		lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("Providers"),
+		headerStyle.Render("//// PROVIDERS ////"),
 		"",
 	}
 	if len(m.rows) == 0 {
@@ -661,8 +677,9 @@ func (m ProvidersModel) viewBrowse(t *theme.Theme) string {
 			lines = append(lines, m.renderRowBrowse(row, isCursor, t)...)
 		}
 	}
+	hintsStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Width(width).Align(lipgloss.Center)
 	lines = append(lines, "",
-		lipgloss.NewStyle().Foreground(t.TextMuted).Render("↑/↓ navigate • Enter select/configure • d remove • Esc close"),
+		hintsStyle.Render("↑/↓ navigate • Enter select/configure • d remove • Esc close"),
 	)
 	return strings.Join(lines, "\n")
 }
@@ -718,28 +735,47 @@ func (m ProvidersModel) viewConfigure(t *theme.Theme) string {
 		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render(meta.Description), "")
 	}
 
-	keyLabel := lipgloss.NewStyle().Foreground(t.Text).Render("API Key: ")
-	keyValue := maskAPIKey(m.configAPIKey)
-	if m.configFocused == 0 {
-		keyValue += "█"
-	}
-	keyStyle := lipgloss.NewStyle().Foreground(t.Primary)
-	if m.configFocused == 0 {
-		keyStyle = keyStyle.Bold(true)
-	}
-	lines = append(lines, keyLabel+keyStyle.Render(keyValue))
+	// Local providers (Ollama, vLLM) don't need API key
+	isLocal := providersWithoutAPIKey[m.configTarget]
 
-	if m.configTarget == "openai" {
+	if isLocal {
+		// Show API Base field for local providers
 		baseLabel := lipgloss.NewStyle().Foreground(t.Text).Render("API Base: ")
 		baseValue := m.configAPIBase
-		if m.configFocused == 1 {
+		if baseValue == "" {
+			baseValue = defaultAPIBase(m.configTarget)
+		}
+		if m.configFocused == 0 {
 			baseValue += "█"
 		}
-		baseStyle := lipgloss.NewStyle().Foreground(t.Primary)
-		if m.configFocused == 1 {
-			baseStyle = baseStyle.Bold(true)
-		}
+		baseStyle := lipgloss.NewStyle().Foreground(t.Primary).Bold(true)
 		lines = append(lines, baseLabel+baseStyle.Render(baseValue))
+		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Italic(true).Render("(API key optional for local providers)"))
+	} else {
+		// Show API Key field for cloud providers
+		keyLabel := lipgloss.NewStyle().Foreground(t.Text).Render("API Key: ")
+		keyValue := maskAPIKey(m.configAPIKey)
+		if m.configFocused == 0 {
+			keyValue += "█"
+		}
+		keyStyle := lipgloss.NewStyle().Foreground(t.Primary)
+		if m.configFocused == 0 {
+			keyStyle = keyStyle.Bold(true)
+		}
+		lines = append(lines, keyLabel+keyStyle.Render(keyValue))
+
+		if m.configTarget == "openai" {
+			baseLabel := lipgloss.NewStyle().Foreground(t.Text).Render("API Base: ")
+			baseValue := m.configAPIBase
+			if m.configFocused == 1 {
+				baseValue += "█"
+			}
+			baseStyle := lipgloss.NewStyle().Foreground(t.Primary)
+			if m.configFocused == 1 {
+				baseStyle = baseStyle.Bold(true)
+			}
+			lines = append(lines, baseLabel+baseStyle.Render(baseValue))
+		}
 	}
 
 	if m.configWorking {

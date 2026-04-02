@@ -7,7 +7,7 @@ import (
 
 func init() {
 	register("monochrome", [15]string{
-		"#000000", "#000000", "#000000", "#333333", "#F5F5F5",
+		"#000000", "#0a0a0a", "#0a0a0a", "#333333", "#F5F5F5",
 		"#F5F5F5", "#DDDDDD", "#B0B0B0", "#F5F5F5", "#777777",
 		"#999999", "#A0A0A0", "#B8B8B8", "#8C8C8C", "#333333",
 	}, func(t *theme.Theme) {

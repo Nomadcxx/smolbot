@@ -1604,7 +1604,7 @@ func TestF1MenuNavigatesToThemesSubmenu(t *testing.T) {
 		got = updated.(Model)
 	}
 
-	if !strings.Contains(plain(got.View().Content), "Themes") {
+	if !strings.Contains(plain(got.View().Content), "THEMES") {
 		t.Fatalf("expected themes submenu after selection, got %q", plain(got.View().Content))
 	}
 }
@@ -1765,7 +1765,7 @@ func TestThemeChooserDoesNotExtendLayoutHeight(t *testing.T) {
 		t.Fatalf("expected theme chooser to render within height %d, got %d lines", model.height, lines)
 	}
 	view := plain(got.View().Content)
-	if !strings.Contains(view, "Themes") {
+	if !strings.Contains(view, "THEMES") {
 		t.Fatalf("expected theme chooser title to remain visible, got %q", view)
 	}
 	if !strings.Contains(view, "Theme: ") {
@@ -2006,9 +2006,9 @@ func TestSelectorsShareOverlayBehavior(t *testing.T) {
 		}
 	}
 
-	checkOverlay("/theme", "Themes")
+	checkOverlay("/theme", "THEMES")
 	checkOverlay("/session", "Sessions")
-	checkOverlay("/model", "Models")
+	checkOverlay("/model", "MODELS")
 }
 
 func TestCompactLayoutOnShortTerminals(t *testing.T) {
@@ -2115,18 +2115,18 @@ func TestSidebarLayoutFillsViewportHeight(t *testing.T) {
 }
 
 func TestEditorUsesThemeSurface(t *testing.T) {
-	model := New(app.Config{})
+	model := New(app.Config{Theme: "catppuccin"})
 	model.width = 80
 	model.height = 16
 	view := model.editor.View()
 
-	if !strings.Contains(view, "48;2;0;0;0") {
-		t.Fatalf("expected editor to consume black theme surface, got %q", view)
+	if !strings.Contains(view, "48;2;10;10;10") {
+		t.Fatalf("expected editor to consume dark panel surface, got %q", view)
 	}
 }
 
 func TestDialogsUsePanelSurface(t *testing.T) {
-	model := New(app.Config{})
+	model := New(app.Config{Theme: "catppuccin"})
 	model.width = 80
 	model.height = 24
 
@@ -2134,13 +2134,13 @@ func TestDialogsUsePanelSurface(t *testing.T) {
 	got := updated.(Model)
 	view := got.View().Content
 
-	if !strings.Contains(view, "48;2;0;0;0") {
-		t.Fatalf("expected dialogs to render on black panel surface, got %q", view)
+	if !strings.Contains(view, "48;2;10;10;10") {
+		t.Fatalf("expected dialogs to render on dark panel surface, got %q", view)
 	}
 }
 
 func TestVisualSurfaceIntegration(t *testing.T) {
-	model := New(app.Config{})
+	model := New(app.Config{Theme: "catppuccin"})
 	model.width = 80
 	model.height = 24
 	model.messages.SetSize(80, 8)
@@ -2157,13 +2157,13 @@ func TestVisualSurfaceIntegration(t *testing.T) {
 	if got := fmt.Sprintf("%#v", view.BackgroundColor); got != want {
 		t.Fatalf("expected black root background, got %s want %s", got, want)
 	}
-	if strings.Count(view.Content, "48;2;0;0;0") < 2 {
-		t.Fatalf("expected black surfaces to appear across editor/dialog stack, got %q", view.Content)
+	if strings.Count(view.Content, "48;2;10;10;10") < 2 {
+		t.Fatalf("expected dark panel surfaces to appear across editor/dialog stack, got %q", view.Content)
 	}
 	if !strings.Contains(transcriptView, "USER") || !strings.Contains(transcriptView, "ASSISTANT") {
 		t.Fatalf("expected transcript semantics to remain intact under overlay, got %q", transcriptView)
 	}
-	if !strings.Contains(plainView, "Themes") {
+	if !strings.Contains(plainView, "THEMES") {
 		t.Fatalf("expected overlay to coexist with transcript content, got %q", plainView)
 	}
 }

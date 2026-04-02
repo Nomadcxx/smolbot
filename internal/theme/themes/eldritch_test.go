@@ -9,9 +9,9 @@ import (
 	_ "github.com/Nomadcxx/smolbot/internal/theme/themes"
 )
 
-func TestRAMAThemeCanonicalPalette(t *testing.T) {
-	if !theme.Set("rama") {
-		t.Fatal("expected to set rama theme")
+func TestEldritchThemeCanonicalPalette(t *testing.T) {
+	if !theme.Set("eldritch") {
+		t.Fatal("expected to set eldritch theme")
 	}
 
 	current := theme.Current()
@@ -20,39 +20,43 @@ func TestRAMAThemeCanonicalPalette(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"Background":                "#1a1b2e",
-		"Panel":                     "#2b2d42",
-		"Element":                   "#2b2d42",
-		"Border":                    "#8d99ae",
-		"BorderFocus":               "#ef233c",
-		"Primary":                   "#ef233c",
-		"Secondary":                 "#8d99ae",
-		"Accent":                    "#d90429",
-		"Text":                      "#edf2f4",
-		"TextMuted":                 "#8d99ae",
-		"Error":                     "#d90429",
-		"Warning":                   "#ffd700",
-		"Success":                   "#8d99ae",
-		"Info":                      "#edf2f4",
-		"ToolBorder":                "#8d99ae",
-		"ToolName":                  "#ef233c",
-		"TranscriptUserAccent":      "#ef233c",
-		"TranscriptAssistantAccent": "#8d99ae",
-		"TranscriptThinking":        "#8d99ae",
-		"TranscriptStreaming":       "#edf2f4",
-		"TranscriptError":           "#d90429",
-		"MarkdownHeading":           "#ef233c",
-		"MarkdownLink":              "#d90429",
-		"MarkdownCode":              "#edf2f4",
-		"SyntaxKeyword":             "#ef233c",
-		"SyntaxString":              "#edf2f4",
-		"SyntaxComment":             "#8d99ae",
-		"ToolStateRunning":          "#ffd700",
-		"ToolStateDone":             "#8d99ae",
-		"ToolStateError":            "#d90429",
-		"ToolArtifactBorder":        "#8d99ae",
-		"ToolArtifactHeader":        "#1a1c2a",
-		"ToolArtifactBody":          "#2b2d42",
+		"Background":                "#212337",
+		"Panel":                     "#323449",
+		"Element":                   "#323449",
+		"Border":                    "#3b4261",
+		"BorderFocus":               "#37f499",
+		"Primary":                   "#37f499",
+		"Secondary":                 "#04d1f9",
+		"Accent":                    "#a48cf2",
+		"Text":                      "#ebfafa",
+		"TextMuted":                 "#7081d0",
+		"Error":                     "#f16c75",
+		"Warning":                   "#f1fc79",
+		"Success":                   "#37f499",
+		"Info":                      "#04d1f9",
+		"ToolBorder":                "#3b4261",
+		"ToolName":                  "#37f499",
+		"TranscriptUserAccent":      "#37f499",
+		"TranscriptAssistantAccent": "#04d1f9",
+		"TranscriptThinking":        "#7081d0",
+		"TranscriptStreaming":       "#ebfafa",
+		"TranscriptError":           "#f16c75",
+		"MarkdownHeading":           "#37f499",
+		"MarkdownLink":              "#04d1f9",
+		"MarkdownCode":              "#a48cf2",
+		"SyntaxKeyword":             "#a48cf2",
+		"SyntaxString":              "#37f499",
+		"SyntaxComment":             "#7081d0",
+		"ToolStateRunning":          "#f1fc79",
+		"ToolStateDone":             "#37f499",
+		"ToolStateError":            "#f16c75",
+		"ToolArtifactBorder":        "#3b4261",
+		"ToolArtifactHeader":        "#1a1b2e",
+		"ToolArtifactBody":          "#212337",
+		"DiffAdded":                 "#37f499",
+		"DiffRemoved":               "#f16c75",
+		"DiffAddedBg":               "#1a2b1a",
+		"DiffRemovedBg":             "#2b1a1a",
 	}
 
 	got := map[string]string{
@@ -89,11 +93,30 @@ func TestRAMAThemeCanonicalPalette(t *testing.T) {
 		"ToolArtifactBorder":        fmt.Sprintf("%#v", current.ToolArtifactBorder),
 		"ToolArtifactHeader":        fmt.Sprintf("%#v", current.ToolArtifactHeader),
 		"ToolArtifactBody":          fmt.Sprintf("%#v", current.ToolArtifactBody),
+		"DiffAdded":                 fmt.Sprintf("%#v", current.DiffAdded),
+		"DiffRemoved":               fmt.Sprintf("%#v", current.DiffRemoved),
+		"DiffAddedBg":               fmt.Sprintf("%#v", current.DiffAddedBg),
+		"DiffRemovedBg":             fmt.Sprintf("%#v", current.DiffRemovedBg),
 	}
 
 	for field, wantValue := range want {
 		if gotValue := got[field]; gotValue != fmt.Sprintf("%#v", lipgloss.Color(wantValue)) {
-			t.Fatalf("unexpected %s: got %s want %s", field, gotValue, fmt.Sprintf("%#v", lipgloss.Color(wantValue)))
+			t.Errorf("unexpected %s: got %s want %s", field, gotValue, fmt.Sprintf("%#v", lipgloss.Color(wantValue)))
 		}
+	}
+}
+
+func TestEldritchThemePanelDistinctFromBackground(t *testing.T) {
+	if !theme.Set("eldritch") {
+		t.Fatal("expected to set eldritch theme")
+	}
+	current := theme.Current()
+	if current == nil {
+		t.Fatal("expected current theme")
+	}
+	bg := fmt.Sprintf("%#v", current.Background)
+	panel := fmt.Sprintf("%#v", current.Panel)
+	if bg == panel {
+		t.Errorf("eldritch: Background (%s) should differ from Panel (%s) for sidebar contrast", bg, panel)
 	}
 }

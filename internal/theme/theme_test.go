@@ -11,8 +11,8 @@ import (
 
 func TestBuiltInThemesRegister(t *testing.T) {
 	names := theme.List()
-	if len(names) != 9 {
-		t.Fatalf("expected 9 themes, got %d: %v", len(names), names)
+	if len(names) != 10 {
+		t.Fatalf("expected 10 themes, got %d: %v", len(names), names)
 	}
 	if !theme.Set("nord") {
 		t.Fatal("expected to set nord theme")

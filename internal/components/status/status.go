@@ -57,9 +57,9 @@ func (m Model) View() string {
 
 	var connStatus string
 	if m.streaming {
-		// Animated "working..." with ellipsis spinner
-		workingStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
-		connStatus = workingStyle.Render("working") + m.spinner.View()
+		// Animated spinner with styled "working" label
+		workingStyle := lipgloss.NewStyle().Foreground(t.Warning).Bold(true)
+		connStatus = workingStyle.Render("working") + " " + m.spinner.View()
 	} else if m.reconnecting {
 		connStatus = lipgloss.NewStyle().Foreground(t.Warning).Render("● reconnecting")
 	} else if m.connected {

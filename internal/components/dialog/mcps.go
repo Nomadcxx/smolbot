@@ -42,8 +42,10 @@ func (m MCPServersModel) View() string {
 	if t == nil {
 		return "mcp servers"
 	}
+	width := dialogWidth(m.termWidth, 72) - 6 // Account for padding/border
+	headerStyle := lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Width(width).Align(lipgloss.Center)
 	lines := []string{
-		lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("MCP Servers"),
+		headerStyle.Render("//// MCP SERVERS ////"),
 		"",
 	}
 	start, end := visibleBounds(len(m.servers), m.cursor)
@@ -77,7 +79,8 @@ func (m MCPServersModel) View() string {
 	if end < len(m.servers) {
 		lines = append(lines, lipgloss.NewStyle().Foreground(t.TextMuted).Render("▼ more below"))
 	}
-	lines = append(lines, "", lipgloss.NewStyle().Foreground(t.TextMuted).Render("↑↓ j/k • Esc close"))
+	hintsStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Width(width).Align(lipgloss.Center)
+	lines = append(lines, "", hintsStyle.Render("↑↓ j/k • Esc close"))
 	return lipgloss.NewStyle().
 		Background(t.Panel).
 		Border(lipgloss.RoundedBorder()).

@@ -28,8 +28,11 @@ func (m KeybindingsModel) View() string {
 	if t == nil {
 		return "keybindings"
 	}
+	width := dialogWidth(m.termWidth, 72) - 6 // Account for padding/border
+	headerStyle := lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Width(width).Align(lipgloss.Center)
+	hintsStyle := lipgloss.NewStyle().Foreground(t.TextMuted).Width(width).Align(lipgloss.Center)
 	lines := []string{
-		lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("Keybindings"),
+		headerStyle.Render("//// KEYBINDINGS ////"),
 		"",
 		"Global",
 		"  F1 / Ctrl+M    Open menu",
@@ -65,7 +68,7 @@ func (m KeybindingsModel) View() string {
 		"  /help          Show help",
 		"  /quit          Exit",
 		"",
-		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Esc close"),
+		hintsStyle.Render("Esc close"),
 	}
 	return lipgloss.NewStyle().
 		Background(t.Panel).

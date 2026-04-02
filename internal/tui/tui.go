@@ -494,7 +494,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status.AdvanceSpinner(msg)
-		return m, nil
+		return m, m.status.StatusSpinnerTick() // Continue the spinner animation
 	case InterruptDebounceTimeoutMsg:
 		m.interruptKeyState = InterruptKeyIdle
 		m.status.SetInterruptHint(false)

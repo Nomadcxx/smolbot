@@ -128,6 +128,7 @@ func (m *MessagesModel) AppendSystem(content string) {
 	m.messages = append(m.messages, ChatMessage{Role: "system", Content: content})
 	m.progress = ""
 	m.thinking = ""
+	m.tools = nil // Clear stale tool output on abort/system messages
 	if len(m.cache) != len(m.messages)-1 {
 		m.messageBody = ""
 	}

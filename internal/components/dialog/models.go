@@ -177,19 +177,10 @@ func (m ModelsModel) View() string {
 		return "models"
 	}
 
-	innerWidth := m.calculateOptimalWidth()
-	// Clamp to terminal width minus border/padding
-	if m.termWidth > 0 {
-		maxInner := m.termWidth - 8
-		if maxInner < minModelDialogWidth {
-			maxInner = minModelDialogWidth
-		}
-		if innerWidth > maxInner {
-			innerWidth = maxInner
-		}
-	}
+	// Use consistent dialog width like other dialogs
+	dialogW := dialogWidth(m.termWidth, 72)
+	contentWidth := dialogW - 6 // Account for padding (1,2 = 4 horizontal) + border (2)
 
-	keyStyle := lipgloss.NewStyle().Foreground(t.Text).Bold(true)
 	mutedStyle := lipgloss.NewStyle().Foreground(t.TextMuted)
 
 	// Styled search input (Phase 27) — cursor always visible
@@ -201,12 +192,15 @@ func (m ModelsModel) View() string {
 	searchBox := lipgloss.NewStyle().
 		Foreground(t.Text).
 		Background(t.Panel).
-		Width(innerWidth - 2).
+		Width(contentWidth - 2).
 		Padding(0, 1).
 		Render(searchContent + cursorChar)
 
+	// Centered header matching menu dialog style
+	headerStyle := lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Width(contentWidth).Align(lipgloss.Center)
+
 	lines := []string{
-		lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("Models"),
+		headerStyle.Render("//// MODELS ////"),
 		searchBox,
 		"",
 	}
@@ -224,32 +218,35 @@ func (m ModelsModel) View() string {
 			lines = append(lines, mutedStyle.Render("▲ more above"))
 		}
 		for i := start; i < end; i++ {
-			lines = append(lines, rows[i].render(t, innerWidth))
+			lines = append(lines, rows[i].render(t, contentWidth))
 		}
 		if end < len(rows) {
 			lines = append(lines, mutedStyle.Render("▼ more below"))
 		}
 	}
 
-	// Styled navigation hints (Phase 26)
+	// Styled navigation hints (Phase 26) with accent colors
+	accentStyle := lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
+	sepStyle := lipgloss.NewStyle().Foreground(t.Primary)
 	hints := []string{
-		keyStyle.Render("↑↓") + mutedStyle.Render(" navigate"),
-		keyStyle.Render("enter") + mutedStyle.Render(" select"),
-		keyStyle.Render("ctrl+f") + mutedStyle.Render(" fav"),
-		keyStyle.Render("ctrl+a") + mutedStyle.Render(" add"),
-		keyStyle.Render("esc") + mutedStyle.Render(" close"),
+		accentStyle.Render("↑↓") + mutedStyle.Render(" navigate"),
+		accentStyle.Render("enter") + mutedStyle.Render(" select"),
+		accentStyle.Render("ctrl+f") + mutedStyle.Render(" fav"),
+		accentStyle.Render("ctrl+a") + mutedStyle.Render(" add"),
+		accentStyle.Render("esc") + mutedStyle.Render(" close"),
 	}
 	if m.filter != "" {
-		hints = append(hints, keyStyle.Render("backspace")+mutedStyle.Render(" clear"))
+		hints = append(hints, accentStyle.Render("⌫")+mutedStyle.Render(" clear"))
 	}
-	lines = append(lines, "", mutedStyle.Render(strings.Join(hints, "  •  ")))
+	hintsLine := strings.Join(hints, sepStyle.Render(" • "))
+	lines = append(lines, "", lipgloss.NewStyle().Width(contentWidth).Align(lipgloss.Center).Render(hintsLine))
 
 	return lipgloss.NewStyle().
 		Background(t.Panel).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
 		Padding(1, 2).
-		Width(innerWidth).
+		Width(dialogW).
 		Render(strings.Join(lines, "\n"))
 }
 

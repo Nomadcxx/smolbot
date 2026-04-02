@@ -7,7 +7,7 @@ import (
 
 func init() {
 	register("rama", [15]string{
-		"#2b2d42", "#2b2d42", "#2b2d42", "#8d99ae", "#ef233c",
+		"#1a1b2e", "#2b2d42", "#2b2d42", "#8d99ae", "#ef233c",
 		"#ef233c", "#8d99ae", "#d90429", "#edf2f4", "#8d99ae",
 		"#d90429", "#ffd700", "#8d99ae", "#edf2f4", "#8d99ae",
 	}, func(t *theme.Theme) {

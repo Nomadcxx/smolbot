@@ -156,11 +156,11 @@ func (d menuDialog) SetTerminalWidth(int) Dialog { return d }
 func (d menuDialog) title() string {
 	switch d.page {
 	case menuPageThemes:
-		return "Themes"
+		return "//// THEMES ////"
 	case menuPageSessions:
-		return "Sessions"
+		return "//// SESSIONS ////"
 	case menuPageContext:
-		return "Context & Compaction"
+		return "//// CONTEXT ////"
 	default:
 		return "//// MENU ////"
 	}
