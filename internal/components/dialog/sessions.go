@@ -90,8 +90,10 @@ func (m SessionsModel) View() string {
 		return "sessions"
 	}
 
+	width := dialogWidth(m.termWidth, 60)
+	headerStyle := lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Width(width).Align(lipgloss.Center)
 	lines := []string{
-		lipgloss.NewStyle().Foreground(t.Primary).Bold(true).Render("Sessions"),
+		headerStyle.Render("//// SESSIONS ////"),
 		lipgloss.NewStyle().Foreground(t.TextMuted).Render("Filter: " + m.filter),
 		"",
 	}
