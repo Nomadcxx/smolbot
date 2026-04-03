@@ -1253,6 +1253,9 @@ func (m Model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			m.app.Theme = args
 			m.header = header.New()
 			m.messages.InvalidateTheme()
+			if t := theme.Current(); t != nil {
+				m.sidebar.SetSidebarBg(t.SidebarBg)
+			}
 			return m, m.persistStateCmd()
 		}
 		m.messages.AppendError("Unknown theme: " + args + ". Available: " + strings.Join(theme.List(), ", "))
@@ -1776,6 +1779,9 @@ func newSidebar(a *app.App, mcps []client.MCPServerInfo) sidebarcmp.Model {
 	sidebar.SetSession(a.Session)
 	sidebar.SetModel(a.Model)
 	sidebar.SetMCPs(mapMCPEntries(mcps))
+	if t := theme.Current(); t != nil {
+		sidebar.SetSidebarBg(t.SidebarBg)
+	}
 	return sidebar
 }
 

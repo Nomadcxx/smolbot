@@ -1,6 +1,7 @@
 package sidebar
 
 import (
+	"image/color"
 	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
@@ -14,9 +15,10 @@ const DefaultWidth = 30
 const minItemsPerSection = 1
 
 type Model struct {
-	width   int
-	height  int
-	visible bool
+	width     int
+	height    int
+	visible   bool
+	sidebarBg color.Color
 
 	session  SessionSection
 	context  ContextSection
@@ -61,6 +63,10 @@ func (m *Model) SetVisible(v bool) {
 	m.visible = v
 }
 
+func (m *Model) SetSidebarBg(bg color.Color) {
+	m.sidebarBg = bg
+}
+
 func (m *Model) SetSession(session string) {
 	m.session.sessionKey = session
 }
@@ -103,17 +109,42 @@ func (m Model) View() string {
 	}
 	t := theme.Current()
 	limits := m.getDynamicLimits()
+
+	// Content width accounts for left padding
+	contentWidth := m.width - 1
+	if contentWidth < 10 {
+		contentWidth = m.width
+	}
+
 	sections := []string{
-		renderSectionBlock(m.session, m.width, 0, t),
-		renderSectionBlock(m.context, m.width, 0, t),
-		renderSectionBlock(m.usage, m.width, 0, t),
-		renderSectionBlock(m.channels, m.width, limits["CHANNELS"], t),
-		renderSectionBlock(m.mcps, m.width, limits["MCPS"], t),
-		renderSectionBlock(m.cron, m.width, limits["SCHEDULED"], t),
+		renderSectionBlock(m.session, contentWidth, 0, t),
+		renderSectionBlock(m.context, contentWidth, 0, t),
+		renderSectionBlock(m.usage, contentWidth, 0, t),
+		renderSectionBlock(m.channels, contentWidth, limits["CHANNELS"], t),
+		renderSectionBlock(m.mcps, contentWidth, limits["MCPS"], t),
+		renderSectionBlock(m.cron, contentWidth, limits["SCHEDULED"], t),
 	}
 	blocks := filterEmpty(sections)
+
+	// Style wraps each block to fill full sidebar width with background
+	blockStyle := lipgloss.NewStyle().Width(m.width).PaddingLeft(1)
+	if m.sidebarBg != nil {
+		blockStyle = blockStyle.Background(m.sidebarBg)
+	}
+
+	// Separator between sections: an empty line with background fill
+	gapStyle := lipgloss.NewStyle().Width(m.width)
+	if m.sidebarBg != nil {
+		gapStyle = gapStyle.Background(m.sidebarBg)
+	}
+	gap := gapStyle.Render("")
+
 	if m.height <= 0 {
-		return strings.Join(blocks, "\n\n")
+		wrapped := make([]string, 0, len(blocks))
+		for _, block := range blocks {
+			wrapped = append(wrapped, blockStyle.Render(block))
+		}
+		return strings.Join(wrapped, "\n"+gap+"\n")
 	}
 
 	rendered := make([]string, 0, len(blocks))
@@ -126,13 +157,14 @@ func (m Model) View() string {
 		if strings.TrimSpace(block) == "" {
 			break
 		}
-		rendered = append(rendered, block)
-		remaining -= lipgloss.Height(block)
+		wrapped := blockStyle.Render(block)
+		rendered = append(rendered, wrapped)
+		remaining -= lipgloss.Height(wrapped)
 		if remaining > 1 {
-			remaining -= 2
+			remaining -= 1 // gap line
 		}
 	}
-	return strings.Join(rendered, "\n\n")
+	return strings.Join(rendered, "\n"+gap+"\n")
 }
 
 func (m Model) CompactView() string {

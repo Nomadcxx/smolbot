@@ -21,13 +21,10 @@ func plain(text string) string {
 	return ansi.Strip(strings.NewReplacer("\r", "").Replace(text))
 }
 
-func TestRenderSectionHeaderUsesUppercaseAndSeparator(t *testing.T) {
+func TestRenderSectionHeaderUsesUppercase(t *testing.T) {
 	got := plain(renderSectionHeader("session", 24, theme.Current()))
 	if !strings.HasPrefix(got, "SESSION") {
 		t.Fatalf("expected uppercase title, got %q", got)
-	}
-	if !strings.Contains(got, "─") {
-		t.Fatalf("expected separator line, got %q", got)
 	}
 }
 

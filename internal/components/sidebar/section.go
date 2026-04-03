@@ -22,26 +22,12 @@ func renderSectionHeader(title string, width int, t *theme.Theme) string {
 	if label == "" {
 		return ""
 	}
-	if width <= 0 {
-		return label
-	}
 
 	styled := lipgloss.NewStyle().Bold(true)
 	if t != nil {
-		styled = styled.Foreground(t.TextMuted)
+		styled = styled.Foreground(t.Accent)
 	}
-	label = styled.Render(label)
-
-	lineWidth := width - lipgloss.Width(label) - 1
-	if lineWidth <= 0 {
-		return label
-	}
-
-	lineStyle := lipgloss.NewStyle()
-	if t != nil {
-		lineStyle = lineStyle.Foreground(t.Border)
-	}
-	return label + " " + lineStyle.Render(strings.Repeat("─", lineWidth))
+	return styled.Render(label)
 }
 
 func truncateVisible(text string, width int) string {
@@ -80,17 +66,6 @@ func styleText(text string, width int, t *theme.Theme, colorFn func(*theme.Theme
 		st = st.Foreground(colorFn(t))
 	}
 	return st.Render(rendered)
-}
-
-func repeatLine(ch string, width int, t *theme.Theme) string {
-	if width <= 0 {
-		return ""
-	}
-	style := lipgloss.NewStyle()
-	if t != nil {
-		style = style.Foreground(t.Border)
-	}
-	return style.Render(strings.Repeat(ch, width))
 }
 
 func formatTokens(value int) string {
