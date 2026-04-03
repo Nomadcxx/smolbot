@@ -7,11 +7,11 @@ import (
 
 func init() {
 	register("rama", [15]string{
-		"#1a1b2e", "#1a1b2e", "#2b2d42", "#8d99ae", "#ef233c",
+		"#000000", "#000000", "#0a0a0a", "#8d99ae", "#ef233c",
 		"#ef233c", "#8d99ae", "#d90429", "#edf2f4", "#8d99ae",
 		"#d90429", "#ffd700", "#8d99ae", "#edf2f4", "#8d99ae",
 	}, func(t *theme.Theme) {
-		t.SidebarBg = lipgloss.Color("#2b2d42")
+		t.SidebarBg = lipgloss.Color("#1a1b2e")
 		t.ToolName = lipgloss.Color("#ef233c")
 		t.TranscriptUserAccent = lipgloss.Color("#ef233c")
 		t.TranscriptAssistantAccent = lipgloss.Color("#8d99ae")

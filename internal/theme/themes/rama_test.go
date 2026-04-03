@@ -20,9 +20,9 @@ func TestRAMAThemeCanonicalPalette(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"Background":                "#1a1b2e",
-		"Panel":                     "#1a1b2e",
-		"Element":                   "#2b2d42",
+		"Background":                "#000000",
+		"Panel":                     "#000000",
+		"Element":                   "#0a0a0a",
 		"Border":                    "#8d99ae",
 		"BorderFocus":               "#ef233c",
 		"Primary":                   "#ef233c",

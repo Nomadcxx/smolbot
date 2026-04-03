@@ -20,9 +20,9 @@ func TestEldritchThemeCanonicalPalette(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"Background":                "#212337",
-		"Panel":                     "#212337",
-		"Element":                   "#323449",
+		"Background":                "#000000",
+		"Panel":                     "#000000",
+		"Element":                   "#0a0a0a",
 		"Border":                    "#3b4261",
 		"BorderFocus":               "#37f499",
 		"Primary":                   "#37f499",
