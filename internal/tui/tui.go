@@ -1335,9 +1335,13 @@ func (m Model) View() tea.View {
 			Render(overlaySidebar.CompactView())
 		content = lipgloss.JoinVertical(lipgloss.Left, overlay, main)
 	} else if m.shouldShowSidebar() {
-		mainWithFooter := lipgloss.JoinVertical(lipgloss.Left, main, m.footer.View())
+		mainWithFooter := lipgloss.NewStyle().
+			Width(m.mainWidth).
+			MaxWidth(m.mainWidth).
+			Render(lipgloss.JoinVertical(lipgloss.Left, main, m.footer.View()))
 		sidebar := lipgloss.NewStyle().
 			Width(m.sidebarWidth).
+			MaxWidth(m.sidebarWidth).
 			Height(lipgloss.Height(mainWithFooter)).
 			Background(t.SidebarBg).
 			Foreground(t.Text).

@@ -127,13 +127,13 @@ func (m Model) View() string {
 	blocks := filterEmpty(sections)
 
 	// Style wraps each block to fill full sidebar width with background
-	blockStyle := lipgloss.NewStyle().Width(m.width).PaddingLeft(1)
+	blockStyle := lipgloss.NewStyle().Width(m.width).MaxWidth(m.width).PaddingLeft(1)
 	if m.sidebarBg != nil {
 		blockStyle = blockStyle.Background(m.sidebarBg)
 	}
 
 	// Separator between sections: an empty line with background fill
-	gapStyle := lipgloss.NewStyle().Width(m.width)
+	gapStyle := lipgloss.NewStyle().Width(m.width).MaxWidth(m.width)
 	if m.sidebarBg != nil {
 		gapStyle = gapStyle.Background(m.sidebarBg)
 	}
