@@ -36,7 +36,15 @@ type OpenAIProvider struct {
 
 func NewOpenAIProvider(name, apiKey, baseURL string, extraHeaders map[string]string) *OpenAIProvider {
 	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
+		// Default URLs for known providers
+		switch name {
+		case "ollama":
+			baseURL = "http://localhost:11434"
+		case "vllm":
+			baseURL = "http://localhost:8000"
+		default:
+			baseURL = "https://api.openai.com/v1"
+		}
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 	// Ollama and other OpenAI-compatible local servers require /v1 path prefix

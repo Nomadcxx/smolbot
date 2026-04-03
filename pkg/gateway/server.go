@@ -604,6 +604,13 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		}
 		if s.config != nil {
 			s.config.Agents.Defaults.Model = current
+			// Persist model change to config file
+			if s.configPath != "" {
+				if err := config.AtomicWriteConfig(s.configPath, s.config); err != nil {
+					// Log but don't fail - model change is still valid in memory
+					fmt.Printf("models.set: failed to persist config: %v\n", err)
+				}
+			}
 		}
 		return map[string]any{
 			"current":  current,
@@ -621,7 +628,9 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 		if strings.TrimSpace(params.Provider) == "" {
 			return nil, fmt.Errorf("provider.configure: missing provider")
 		}
-		if strings.TrimSpace(params.APIKey) == "" {
+		// Local providers (ollama, vllm) don't require API keys
+		localProviders := map[string]bool{"ollama": true, "vllm": true}
+		if !localProviders[params.Provider] && strings.TrimSpace(params.APIKey) == "" {
 			return nil, fmt.Errorf("provider.configure: missing apiKey")
 		}
 		pc := config.ProviderConfig{

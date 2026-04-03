@@ -260,8 +260,10 @@ func discoverOllamaModels(cfg *config.Config) ([]ModelInfo, error) {
 
 	models := make([]ModelInfo, len(ollamaModels))
 	for i, m := range ollamaModels {
+		// Prefix with ollama/ for correct routing
+		modelID := "ollama/" + m.Name
 		models[i] = ModelInfo{
-			ID:          m.Name,
+			ID:          modelID,
 			Name:        m.Name,
 			Provider:    "ollama",
 			Description: ollamaModelDescription(m),

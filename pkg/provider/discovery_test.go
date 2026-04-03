@@ -40,7 +40,7 @@ func TestGetAvailableModelsUsesLiveOllamaDiscovery(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.Config{}
-	cfg.Agents.Defaults.Model = "qwen3:8b"
+	cfg.Agents.Defaults.Model = "ollama/qwen3:8b"
 	cfg.Agents.Defaults.Provider = "ollama"
 	cfg.Providers = map[string]config.ProviderConfig{
 		"ollama": {APIBase: server.URL},
@@ -53,12 +53,12 @@ func TestGetAvailableModelsUsesLiveOllamaDiscovery(t *testing.T) {
 	if len(models) != 2 {
 		t.Fatalf("len(models) = %d, want 2", len(models))
 	}
-	got, ok := findModel(models, "ollama", "qwen3:8b")
+	got, ok := findModel(models, "ollama", "ollama/qwen3:8b")
 	if !ok {
-		t.Fatalf("expected qwen3:8b in ollama catalog, got %#v", models)
+		t.Fatalf("expected ollama/qwen3:8b in ollama catalog, got %#v", models)
 	}
-	if got.ID != "qwen3:8b" {
-		t.Fatalf("ollama id = %q, want qwen3:8b", got.ID)
+	if got.ID != "ollama/qwen3:8b" {
+		t.Fatalf("ollama id = %q, want ollama/qwen3:8b", got.ID)
 	}
 	if got.Name != "qwen3:8b" {
 		t.Fatalf("ollama name = %q, want qwen3:8b", got.Name)
