@@ -59,6 +59,9 @@ type Theme struct {
 	ToolArtifactHeader color.Color
 	ToolArtifactBody   color.Color
 
+	// Sidebar background — distinct from Background to create visual separation.
+	SidebarBg color.Color
+
 	// Compression indicator colors (inspired by nanocoder)
 	CompressionActive  color.Color // Light compression (20-40%)
 	CompressionSuccess color.Color // Moderate compression (40-60%)

@@ -1327,7 +1327,7 @@ func (m Model) View() tea.View {
 		overlaySidebar.SetSize(mainWidth, m.height)
 		overlay := lipgloss.NewStyle().
 			Width(mainWidth).
-			Background(t.Panel).
+			Background(t.SidebarBg).
 			Foreground(t.Text).
 			Render(overlaySidebar.CompactView())
 		content = lipgloss.JoinVertical(lipgloss.Left, overlay, main)
@@ -1336,7 +1336,7 @@ func (m Model) View() tea.View {
 		sidebar := lipgloss.NewStyle().
 			Width(m.sidebarWidth).
 			Height(lipgloss.Height(mainWithFooter)).
-			Background(t.Panel).
+			Background(t.SidebarBg).
 			Foreground(t.Text).
 			Render(m.sidebar.View())
 		separator := m.renderSidebarSeparator(lipgloss.Height(mainWithFooter))

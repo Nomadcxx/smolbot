@@ -7,10 +7,11 @@ import (
 
 func init() {
 	register("tokyo_night", [15]string{
-		"#000000", "#0a0a0a", "#0a0a0a", "#24283B", "#7AA2F7",
+		"#000000", "#000000", "#0a0a0a", "#24283B", "#7AA2F7",
 		"#7AA2F7", "#BB9AF7", "#F7768E", "#C0CAF5", "#565F89",
 		"#F7768E", "#E0AF68", "#9ECE6A", "#7DCFFF", "#24283B",
 	}, func(t *theme.Theme) {
+		t.SidebarBg = lipgloss.Color("#111111")
 		t.ToolName = lipgloss.Color("#7AA2F7")
 		t.TranscriptUserAccent = lipgloss.Color("#7AA2F7")
 		t.TranscriptAssistantAccent = lipgloss.Color("#BB9AF7")

@@ -10,8 +10,8 @@ func init() {
 	// Source palette: https://github.com/eldritch-theme/eldritch
 	register("eldritch", [15]string{
 		"#212337", // [0]  Background  - Sunken Depths Grey
-		"#323449", // [1]  Panel       - Shallow Depths Grey (elevated)
-		"#323449", // [2]  Element     - same as panel
+		"#212337", // [1]  Panel       - matches Background (no leak)
+		"#323449", // [2]  Element     - Shallow Depths Grey
 		"#3b4261", // [3]  Border      - subtle separator
 		"#37f499", // [4]  BorderFocus - Great Old One Green
 		"#37f499", // [5]  Primary     - Great Old One Green
@@ -25,6 +25,7 @@ func init() {
 		"#04d1f9", // [13] Info        - Watery Tomb Blue
 		"#3b4261", // [14] ToolBorder  - same as border
 	}, func(t *theme.Theme) {
+		t.SidebarBg = lipgloss.Color("#323449") // Shallow Depths Grey
 		t.ToolName = lipgloss.Color("#37f499")
 		t.TranscriptUserAccent = lipgloss.Color("#37f499")
 		t.TranscriptAssistantAccent = lipgloss.Color("#04d1f9")

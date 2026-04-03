@@ -21,7 +21,7 @@ func TestEldritchThemeCanonicalPalette(t *testing.T) {
 
 	want := map[string]string{
 		"Background":                "#212337",
-		"Panel":                     "#323449",
+		"Panel":                     "#212337",
 		"Element":                   "#323449",
 		"Border":                    "#3b4261",
 		"BorderFocus":               "#37f499",
@@ -106,7 +106,7 @@ func TestEldritchThemeCanonicalPalette(t *testing.T) {
 	}
 }
 
-func TestEldritchThemePanelDistinctFromBackground(t *testing.T) {
+func TestEldritchThemeSidebarBgDistinctFromBackground(t *testing.T) {
 	if !theme.Set("eldritch") {
 		t.Fatal("expected to set eldritch theme")
 	}
@@ -115,8 +115,8 @@ func TestEldritchThemePanelDistinctFromBackground(t *testing.T) {
 		t.Fatal("expected current theme")
 	}
 	bg := fmt.Sprintf("%#v", current.Background)
-	panel := fmt.Sprintf("%#v", current.Panel)
-	if bg == panel {
-		t.Errorf("eldritch: Background (%s) should differ from Panel (%s) for sidebar contrast", bg, panel)
+	sidebarBg := fmt.Sprintf("%#v", current.SidebarBg)
+	if bg == sidebarBg {
+		t.Errorf("eldritch: Background (%s) should differ from SidebarBg (%s) for sidebar contrast", bg, sidebarBg)
 	}
 }

@@ -93,6 +93,9 @@ func register(name string, colors [15]string, opts ...themeOption) {
 	if t.DiffLineNumber == nil {
 		t.DiffLineNumber = t.TextMuted
 	}
+	if t.SidebarBg == nil {
+		t.SidebarBg = t.Panel
+	}
 
 	theme.Register(t)
 }
