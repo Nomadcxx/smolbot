@@ -612,6 +612,12 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 				}
 			}
 		}
+		// Broadcast so all connected TUIs update their model dialogs.
+		models, _ := provider.GetAvailableModels(s.config)
+		s.BroadcastEvent("models.updated", map[string]any{
+			"models":  clientModels(models),
+			"current": current,
+		})
 		return map[string]any{
 			"current":  current,
 			"previous": previous,

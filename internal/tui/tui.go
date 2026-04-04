@@ -924,6 +924,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				m.app.Model = p.Current
+				m.footer.SetModel(p.Current)
+				m.sidebar.SetModel(p.Current)
 				if _, ok := m.dialog.(providersDialog); ok {
 					if m.returnToModelsAfterProvider {
 						m.returnToModelsAfterProvider = false
@@ -932,6 +934,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					} else {
 						m.dialog = providersDialog{dialogcmp.NewProvidersFromData(p.Models, p.Current, client.StatusPayload{}, m.providerConfig)}
 					}
+				} else if _, ok := m.dialog.(modelsDialog); ok {
+					m.dialog = modelsDialog{dialogcmp.NewModelsWithState(m.providerConfig, p.Models, p.Current, m.app.State.FavoriteModelIDs(), m.app.State.RecentModelIDs())}
+					m.dialog = m.dialog.SetTerminalWidth(m.width)
 				} else if m.returnToModelsAfterProvider {
 					// Dialog changed or closed before models.updated arrived — clear stale flag.
 					m.returnToModelsAfterProvider = false
