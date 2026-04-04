@@ -131,20 +131,21 @@ func TestBuildCodexRequest(t *testing.T) {
 	if cr.MaxTokens != 4096 {
 		t.Errorf("MaxTokens = %d, want %d", cr.MaxTokens, 4096)
 	}
-	if len(cr.Input) != 3 {
-		t.Fatalf("len(Input) = %d, want 3", len(cr.Input))
+	if cr.Instructions != "You are a helpful assistant" {
+		t.Errorf("Instructions = %q, want %q", cr.Instructions, "You are a helpful assistant")
 	}
-	if cr.Input[0].Role != "developer" {
-		t.Errorf("Input[0].Role = %q, want %q", cr.Input[0].Role, "developer")
+	// System message extracted to instructions, so Input has only user + tool = 2
+	if len(cr.Input) != 2 {
+		t.Fatalf("len(Input) = %d, want 2", len(cr.Input))
 	}
-	if cr.Input[1].Role != "user" {
-		t.Errorf("Input[1].Role = %q, want %q", cr.Input[1].Role, "user")
+	if cr.Input[0].Role != "user" {
+		t.Errorf("Input[0].Role = %q, want %q", cr.Input[0].Role, "user")
 	}
-	if cr.Input[2].Role != "tool" {
-		t.Errorf("Input[2].Role = %q, want %q", cr.Input[2].Role, "tool")
+	if cr.Input[1].Role != "tool" {
+		t.Errorf("Input[1].Role = %q, want %q", cr.Input[1].Role, "tool")
 	}
-	if !strings.Contains(cr.Input[2].Content, "call_123") {
-		t.Errorf("tool input should contain call_id, got: %q", cr.Input[2].Content)
+	if !strings.Contains(cr.Input[1].Content, "call_123") {
+		t.Errorf("tool input should contain call_id, got: %q", cr.Input[1].Content)
 	}
 	if len(cr.Tools) != 1 {
 		t.Fatalf("len(Tools) = %d, want 1", len(cr.Tools))

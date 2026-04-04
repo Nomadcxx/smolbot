@@ -47,10 +47,8 @@ func GetAvailableModels(cfg *config.Config) ([]ModelInfo, error) {
 		if !ok {
 			continue
 		}
-		if pc.AuthType == "oauth" {
-			continue
-		}
-		if strings.TrimSpace(pc.APIKey) == "" {
+		// API-key providers need a key set; OAuth providers are always available.
+		if pc.AuthType != "oauth" && strings.TrimSpace(pc.APIKey) == "" {
 			continue
 		}
 		for _, entry := range CatalogueModels(providerID) {

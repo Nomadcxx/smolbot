@@ -246,12 +246,13 @@ func (p *OpenAICodexProvider) setCodexHeaders(req *http.Request, accessToken str
 
 // codexRequest is the Codex Responses API body format.
 type codexRequest struct {
-	Model       string           `json:"model"`
-	Stream      bool             `json:"stream"`
-	Input       []codexInputItem `json:"input"`
-	Tools       []codexToolDef   `json:"tools,omitempty"`
-	MaxTokens   int              `json:"max_output_tokens,omitempty"`
-	Temperature *float64         `json:"temperature,omitempty"`
+	Model        string           `json:"model"`
+	Instructions string           `json:"instructions"`
+	Stream       bool             `json:"stream"`
+	Input        []codexInputItem `json:"input"`
+	Tools        []codexToolDef   `json:"tools,omitempty"`
+	MaxTokens    int              `json:"max_output_tokens,omitempty"`
+	Temperature  *float64         `json:"temperature,omitempty"`
 }
 
 type codexInputItem struct {
@@ -276,12 +277,15 @@ func (p *OpenAICodexProvider) buildCodexRequest(req ChatRequest) codexRequest {
 		MaxTokens: req.MaxTokens,
 	}
 
+	// Collect system/developer messages into instructions field.
+	var instructions []string
 	for _, msg := range req.Messages {
 		role := msg.Role
-		if role == "system" {
-			role = "developer"
-		}
 		content := msg.StringContent()
+		if role == "system" || role == "developer" {
+			instructions = append(instructions, content)
+			continue
+		}
 		if role == "tool" && msg.ToolCallID != "" {
 			cr.Input = append(cr.Input, codexInputItem{
 				Role:    "tool",
@@ -293,6 +297,12 @@ func (p *OpenAICodexProvider) buildCodexRequest(req ChatRequest) codexRequest {
 			Role:    role,
 			Content: content,
 		})
+	}
+
+	if len(instructions) > 0 {
+		cr.Instructions = strings.Join(instructions, "\n\n")
+	} else {
+		cr.Instructions = "You are a helpful assistant."
 	}
 
 	for _, tool := range req.Tools {
