@@ -28,6 +28,7 @@ func NewRootCmd(version string) *cobra.Command {
 	cmd.AddCommand(newStatusCmd(opts))
 	cmd.AddCommand(newOnboardCmd(opts))
 	cmd.AddCommand(newChannelsCmd(opts))
+	cmd.AddCommand(newAuthCmd(opts))
 
 	return cmd
 }

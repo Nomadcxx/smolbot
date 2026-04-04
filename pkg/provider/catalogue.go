@@ -56,6 +56,16 @@ var providerCatalogue = map[string][]CatalogueEntry{
 		{ID: "MiniMax-Text-01", Name: "MiniMax Text-01", Capability: "chat", ReleaseDate: "2025-01", ContextWindow: 1000000},
 		{ID: "abab6.5s-chat", Name: "ABAB 6.5s", Capability: "chat", ReleaseDate: "2024-06", ContextWindow: 245000},
 	},
+	"openai-codex": {
+		{ID: "gpt-5.4", Name: "GPT-5.4", Capability: "chat", ReleaseDate: "2025-07", ContextWindow: 200000, IsFree: true},
+		{ID: "gpt-5.3-codex", Name: "GPT-5.3 Codex", Capability: "chat", ReleaseDate: "2025-06", ContextWindow: 200000, IsFree: true},
+		{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", Capability: "chat", ReleaseDate: "2025-06", ContextWindow: 200000, IsFree: true},
+		{ID: "gpt-5.2", Name: "GPT-5.2", Capability: "chat", ReleaseDate: "2025-06", ContextWindow: 200000, IsFree: true},
+		{ID: "gpt-5.1", Name: "GPT-5.1", Capability: "chat", ReleaseDate: "2025-05", ContextWindow: 200000, IsFree: true},
+		{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex", Capability: "chat", ReleaseDate: "2025-05", ContextWindow: 200000, IsFree: true},
+		{ID: "gpt-5.1-codex-max", Name: "GPT-5.1 Codex Max", Capability: "chat", ReleaseDate: "2025-05", ContextWindow: 200000, IsFree: true},
+		{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1 Codex Mini", Capability: "chat", ReleaseDate: "2025-05", ContextWindow: 200000, IsFree: true},
+	},
 }
 
 func CatalogueModels(providerID string) []CatalogueEntry {

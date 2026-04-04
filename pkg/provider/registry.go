@@ -72,6 +72,10 @@ func NewRegistryWithOAuthStore(cfg *config.Config, store config.OAuthTokenStore)
 		return NewMiniMaxOAuthProvider("minimax-portal", WithMiniMaxOAuthBaseURL(cfg.BaseURL))
 	})
 
+	r.RegisterOAuthFactory("openai-codex", func(cfg OAuthConfig) OAuthProvider {
+		return NewOpenAICodexProvider("openai-codex")
+	})
+
 	return r
 }
 
