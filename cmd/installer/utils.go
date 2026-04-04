@@ -227,6 +227,8 @@ func defaultModelFor(provider string) string {
 		return "MiniMax-M2.7"
 	case providerMiniMaxOAuth:
 		return "minimax-portal/MiniMax-M2.7"
+	case providerOpenAICodex:
+		return "openai-codex/gpt-5.2-codex"
 	case providerCustom:
 		return "gpt-4o"
 	default:

@@ -21,6 +21,7 @@ const (
 	stepProvider
 	stepConfiguration
 	stepMiniMaxOAuth
+	stepCodexOAuth
 	stepChannels
 	stepSignalSetup
 	stepTelegramSetup
@@ -36,6 +37,7 @@ const (
 const (
 	providerOllama       = "ollama"
 	providerOpenAI       = "openai"
+	providerOpenAICodex  = "openai-codex"
 	providerAnthropic    = "anthropic"
 	providerAzure        = "azure_openai"
 	providerMiniMax      = "minimax"
@@ -46,6 +48,7 @@ const (
 var providers = []string{
 	providerOllama,
 	providerOpenAI,
+	providerOpenAICodex,
 	providerAnthropic,
 	providerAzure,
 	providerMiniMax,
@@ -173,6 +176,11 @@ type model struct {
 	oauthToken *oauthToken
 	oauthError string
 	oauthURL   string
+
+	// Codex OAuth state
+	codexToken *codexInstallerToken
+	codexError string
+	codexURL   string
 
 	// Signal setup state
 	signalQRCode string

@@ -63,6 +63,8 @@ func (m model) View() string {
 		mainContent = m.renderConfiguration()
 	case stepMiniMaxOAuth:
 		mainContent = m.renderMiniMaxOAuth()
+	case stepCodexOAuth:
+		mainContent = m.renderCodexOAuth()
 	case stepChannels:
 		mainContent = m.renderChannels()
 	case stepSignalSetup:
@@ -140,6 +142,8 @@ func (m model) getHelpText() string {
 	case stepConfiguration:
 		return "↑/↓: Select model  •  Tab: Switch field  •  Enter: Confirm  •  Esc: Back"
 	case stepMiniMaxOAuth:
+		return "Esc: Cancel"
+	case stepCodexOAuth:
 		return "Esc: Cancel"
 	case stepChannels:
 		return "↑/↓: Navigate  •  Space: Toggle  •  Enter: Continue  •  Esc: Back"
@@ -266,6 +270,7 @@ func (m model) renderProvider() string {
 	}{
 		{"Ollama", "Local AI models (recommended)"},
 		{"OpenAI", "GPT-4, GPT-3.5 (requires API key)"},
+		{"OpenAI Codex", "GPT-5 models via OAuth (free with subscription)"},
 		{"Anthropic", "Claude models (requires API key)"},
 		{"Azure OpenAI", "Enterprise OpenAI (requires endpoint + key)"},
 		{"MiniMax", "MiniMax API key authentication"},
@@ -299,7 +304,7 @@ func (m model) renderConfiguration() string {
 	b.WriteString(headerStyle.Render("Configuration"))
 	b.WriteString("\n\n")
 
-	providerNames := []string{"Ollama", "OpenAI", "Anthropic", "Azure OpenAI", "MiniMax", "MiniMax OAuth", "Custom"}
+	providerNames := []string{"Ollama", "OpenAI", "OpenAI Codex", "Anthropic", "Azure OpenAI", "MiniMax", "MiniMax OAuth", "Custom"}
 	b.WriteString(fmt.Sprintf("Provider: %s\n\n", providerNames[m.providerIndex]))
 
 	switch m.provider {
@@ -427,6 +432,41 @@ func (m model) renderMiniMaxOAuth() string {
 	b.WriteString(lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("  " + m.oauthURL))
 	b.WriteString("\n\n")
 	b.WriteString("  Click Authorize on the MiniMax page.\n\n")
+	b.WriteString("  " + m.spinner.View() + " Waiting for authorization...")
+	b.WriteString("\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Esc to cancel"))
+	return b.String()
+}
+
+func (m model) renderCodexOAuth() string {
+	var b strings.Builder
+	b.WriteString(headerStyle.Render("OpenAI Codex OAuth Sign-In"))
+	b.WriteString("\n\n")
+
+	if m.codexError != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(ErrorColor).Render("  ✗ " + m.codexError))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Press Enter to retry  •  Esc to go back"))
+		return b.String()
+	}
+
+	if m.codexToken != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("  ✓ Signed in successfully!"))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Token saved.  Press Enter to continue."))
+		return b.String()
+	}
+
+	if m.codexURL == "" {
+		b.WriteString("  " + m.spinner.View() + " Connecting to OpenAI...")
+		return b.String()
+	}
+
+	b.WriteString("  Your browser should have opened automatically.\n")
+	b.WriteString("  If it didn't, visit:\n\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("  " + m.codexURL))
+	b.WriteString("\n\n")
+	b.WriteString("  Sign in with your ChatGPT Plus/Pro account.\n\n")
 	b.WriteString("  " + m.spinner.View() + " Waiting for authorization...")
 	b.WriteString("\n\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("  Esc to cancel"))

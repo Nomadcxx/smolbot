@@ -308,6 +308,64 @@ func openBrowser(rawURL string) {
 	_ = exec.Command("xdg-open", rawURL).Start()
 }
 
+type codexInstallerToken struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	ExpiresIn    int    `json:"expires_in"`
+	TokenType    string `json:"token_type"`
+	Scope        string `json:"scope"`
+}
+
+func saveCodexOAuthToken(configDir string, tok *codexInstallerToken) error {
+	if tok == nil {
+		return fmt.Errorf("nil token")
+	}
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return err
+	}
+	path := filepath.Join(configDir, "oauth_tokens.json")
+	tmp := path + ".tmp"
+
+	profileID := "openai-codex:default"
+	entry := map[string]any{
+		"access_token":  tok.AccessToken,
+		"refresh_token": tok.RefreshToken,
+		"expires_at":    time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
+		"token_type":    tok.TokenType,
+		"scope":         tok.Scope,
+		"provider_id":   "openai-codex",
+		"profile_id":    profileID,
+		"updated_at":    time.Now(),
+	}
+
+	existing := map[string]map[string]any{}
+	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+		_ = json.Unmarshal(data, &existing)
+	}
+	if existing["openai-codex"] == nil {
+		existing["openai-codex"] = map[string]any{}
+	}
+	existing["openai-codex"][profileID] = entry
+
+	data, err := json.Marshal(existing)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp)
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 func generateOAuthPKCE() (verifier, challenge string, err error) {
 	b := make([]byte, 32)
 	if _, err = rand.Read(b); err != nil {

@@ -333,6 +333,11 @@ func writeConfig(m *model) error {
 			"profileId": "minimax-portal:default",
 			"apiBase":   "https://api.minimax.io",
 		}
+	case providerOpenAICodex:
+		providers["openai-codex"] = map[string]interface{}{
+			"authType":  "oauth",
+			"profileId": "openai-codex:default",
+		}
 	case providerCustom:
 		providers["custom"] = map[string]interface{}{
 			"apiBase": m.apiEndpoint,

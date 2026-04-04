@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nomadcxx/smolbot/pkg/provider"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -147,6 +148,18 @@ type miniMaxOAuthDoneMsg struct {
 	err   error
 }
 
+// codexOAuthInitMsg is sent when the Codex browser flow starts.
+type codexOAuthInitMsg struct {
+	authURL string
+	err     error
+}
+
+// codexOAuthDoneMsg is sent when the Codex token exchange completes.
+type codexOAuthDoneMsg struct {
+	token *codexInstallerToken
+	err   error
+}
+
 // startMiniMaxOAuthCmd posts to MiniMax /oauth/code and opens the browser.
 func startMiniMaxOAuthCmd() tea.Cmd {
 	return func() tea.Msg {
@@ -160,6 +173,29 @@ func pollMiniMaxCmd(ctx context.Context, dc *deviceCodeResp) tea.Cmd {
 	return func() tea.Msg {
 		tok, err := pollMiniMax(ctx, dc, nil)
 		return miniMaxOAuthDoneMsg{token: tok, err: err}
+	}
+}
+
+// startCodexOAuthCmd initiates the Codex browser auth flow via the provider package.
+func startCodexOAuthCmd() tea.Cmd {
+	return func() tea.Msg {
+		client := provider.NewCodexOAuthClient()
+		auth, err := client.StartBrowserAuthorization(context.Background())
+		if err != nil {
+			return codexOAuthInitMsg{err: fmt.Errorf("start codex auth: %w", err)}
+		}
+		openBrowser(auth.AuthURL)
+		token, err := auth.Wait(context.Background())
+		if err != nil {
+			return codexOAuthDoneMsg{err: err}
+		}
+		return codexOAuthDoneMsg{token: &codexInstallerToken{
+			AccessToken:  token.AccessToken,
+			RefreshToken: token.RefreshToken,
+			ExpiresIn:    token.ExpiresIn,
+			TokenType:    token.TokenType,
+			Scope:        token.Scope,
+		}}
 	}
 }
 
@@ -184,6 +220,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleConfigurationKeys(msg)
 		case stepMiniMaxOAuth:
 			return m.handleMiniMaxOAuthKeys(msg)
+		case stepCodexOAuth:
+			return m.handleCodexOAuthKeys(msg)
 		case stepChannels:
 			return m.handleChannelsKeys(msg)
 		case stepSignalSetup:
@@ -244,6 +282,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		home, _ := os.UserHomeDir()
 		_ = saveOAuthToken(filepath.Join(home, ".smolbot"), msg.token)
 		m.step = stepChannels
+		return m, nil
+
+	case codexOAuthDoneMsg:
+		if msg.err != nil {
+			m.codexError = msg.err.Error()
+			return m, nil
+		}
+		m.codexToken = msg.token
+		home, _ := os.UserHomeDir()
+		_ = saveCodexOAuthToken(filepath.Join(home, ".smolbot"), msg.token)
 		return m, nil
 
 	case whatsappInitResult:
@@ -413,6 +461,13 @@ func (m model) handleProviderKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.oauthURL = ""
 			m.step = stepMiniMaxOAuth
 			return m, startMiniMaxOAuthCmd()
+		case providerOpenAICodex:
+			m.selectedModel = defaultModelFor(m.provider)
+			m.codexToken = nil
+			m.codexError = ""
+			m.codexURL = ""
+			m.step = stepCodexOAuth
+			return m, startCodexOAuthCmd()
 		}
 		m.step = stepConfiguration
 		if m.provider == providerOllama {
@@ -502,6 +557,29 @@ func (m model) handleMiniMaxOAuthKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, startMiniMaxOAuthCmd()
 		}
 		if m.oauthToken != nil {
+			m.step = stepChannels
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) handleCodexOAuthKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.step = stepProvider
+		m.codexToken = nil
+		m.codexError = ""
+		m.codexURL = ""
+		return m, nil
+	case "enter":
+		if m.codexError != "" {
+			m.codexToken = nil
+			m.codexError = ""
+			m.codexURL = ""
+			return m, startCodexOAuthCmd()
+		}
+		if m.codexToken != nil {
 			m.step = stepChannels
 		}
 		return m, nil

@@ -41,6 +41,7 @@ type providerMetaEntry struct {
 var providerMeta = map[string]providerMetaEntry{
 	"anthropic":      {"Anthropic", "Claude models — console.anthropic.com"},
 	"openai":         {"OpenAI", "GPT & o-series — platform.openai.com"},
+	"openai-codex":   {"OpenAI Codex", "GPT-5 models via OAuth — zero cost with subscription"},
 	"gemini":         {"Google Gemini", "Gemini models — aistudio.google.com"},
 	"groq":           {"Groq", "Fast inference — console.groq.com"},
 	"deepseek":       {"DeepSeek", "DeepSeek models — platform.deepseek.com"},
@@ -259,16 +260,19 @@ func providerTypeName(providerID string) string {
 		return "MiniMax"
 	case "minimax-portal":
 		return "MiniMax OAuth"
+	case "openai-codex":
+		return "OpenAI Codex (OAuth)"
 	}
 	return "OpenAI Compatible"
 }
 
 var popularProviders = map[string]bool{
-	"anthropic": true,
-	"openai":    true,
-	"gemini":    true,
-	"groq":      true,
-	"deepseek":  true,
+	"anthropic":    true,
+	"openai":       true,
+	"openai-codex": true,
+	"gemini":       true,
+	"groq":         true,
+	"deepseek":     true,
 }
 
 func buildProviderRows(info []ProviderInfo, activeProvider, activeModel string) []providerRenderRow {

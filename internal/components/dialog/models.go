@@ -21,6 +21,7 @@ const (
 
 type OAuthProviderFilter struct {
 	MinimaxPortalIsOAuth bool
+	OpenAICodexIsOAuth   bool
 }
 
 func NewModels(providerConfig *cfgpkg.Config, models []client.ModelInfo, current string) ModelsModel {
@@ -57,11 +58,14 @@ func buildOAuthFilter(cfg *cfgpkg.Config) OAuthProviderFilter {
 	if cfg == nil || cfg.Providers == nil {
 		return OAuthProviderFilter{}
 	}
-	portal, ok := cfg.Providers["minimax-portal"]
-	if !ok {
-		return OAuthProviderFilter{}
+	var filter OAuthProviderFilter
+	if portal, ok := cfg.Providers["minimax-portal"]; ok {
+		filter.MinimaxPortalIsOAuth = portal.AuthType == "oauth"
 	}
-	return OAuthProviderFilter{MinimaxPortalIsOAuth: portal.AuthType == "oauth"}
+	if codex, ok := cfg.Providers["openai-codex"]; ok {
+		filter.OpenAICodexIsOAuth = codex.AuthType == "oauth"
+	}
+	return filter
 }
 
 type ModelChosenMsg struct {
@@ -258,6 +262,9 @@ func (m *ModelsModel) applyFilter() {
 			continue
 		}
 		if m.oauthFilter.MinimaxPortalIsOAuth && model.Provider == "minimax" {
+			continue
+		}
+		if m.oauthFilter.OpenAICodexIsOAuth && model.Provider == "openai" {
 			continue
 		}
 		filtered = append(filtered, model)
