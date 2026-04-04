@@ -101,6 +101,9 @@ func installBinaries(m *model) error {
 			return fmt.Errorf("read %s: %w", binary, err)
 		}
 
+		// Remove destination first to avoid "text file busy" when binary is running.
+		os.Remove(dst)
+
 		// Write destination
 		if err := os.WriteFile(dst, data, 0755); err != nil {
 			return fmt.Errorf("install %s: %w", binary, err)
