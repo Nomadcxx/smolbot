@@ -256,9 +256,18 @@ type codexRequest struct {
 	Temperature  *float64         `json:"temperature,omitempty"`
 }
 
+// codexInputItem represents a typed item in the Responses API input array.
+// Messages use {type:"message", role, content}, tool results use
+// {type:"function_call_output", call_id, output}, and prior tool calls use
+// {type:"function_call", call_id, name, arguments}.
 type codexInputItem struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Type      string `json:"type"`
+	Role      string `json:"role,omitempty"`
+	Content   string `json:"content,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+	Output    string `json:"output,omitempty"`
 }
 
 // codexToolDef is the flat tool format for the Responses API.
@@ -287,14 +296,40 @@ func (p *OpenAICodexProvider) buildCodexRequest(req ChatRequest) codexRequest {
 			instructions = append(instructions, content)
 			continue
 		}
+
+		// Tool results → function_call_output items.
 		if role == "tool" && msg.ToolCallID != "" {
 			cr.Input = append(cr.Input, codexInputItem{
-				Role:    "tool",
-				Content: fmt.Sprintf("[tool_result id=%s]\n%s", msg.ToolCallID, content),
+				Type:   "function_call_output",
+				CallID: msg.ToolCallID,
+				Output: content,
 			})
 			continue
 		}
+
+		// Assistant messages with tool calls → message (for text) + function_call items.
+		if role == "assistant" && len(msg.ToolCalls) > 0 {
+			if content != "" {
+				cr.Input = append(cr.Input, codexInputItem{
+					Type:    "message",
+					Role:    "assistant",
+					Content: content,
+				})
+			}
+			for _, tc := range msg.ToolCalls {
+				cr.Input = append(cr.Input, codexInputItem{
+					Type:      "function_call",
+					CallID:    tc.ID,
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				})
+			}
+			continue
+		}
+
+		// Regular user/assistant messages.
 		cr.Input = append(cr.Input, codexInputItem{
+			Type:    "message",
 			Role:    role,
 			Content: content,
 		})
@@ -406,6 +441,7 @@ func (p *OpenAICodexProvider) newCodexStream(body io.ReadCloser) *Stream {
 	scanner := bufio.NewScanner(body)
 	done := false
 	toolIdx := 0
+	itemToIdx := make(map[string]int) // maps SSE item_id to tool index
 
 	return NewStream(
 		func() (*StreamDelta, error) {
@@ -441,24 +477,51 @@ func (p *OpenAICodexProvider) newCodexStream(body io.ReadCloser) *Stream {
 					if delta != "" {
 						return &StreamDelta{Content: delta}, nil
 					}
-				case "response.function_call_arguments.delta":
-					argDelta, _ := event["delta"].(string)
-					callID, _ := event["call_id"].(string)
-					name, _ := event["name"].(string)
-					if argDelta != "" || callID != "" {
+
+				case "response.output_item.added":
+					// Tool calls arrive here with name and call_id.
+					item, _ := event["item"].(map[string]any)
+					if item == nil {
+						continue
+					}
+					itemType, _ := item["type"].(string)
+					if itemType == "function_call" {
 						tc := ToolCall{
-							ID:    callID,
+							ID:    strFromMap(item, "call_id"),
 							Index: toolIdx,
 							Function: FunctionCall{
-								Name:      name,
-								Arguments: argDelta,
+								Name: strFromMap(item, "name"),
 							},
+						}
+						// Track item_id → toolIdx for argument deltas.
+						itemID, _ := item["id"].(string)
+						if itemID != "" {
+							itemToIdx[itemID] = toolIdx
 						}
 						return &StreamDelta{ToolCalls: []ToolCall{tc}}, nil
 					}
+
+				case "response.function_call_arguments.delta":
+					argDelta, _ := event["delta"].(string)
+					if argDelta == "" {
+						continue
+					}
+					itemID, _ := event["item_id"].(string)
+					idx, ok := itemToIdx[itemID]
+					if !ok {
+						idx = toolIdx
+					}
+					tc := ToolCall{
+						Index: idx,
+						Function: FunctionCall{
+							Arguments: argDelta,
+						},
+					}
+					return &StreamDelta{ToolCalls: []ToolCall{tc}}, nil
+
 				case "response.output_item.done":
-					// Finished one output item, advance tool index
 					toolIdx++
+
 				case "response.completed", "response.done":
 					done = true
 					reason := "completed"

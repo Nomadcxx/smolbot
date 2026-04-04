@@ -326,6 +326,21 @@ func CoerceArgs[T any](input map[string]any) (T, error) {
 					coerced[key] = i
 					continue
 				}
+			case "slice":
+				// Models sometimes send "" instead of [] for empty arrays.
+				if typed == "" {
+					coerced[key] = []any{}
+					continue
+				}
+				// Try parsing as JSON array.
+				var arr []any
+				if err := json.Unmarshal([]byte(typed), &arr); err == nil {
+					coerced[key] = arr
+					continue
+				}
+				// Single value → single-element array.
+				coerced[key] = []any{typed}
+				continue
 			default:
 				if i, err := strconv.Atoi(typed); err == nil {
 					coerced[key] = i
@@ -385,6 +400,8 @@ func structFieldTypes(v any) map[string]string {
 			m[name] = "bool"
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			m[name] = "int"
+		case reflect.Slice, reflect.Array:
+			m[name] = "slice"
 		default:
 			m[name] = "string"
 		}

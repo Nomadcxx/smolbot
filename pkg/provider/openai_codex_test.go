@@ -115,7 +115,11 @@ func TestBuildCodexRequest(t *testing.T) {
 		Messages: []Message{
 			{Role: "system", Content: "You are a helpful assistant"},
 			{Role: "user", Content: "Hello"},
-			{Role: "tool", Content: "result data", ToolCallID: "call_123"},
+			{Role: "assistant", Content: "I'll read that file.", ToolCalls: []ToolCall{
+				{ID: "call_123", Function: FunctionCall{Name: "read_file", Arguments: `{"path":"/tmp/x"}`}},
+			}},
+			{Role: "tool", Content: "file contents here", ToolCallID: "call_123"},
+			{Role: "assistant", Content: "Here is the file."},
 		},
 		Tools: []ToolDef{
 			{Name: "read_file", Description: "Read a file", Parameters: map[string]any{"type": "object"}},
@@ -132,19 +136,44 @@ func TestBuildCodexRequest(t *testing.T) {
 	if cr.Instructions != "You are a helpful assistant" {
 		t.Errorf("Instructions = %q, want %q", cr.Instructions, "You are a helpful assistant")
 	}
-	// System message extracted to instructions, so Input has only user + tool = 2
-	if len(cr.Input) != 2 {
-		t.Fatalf("len(Input) = %d, want 2", len(cr.Input))
+
+	// Expected input: user message, assistant message (text), function_call,
+	// function_call_output, assistant message (text) = 5 items
+	if len(cr.Input) != 5 {
+		t.Fatalf("len(Input) = %d, want 5; items: %+v", len(cr.Input), cr.Input)
 	}
-	if cr.Input[0].Role != "user" {
-		t.Errorf("Input[0].Role = %q, want %q", cr.Input[0].Role, "user")
+
+	// [0] user message
+	if cr.Input[0].Type != "message" || cr.Input[0].Role != "user" {
+		t.Errorf("Input[0] = %+v, want type=message role=user", cr.Input[0])
 	}
-	if cr.Input[1].Role != "tool" {
-		t.Errorf("Input[1].Role = %q, want %q", cr.Input[1].Role, "tool")
+
+	// [1] assistant text before tool call
+	if cr.Input[1].Type != "message" || cr.Input[1].Role != "assistant" {
+		t.Errorf("Input[1] = %+v, want type=message role=assistant", cr.Input[1])
 	}
-	if !strings.Contains(cr.Input[1].Content, "call_123") {
-		t.Errorf("tool input should contain call_id, got: %q", cr.Input[1].Content)
+
+	// [2] function_call
+	if cr.Input[2].Type != "function_call" || cr.Input[2].CallID != "call_123" || cr.Input[2].Name != "read_file" {
+		t.Errorf("Input[2] = %+v, want type=function_call call_id=call_123 name=read_file", cr.Input[2])
 	}
+	if cr.Input[2].Arguments != `{"path":"/tmp/x"}` {
+		t.Errorf("Input[2].Arguments = %q, want %q", cr.Input[2].Arguments, `{"path":"/tmp/x"}`)
+	}
+
+	// [3] function_call_output
+	if cr.Input[3].Type != "function_call_output" || cr.Input[3].CallID != "call_123" {
+		t.Errorf("Input[3] = %+v, want type=function_call_output call_id=call_123", cr.Input[3])
+	}
+	if cr.Input[3].Output != "file contents here" {
+		t.Errorf("Input[3].Output = %q, want %q", cr.Input[3].Output, "file contents here")
+	}
+
+	// [4] final assistant message
+	if cr.Input[4].Type != "message" || cr.Input[4].Content != "Here is the file." {
+		t.Errorf("Input[4] = %+v, want type=message content='Here is the file.'", cr.Input[4])
+	}
+
 	if len(cr.Tools) != 1 {
 		t.Fatalf("len(Tools) = %d, want 1", len(cr.Tools))
 	}
@@ -246,8 +275,11 @@ data: [DONE]
 func TestNewCodexStreamToolCalls(t *testing.T) {
 	p := NewOpenAICodexProvider("openai-codex")
 
-	sseData := `data: {"type":"response.function_call_arguments.delta","call_id":"call_1","name":"read_file","delta":"{\"path\":"}
-data: {"type":"response.function_call_arguments.delta","call_id":"","name":"","delta":"\"test.go\"}"}
+	// Real SSE event sequence: output_item.added has name+call_id,
+	// argument deltas reference item_id, output_item.done finishes.
+	sseData := `data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"read_file","arguments":""},"output_index":0}
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"path\":"}
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"\"test.go\"}"}
 data: {"type":"response.output_item.done"}
 data: {"type":"response.completed","response":{"status":"completed"}}
 data: [DONE]
@@ -270,8 +302,20 @@ data: [DONE]
 	if len(toolCalls) < 1 {
 		t.Fatalf("expected at least 1 tool call delta, got %d", len(toolCalls))
 	}
+	// First delta from output_item.added carries name and call_id
 	if toolCalls[0].ID != "call_1" {
 		t.Errorf("first tool call ID = %q, want %q", toolCalls[0].ID, "call_1")
+	}
+	if toolCalls[0].Function.Name != "read_file" {
+		t.Errorf("first tool call Name = %q, want %q", toolCalls[0].Function.Name, "read_file")
+	}
+	// Subsequent deltas carry argument chunks
+	fullArgs := ""
+	for _, tc := range toolCalls {
+		fullArgs += tc.Function.Arguments
+	}
+	if fullArgs != `{"path":"test.go"}` {
+		t.Errorf("accumulated arguments = %q, want %q", fullArgs, `{"path":"test.go"}`)
 	}
 }
 
