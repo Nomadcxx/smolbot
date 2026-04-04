@@ -830,6 +830,9 @@ func (s *Server) currentProvider() string {
 
 func detectProviderFromModel(model, fallbackProvider string) string {
 	lower := strings.ToLower(model)
+	if strings.HasPrefix(lower, "openai-codex/") {
+		return "openai-codex"
+	}
 	if strings.HasPrefix(lower, "claude-") || strings.Contains(lower, "anthropic") {
 		return "anthropic"
 	}

@@ -272,8 +272,12 @@ type codexToolFn struct {
 }
 
 func (p *OpenAICodexProvider) buildCodexRequest(req ChatRequest) codexRequest {
+	model := req.Model
+	if strings.HasPrefix(model, "openai-codex/") {
+		model = strings.TrimPrefix(model, "openai-codex/")
+	}
 	cr := codexRequest{
-		Model:     req.Model,
+		Model:     model,
 		MaxTokens: req.MaxTokens,
 	}
 

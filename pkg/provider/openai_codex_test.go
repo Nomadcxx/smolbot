@@ -111,7 +111,7 @@ func TestBuildCodexRequest(t *testing.T) {
 	p := NewOpenAICodexProvider("openai-codex")
 
 	req := ChatRequest{
-		Model: "gpt-5.2-codex",
+		Model: "openai-codex/gpt-5.2-codex",
 		Messages: []Message{
 			{Role: "system", Content: "You are a helpful assistant"},
 			{Role: "user", Content: "Hello"},
@@ -125,6 +125,7 @@ func TestBuildCodexRequest(t *testing.T) {
 
 	cr := p.buildCodexRequest(req)
 
+	// Prefix should be stripped for the API call
 	if cr.Model != "gpt-5.2-codex" {
 		t.Errorf("Model = %q, want %q", cr.Model, "gpt-5.2-codex")
 	}
