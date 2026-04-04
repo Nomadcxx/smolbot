@@ -249,6 +249,7 @@ type codexRequest struct {
 	Model        string           `json:"model"`
 	Instructions string           `json:"instructions"`
 	Stream       bool             `json:"stream"`
+	Store        bool             `json:"store"`
 	Input        []codexInputItem `json:"input"`
 	Tools        []codexToolDef   `json:"tools,omitempty"`
 	MaxTokens    int              `json:"max_output_tokens,omitempty"`
