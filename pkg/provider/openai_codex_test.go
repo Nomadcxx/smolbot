@@ -129,9 +129,6 @@ func TestBuildCodexRequest(t *testing.T) {
 	if cr.Model != "gpt-5.2-codex" {
 		t.Errorf("Model = %q, want %q", cr.Model, "gpt-5.2-codex")
 	}
-	if cr.MaxTokens != 4096 {
-		t.Errorf("MaxTokens = %d, want %d", cr.MaxTokens, 4096)
-	}
 	if cr.Instructions != "You are a helpful assistant" {
 		t.Errorf("Instructions = %q, want %q", cr.Instructions, "You are a helpful assistant")
 	}
@@ -151,8 +148,8 @@ func TestBuildCodexRequest(t *testing.T) {
 	if len(cr.Tools) != 1 {
 		t.Fatalf("len(Tools) = %d, want 1", len(cr.Tools))
 	}
-	if cr.Tools[0].Function.Name != "read_file" {
-		t.Errorf("Tools[0].Function.Name = %q, want %q", cr.Tools[0].Function.Name, "read_file")
+	if cr.Tools[0].Name != "read_file" {
+		t.Errorf("Tools[0].Name = %q, want %q", cr.Tools[0].Name, "read_file")
 	}
 }
 

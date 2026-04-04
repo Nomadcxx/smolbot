@@ -252,7 +252,7 @@ type codexRequest struct {
 	Store        bool             `json:"store"`
 	Input        []codexInputItem `json:"input"`
 	Tools        []codexToolDef   `json:"tools,omitempty"`
-	MaxTokens    int              `json:"max_output_tokens,omitempty"`
+	// Codex Responses API does not accept max_output_tokens.
 	Temperature  *float64         `json:"temperature,omitempty"`
 }
 
@@ -261,12 +261,9 @@ type codexInputItem struct {
 	Content string `json:"content"`
 }
 
+// codexToolDef is the flat tool format for the Responses API.
 type codexToolDef struct {
-	Type     string       `json:"type"`
-	Function *codexToolFn `json:"function,omitempty"`
-}
-
-type codexToolFn struct {
+	Type        string         `json:"type"`
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	Parameters  map[string]any `json:"parameters,omitempty"`
@@ -278,8 +275,7 @@ func (p *OpenAICodexProvider) buildCodexRequest(req ChatRequest) codexRequest {
 		model = strings.TrimPrefix(model, "openai-codex/")
 	}
 	cr := codexRequest{
-		Model:     model,
-		MaxTokens: req.MaxTokens,
+		Model: model,
 	}
 
 	// Collect system/developer messages into instructions field.
@@ -311,13 +307,14 @@ func (p *OpenAICodexProvider) buildCodexRequest(req ChatRequest) codexRequest {
 	}
 
 	for _, tool := range req.Tools {
+		if tool.Name == "" {
+			continue
+		}
 		cr.Tools = append(cr.Tools, codexToolDef{
-			Type: "function",
-			Function: &codexToolFn{
-				Name:        tool.Name,
-				Description: tool.Description,
-				Parameters:  tool.Parameters,
-			},
+			Type:        "function",
+			Name:        tool.Name,
+			Description: tool.Description,
+			Parameters:  tool.Parameters,
 		})
 	}
 
