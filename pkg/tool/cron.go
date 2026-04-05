@@ -61,9 +61,13 @@ func (t *CronTool) Parameters() map[string]any {
 }
 
 func (t *CronTool) Execute(ctx context.Context, raw json.RawMessage, tctx ToolContext) (*Result, error) {
-	args := cronArgs{}
-	if err := json.Unmarshal(raw, &args); err != nil {
+	var rawArgs map[string]any
+	if err := json.Unmarshal(raw, &rawArgs); err != nil {
 		return nil, fmt.Errorf("parse cron args: %w", err)
+	}
+	args, err := CoerceArgs[cronArgs](rawArgs)
+	if err != nil {
+		return nil, fmt.Errorf("coerce cron args: %w", err)
 	}
 	if t.service == nil {
 		return &Result{Error: "cron service unavailable"}, nil

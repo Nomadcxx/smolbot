@@ -280,7 +280,7 @@ func TestNewCodexStreamToolCalls(t *testing.T) {
 	sseData := `data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"read_file","arguments":""},"output_index":0}
 data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"path\":"}
 data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"\"test.go\"}"}
-data: {"type":"response.output_item.done"}
+data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call"}}
 data: {"type":"response.completed","response":{"status":"completed"}}
 data: [DONE]
 `
@@ -316,6 +316,102 @@ data: [DONE]
 	}
 	if fullArgs != `{"path":"test.go"}` {
 		t.Errorf("accumulated arguments = %q, want %q", fullArgs, `{"path":"test.go"}`)
+	}
+}
+
+func TestBuildCodexRequestEmptyToolCallID(t *testing.T) {
+	p := NewOpenAICodexProvider("openai-codex")
+
+	// Simulate a tool result with empty ToolCallID (e.g. from broken session).
+	// Must NOT create type:"message" role:"tool" — Codex rejects role "tool".
+	req := ChatRequest{
+		Model: "openai-codex/gpt-5.2-codex",
+		Messages: []Message{
+			{Role: "user", Content: "Hello"},
+			{Role: "tool", Content: "some output", ToolCallID: ""},
+		},
+	}
+	cr := p.buildCodexRequest(req)
+
+	for i, item := range cr.Input {
+		if item.Role == "tool" {
+			t.Errorf("Input[%d] has role='tool' which Codex API rejects; got %+v", i, item)
+		}
+	}
+	// The tool result should still become function_call_output with a fallback ID.
+	found := false
+	for _, item := range cr.Input {
+		if item.Type == "function_call_output" {
+			found = true
+			if item.CallID == "" {
+				t.Error("function_call_output has empty CallID, should have fallback")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected function_call_output item for tool result, got none")
+	}
+}
+
+func TestNewCodexStreamMultipleToolCalls(t *testing.T) {
+	p := NewOpenAICodexProvider("openai-codex")
+
+	// Model returns text message first, then two function calls.
+	// output_item.done for message should NOT increment toolIdx.
+	sseData := `data: {"type":"response.output_item.added","item":{"id":"msg_1","type":"message","role":"assistant"},"output_index":0}
+data: {"type":"response.output_text.delta","delta":"Checking..."}
+data: {"type":"response.output_item.done","item":{"id":"msg_1","type":"message"}}
+data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_a","name":"read_file","arguments":""},"output_index":1}
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"path\":\"a.go\"}"}
+data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call"}}
+data: {"type":"response.output_item.added","item":{"id":"fc_2","type":"function_call","call_id":"call_b","name":"list_dir","arguments":""},"output_index":2}
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_2","delta":"{\"path\":\"/tmp\"}"}
+data: {"type":"response.output_item.done","item":{"id":"fc_2","type":"function_call"}}
+data: {"type":"response.completed","response":{"status":"completed"}}
+data: [DONE]
+`
+	body := io.NopCloser(strings.NewReader(sseData))
+	stream := p.newCodexStream(body)
+
+	var content string
+	var toolCalls []ToolCall
+	for {
+		delta, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Recv() error: %v", err)
+		}
+		content += delta.Content
+		toolCalls = append(toolCalls, delta.ToolCalls...)
+	}
+
+	if content != "Checking..." {
+		t.Errorf("content = %q, want %q", content, "Checking...")
+	}
+
+	// Should have tool call deltas for two function calls.
+	// First call: Index=0 (output_item.added) + Index=0 (args delta)
+	// Second call: Index=1 (output_item.added) + Index=1 (args delta)
+	if len(toolCalls) < 4 {
+		t.Fatalf("expected at least 4 tool call deltas, got %d: %+v", len(toolCalls), toolCalls)
+	}
+
+	// First tool call should be index 0.
+	if toolCalls[0].Index != 0 || toolCalls[0].ID != "call_a" {
+		t.Errorf("toolCalls[0] = Index=%d ID=%q, want Index=0 ID=call_a", toolCalls[0].Index, toolCalls[0].ID)
+	}
+	// Second tool call (index 2 or 3) should be index 1.
+	var secondCallIdx int
+	for _, tc := range toolCalls {
+		if tc.ID == "call_b" {
+			secondCallIdx = tc.Index
+			break
+		}
+	}
+	if secondCallIdx != 1 {
+		t.Errorf("second tool call Index = %d, want 1", secondCallIdx)
 	}
 }
 

@@ -45,11 +45,15 @@ func (t *WaitTool) Parameters() map[string]any {
 }
 
 func (t *WaitTool) Execute(ctx context.Context, raw json.RawMessage, tctx ToolContext) (*Result, error) {
-	args := waitArgs{}
+	var rawArgs map[string]any
 	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &args); err != nil {
+		if err := json.Unmarshal(raw, &rawArgs); err != nil {
 			return nil, fmt.Errorf("parse wait args: %w", err)
 		}
+	}
+	args, err := CoerceArgs[waitArgs](rawArgs)
+	if err != nil {
+		return nil, fmt.Errorf("coerce wait args: %w", err)
 	}
 	if tctx.Spawner == nil {
 		return &Result{Error: "spawner unavailable"}, nil

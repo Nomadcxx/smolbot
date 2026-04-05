@@ -298,10 +298,15 @@ func (p *OpenAICodexProvider) buildCodexRequest(req ChatRequest) codexRequest {
 		}
 
 		// Tool results → function_call_output items.
-		if role == "tool" && msg.ToolCallID != "" {
+		// Always handle role:"tool" here; Codex only accepts user/assistant/developer roles.
+		if role == "tool" {
+			callID := msg.ToolCallID
+			if callID == "" {
+				callID = "call_unknown"
+			}
 			cr.Input = append(cr.Input, codexInputItem{
 				Type:   "function_call_output",
-				CallID: msg.ToolCallID,
+				CallID: callID,
 				Output: content,
 			})
 			continue
@@ -520,7 +525,13 @@ func (p *OpenAICodexProvider) newCodexStream(body io.ReadCloser) *Stream {
 					return &StreamDelta{ToolCalls: []ToolCall{tc}}, nil
 
 				case "response.output_item.done":
-					toolIdx++
+					// Only increment tool index for function_call items;
+					// message items also fire this event.
+					if item, ok := event["item"].(map[string]any); ok {
+						if t, _ := item["type"].(string); t == "function_call" {
+							toolIdx++
+						}
+					}
 
 				case "response.completed", "response.done":
 					done = true
