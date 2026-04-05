@@ -165,7 +165,7 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 		if err := dcpStateManager.Save(dcpState); err != nil {
 			return "", fmt.Errorf("dcp state save: %w", err)
 		}
-		history = pruned
+		history = dcp.StripMessages(pruned)
 	default:
 		compressedHistory, compressed, _, _, _, err := a.compressSessionHistory(req.SessionKey, history, false, cb)
 		if err != nil {

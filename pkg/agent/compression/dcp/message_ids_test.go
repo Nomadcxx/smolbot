@@ -73,7 +73,7 @@ func TestAssignMessageIDs_ProtectedMsgs(t *testing.T) {
 
 func TestStripDCPTags(t *testing.T) {
 	content := "hello <dcp-id>m0001</dcp-id> world <dcp-reminder>warn</dcp-reminder>"
-	if got := StripDCPTags(content); got != "hello  world " {
+	if got := StripDCPTags(content); got != "hello  world" {
 		t.Fatalf("StripDCPTags() = %q", got)
 	}
 }

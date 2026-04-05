@@ -78,7 +78,39 @@ func buildToolPairs(messages []provider.Message) []ToolPairState {
 func StripDCPTags(content string) string {
 	content = dcpIDPattern.ReplaceAllString(content, "")
 	content = dcpReminderPattern.ReplaceAllString(content, "")
-	return content
+	return strings.TrimSpace(content)
+}
+
+// StripMessages returns a copy of messages with all DCP tags removed from content.
+func StripMessages(messages []provider.Message) []provider.Message {
+	out := make([]provider.Message, len(messages))
+	for i, msg := range messages {
+		out[i] = msg
+		out[i].Content = stripContent(msg.Content)
+	}
+	return out
+}
+
+func stripContent(content any) any {
+	switch value := content.(type) {
+	case string:
+		stripped := StripDCPTags(value)
+		if stripped == "" && value != "" {
+			return value
+		}
+		return stripped
+	case []provider.ContentBlock:
+		blocks := make([]provider.ContentBlock, len(value))
+		for i, b := range value {
+			blocks[i] = b
+			if b.Type == "text" || b.Type == "input_text" || b.Type == "output_text" {
+				blocks[i].Text = StripDCPTags(b.Text)
+			}
+		}
+		return blocks
+	default:
+		return content
+	}
 }
 
 func extractDCPID(content string) string {
