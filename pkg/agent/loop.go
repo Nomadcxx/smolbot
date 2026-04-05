@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/smolbot/pkg/agent/compression"
+	"github.com/Nomadcxx/smolbot/pkg/agent/compression/dcp"
 	"github.com/Nomadcxx/smolbot/pkg/config"
 	"github.com/Nomadcxx/smolbot/pkg/provider"
 	"github.com/Nomadcxx/smolbot/pkg/session"
@@ -58,6 +59,7 @@ type AgentLoop struct {
 
 	messageRouter tool.MessageRouter
 	spawner       tool.Spawner
+	dcpStateManager *dcp.StateManager
 
 	mu         sync.Mutex
 	activeTask map[string]context.CancelFunc
@@ -130,13 +132,48 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	}
 
 	userMessage := a.buildUserMessage(req)
+	runTools := a.tools
 
-	compressedHistory, compressed, _, _, _, err := a.compressSessionHistory(req.SessionKey, history, false, cb)
-	if err != nil {
-		return "", err
-	}
-	if compressed {
-		history = compressedHistory
+	compCfg := a.config.Agents.Defaults.Compression
+	switch {
+	case compCfg.Enabled && compCfg.Engine == "dcp":
+		dcpStateManager, err := a.ensureDCPStateManager()
+		if err != nil {
+			return "", err
+		}
+		dcpCfg := toDCPConfig(compCfg.DCP)
+		if compCfg.DCP.CompressTool.Enabled {
+			runTools = a.tools.Clone()
+		}
+		dcpState, err := dcpStateManager.Load(req.SessionKey)
+		if err != nil {
+			return "", fmt.Errorf("dcp state load: %w", err)
+		}
+		pruned, dcpStats := dcp.Transform(history, dcpState, dcpCfg, a.tokenizer, a.config.Agents.Defaults.ContextWindowTokens)
+		if compCfg.DCP.CompressTool.Enabled {
+			ct := dcp.NewCompressTool(dcpStateManager, dcpCfg, a.tokenizer).WithMessageProvider(func() []provider.Message {
+				return pruned
+			})
+			runTools.Register(ct)
+		}
+		if dcpStats.DedupCount > 0 || dcpStats.ErrorPurgeCount > 0 || dcpStats.BlocksApplied > 0 {
+			emit(cb, Event{
+				Type:    EventContextCompacting,
+				Content: fmt.Sprintf("DCP: %d deduped, %d errors purged", dcpStats.DedupCount, dcpStats.ErrorPurgeCount),
+			})
+		}
+		if err := dcpStateManager.Save(dcpState); err != nil {
+			return "", fmt.Errorf("dcp state save: %w", err)
+		}
+		history = pruned
+	default:
+		compressedHistory, compressed, _, _, _, err := a.compressSessionHistory(req.SessionKey, history, false, cb)
+		if err != nil {
+			return "", err
+		}
+		if compressed {
+			history = compressedHistory
+		}
 	}
 
 	conversation := make([]provider.Message, 0, len(history)+2)
@@ -161,11 +198,11 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 	discoveredTools := make(map[string]bool)
 
 	modelCaps := provider.CapabilitiesForModel(activeModel)
-	executor := newToolExecutor(a.tools, modelCaps.SupportsParallelTools, req)
+	executor := newToolExecutor(runTools, modelCaps.SupportsParallelTools, req)
 
 	for i := 0; i < maxIterations; i++ {
 		// Rebuild visible tools each iteration so newly-discovered tools are included.
-		toolDefs := a.tools.GetVisibleTools(discoveredTools, req.DisabledTools)
+		toolDefs := runTools.GetVisibleTools(discoveredTools, req.DisabledTools)
 
 		iterationStart := time.Now()
 		activeProviderName := providerNameForModel(a.provider, activeModel)
@@ -360,6 +397,11 @@ func (a *AgentLoop) handleSlashCommand(ctx context.Context, req Request) (string
 			if err := a.memory.MaybeConsolidate(ctx, req.SessionKey); err != nil {
 				log.Printf("[agent] memory consolidation failed on /new for session %s: %v", req.SessionKey, err)
 			}
+		}
+		if dcpStateManager, err := a.ensureDCPStateManager(); err != nil {
+			log.Printf("[agent] dcp state manager init failed on /new for session %s: %v", req.SessionKey, err)
+		} else if err := dcpStateManager.Delete(req.SessionKey); err != nil {
+			return "", err
 		}
 		if err := a.sessions.ClearSession(req.SessionKey); err != nil {
 			return "", err
@@ -576,6 +618,48 @@ func (a *AgentLoop) consumeStream(stream *provider.Stream, cb EventCallback, sup
 		}
 	}
 	return resp, nil
+}
+
+func (a *AgentLoop) ensureDCPStateManager() (*dcp.StateManager, error) {
+	if a.dcpStateManager != nil {
+		return a.dcpStateManager, nil
+	}
+	if a.sessions == nil || a.sessions.DB() == nil {
+		return nil, fmt.Errorf("missing session store for dcp")
+	}
+	manager, err := dcp.NewStateManager(a.sessions.DB())
+	if err != nil {
+		return nil, err
+	}
+	a.dcpStateManager = manager
+	return manager, nil
+}
+
+func toDCPConfig(cfg config.DCPConfig) dcp.Config {
+	return dcp.Config{
+		Deduplication: dcp.DeduplicationConfig{
+			Enabled:        cfg.Deduplication.Enabled,
+			ProtectedTools: append([]string(nil), cfg.Deduplication.ProtectedTools...),
+		},
+		PurgeErrors: dcp.PurgeErrorsConfig{
+			Enabled:        cfg.PurgeErrors.Enabled,
+			TurnThreshold:  cfg.PurgeErrors.TurnThreshold,
+			ProtectedTools: append([]string(nil), cfg.PurgeErrors.ProtectedTools...),
+		},
+		TurnProtection: cfg.TurnProtection,
+		CompressTool: dcp.CompressToolConfig{
+			Enabled:         cfg.CompressTool.Enabled,
+			ProtectedTools:  append([]string(nil), cfg.CompressTool.ProtectedTools...),
+			ProtectUserMsgs: cfg.CompressTool.ProtectUserMsgs,
+		},
+		Nudge: dcp.NudgeConfig{
+			MinContextLimit:         cfg.Nudge.MinContextLimit,
+			MaxContextLimit:         cfg.Nudge.MaxContextLimit,
+			NudgeFrequency:          cfg.Nudge.NudgeFrequency,
+			IterationNudgeThreshold: cfg.Nudge.IterationNudgeThreshold,
+		},
+		ProtectedTools: append([]string(nil), cfg.ProtectedTools...),
+	}
 }
 
 func normalizeMessagesForSave(messages []provider.Message) []provider.Message {

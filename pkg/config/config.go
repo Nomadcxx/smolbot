@@ -24,8 +24,43 @@ type AgentsConfig struct {
 
 type CompressionConfig struct {
 	Enabled          bool   `json:"enabled"`
+	Engine           string `json:"engine"`
 	Mode             string `json:"mode"`
 	ThresholdPercent int    `json:"thresholdPercent"`
+	DCP              DCPConfig `json:"dcp,omitempty"`
+}
+
+type DCPConfig struct {
+	Deduplication  DCPDeduplicationConfig `json:"deduplication"`
+	PurgeErrors    DCPPurgeErrorsConfig   `json:"purgeErrors"`
+	TurnProtection int                    `json:"turnProtection"`
+	CompressTool   DCPCompressToolConfig  `json:"compressTool"`
+	Nudge          DCPNudgeConfig         `json:"nudge"`
+	ProtectedTools []string               `json:"protectedTools"`
+}
+
+type DCPDeduplicationConfig struct {
+	Enabled        bool     `json:"enabled"`
+	ProtectedTools []string `json:"protectedTools"`
+}
+
+type DCPPurgeErrorsConfig struct {
+	Enabled        bool     `json:"enabled"`
+	TurnThreshold  int      `json:"turnThreshold"`
+	ProtectedTools []string `json:"protectedTools"`
+}
+
+type DCPCompressToolConfig struct {
+	Enabled         bool     `json:"enabled"`
+	ProtectedTools  []string `json:"protectedTools"`
+	ProtectUserMsgs bool     `json:"protectUserMessages"`
+}
+
+type DCPNudgeConfig struct {
+	MinContextLimit         int `json:"minContextLimit"`
+	MaxContextLimit         int `json:"maxContextLimit"`
+	NudgeFrequency          int `json:"nudgeFrequency"`
+	IterationNudgeThreshold int `json:"iterationNudgeThreshold"`
 }
 
 type AgentDefaults struct {
@@ -188,8 +223,28 @@ func DefaultConfig() Config {
 				MaxToolIterations:   40,
 				Compression: CompressionConfig{
 					Enabled:          true,
+					Engine:           "legacy",
 					Mode:             "default",
 					ThresholdPercent: 60,
+					DCP: DCPConfig{
+						Deduplication: DCPDeduplicationConfig{
+							Enabled: true,
+						},
+						PurgeErrors: DCPPurgeErrorsConfig{
+							Enabled:       true,
+							TurnThreshold: 4,
+						},
+						TurnProtection: 4,
+						CompressTool: DCPCompressToolConfig{
+							Enabled: true,
+						},
+						Nudge: DCPNudgeConfig{
+							MinContextLimit:         50000,
+							MaxContextLimit:         100000,
+							NudgeFrequency:          5,
+							IterationNudgeThreshold: 15,
+						},
+					},
 				},
 			},
 		},

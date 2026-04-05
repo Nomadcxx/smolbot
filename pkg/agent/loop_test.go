@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,8 +52,8 @@ func TestAgentLoopHelpAndNew(t *testing.T) {
 	if !strings.Contains(resp, "new session") {
 		t.Fatalf("unexpected /new response: %q", resp)
 	}
-	if fakeMemory.calls != 1 {
-		t.Fatalf("memory consolidator calls = %d, want 1", fakeMemory.calls)
+	if fakeMemory.calls.Load() != 1 {
+		t.Fatalf("memory consolidator calls = %d, want 1", fakeMemory.calls.Load())
 	}
 	count, err := store.CountUnconsolidated("s1")
 	if err != nil {
@@ -851,11 +852,11 @@ func (fakeSpawner) Wait(_ context.Context, _ tool.WaitRequest) (*tool.WaitResult
 }
 
 type fakeLoopMemory struct {
-	calls int
+	calls atomic.Int32
 }
 
 func (f *fakeLoopMemory) MaybeConsolidate(context.Context, string) error {
-	f.calls++
+	f.calls.Add(1)
 	return nil
 }
 

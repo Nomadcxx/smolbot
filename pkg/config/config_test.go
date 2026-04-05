@@ -215,6 +215,18 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Channels.Discord.AllowedChannelIDs) != 0 {
 		t.Fatalf("discord defaults = %+v, want no allowlist", cfg.Channels.Discord)
 	}
+	if cfg.Agents.Defaults.Compression.Engine != "legacy" {
+		t.Fatalf("compression engine = %q, want legacy", cfg.Agents.Defaults.Compression.Engine)
+	}
+	if !cfg.Agents.Defaults.Compression.DCP.Deduplication.Enabled {
+		t.Fatal("default DCP deduplication should be enabled")
+	}
+	if !cfg.Agents.Defaults.Compression.DCP.PurgeErrors.Enabled {
+		t.Fatal("default DCP purgeErrors should be enabled")
+	}
+	if cfg.Agents.Defaults.Compression.DCP.TurnProtection != 4 {
+		t.Fatalf("default DCP turnProtection = %d, want 4", cfg.Agents.Defaults.Compression.DCP.TurnProtection)
+	}
 }
 
 func TestLoadTelegramConfig(t *testing.T) {

@@ -80,6 +80,13 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+func (s *Store) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
+}
+
 func (s *Store) GetOrCreateSession(key string) (*Session, error) {
 	if _, err := s.db.Exec(`INSERT OR IGNORE INTO sessions (key) VALUES (?)`, key); err != nil {
 		return nil, fmt.Errorf("upsert session: %w", err)
