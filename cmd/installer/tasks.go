@@ -488,11 +488,16 @@ func startService(m *model) error {
 
 // Task: Stop service
 func stopService(m *model) error {
+	// Try systemctl first.
 	result := runCommand(m, "systemctl", "--user", "stop", "smolbot")
-	if result.Err != nil {
-		// Service might not be running, that's ok
-		return nil
+	if result.Err != nil && m.logFile != nil {
+		fmt.Fprintf(m.logFile, "[INFO] systemctl stop failed (may not be using systemd): %v\n", result.Err)
 	}
+
+	// Also kill any running gateway processes not managed by systemd.
+	// This handles manually started gateways that would keep the old binary in memory.
+	killOrphanGateways(m)
+
 	return nil
 }
 

@@ -83,6 +83,56 @@ func validatePort(port int) error {
 	return nil
 }
 
+// killOrphanGateways finds and stops any running "smolbot run" processes
+// that aren't managed by systemd. This prevents stale gateways from
+// serving old code after a binary upgrade.
+func killOrphanGateways(m *model) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	self := os.Getpid()
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		// Only numeric directories are PIDs.
+		pid := 0
+		for _, c := range entry.Name() {
+			if c < '0' || c > '9' {
+				pid = -1
+				break
+			}
+			pid = pid*10 + int(c-'0')
+		}
+		if pid <= 0 || pid == self {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		if err != nil {
+			continue
+		}
+		// cmdline is NUL-delimited; join for matching.
+		args := strings.ReplaceAll(string(cmdline), "\x00", " ")
+		if strings.Contains(args, "smolbot") && strings.Contains(args, " run") {
+			proc, err := os.FindProcess(pid)
+			if err != nil {
+				continue
+			}
+			if m.logFile != nil {
+				fmt.Fprintf(m.logFile, "[INFO] Stopping orphan gateway PID %d: %s\n", pid, strings.TrimSpace(args))
+			}
+			proc.Signal(os.Interrupt)
+			// Give it a moment to exit gracefully.
+			time.Sleep(500 * time.Millisecond)
+			// Force kill if still running.
+			if _, err := os.Stat(filepath.Join("/proc", entry.Name())); err == nil {
+				proc.Kill()
+			}
+		}
+	}
+}
+
 // getLastCommand returns the last executed command for error display
 var lastCommand string
 
