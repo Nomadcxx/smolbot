@@ -367,6 +367,7 @@ func (p *OpenAICodexProvider) buildCodexRequest(req ChatRequest) codexRequest {
 func (p *OpenAICodexProvider) parseSSEToResponse(reader io.Reader) (*Response, error) {
 	var finalContent strings.Builder
 	var toolCalls []ToolCall
+	var usage Usage
 	finishReason := ""
 
 	scanner := bufio.NewScanner(reader)
@@ -426,6 +427,7 @@ func (p *OpenAICodexProvider) parseSSEToResponse(reader io.Reader) (*Response, e
 				if status, ok := resp["status"].(string); ok {
 					finishReason = status
 				}
+				usage = extractCodexUsage(resp)
 			}
 		}
 	}
@@ -438,6 +440,7 @@ func (p *OpenAICodexProvider) parseSSEToResponse(reader io.Reader) (*Response, e
 		Content:      finalContent.String(),
 		FinishReason: finishReason,
 		ToolCalls:    toolCalls,
+		Usage:        usage,
 	}, nil
 }
 
@@ -536,12 +539,17 @@ func (p *OpenAICodexProvider) newCodexStream(body io.ReadCloser) *Stream {
 				case "response.completed", "response.done":
 					done = true
 					reason := "completed"
+					var u *Usage
 					if resp, ok := event["response"].(map[string]any); ok {
 						if s, ok := resp["status"].(string); ok {
 							reason = s
 						}
+						usage := extractCodexUsage(resp)
+						if usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+							u = &usage
+						}
 					}
-					return &StreamDelta{FinishReason: &reason}, nil
+					return &StreamDelta{FinishReason: &reason, Usage: u}, nil
 				}
 			}
 		},
@@ -549,6 +557,29 @@ func (p *OpenAICodexProvider) newCodexStream(body io.ReadCloser) *Stream {
 			return body.Close()
 		},
 	)
+}
+
+func extractCodexUsage(resp map[string]any) Usage {
+	u, ok := resp["usage"].(map[string]any)
+	if !ok {
+		return Usage{}
+	}
+	return Usage{
+		PromptTokens:     intFromMap(u, "input_tokens"),
+		CompletionTokens: intFromMap(u, "output_tokens"),
+		TotalTokens:      intFromMap(u, "total_tokens"),
+	}
+}
+
+func intFromMap(m map[string]any, key string) int {
+	switch v := m[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
+	}
 }
 
 func strFromMap(m map[string]any, key string) string {

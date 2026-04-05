@@ -415,6 +415,37 @@ data: [DONE]
 	}
 }
 
+func TestCodexStreamUsage(t *testing.T) {
+	p := NewOpenAICodexProvider("openai-codex")
+	sseData := `data: {"type":"response.output_text.delta","delta":"Hi"}
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":42,"output_tokens":7,"total_tokens":49}}}
+data: [DONE]
+`
+	body := io.NopCloser(strings.NewReader(sseData))
+	stream := p.newCodexStream(body)
+
+	var lastUsage *Usage
+	for {
+		delta, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Recv() error: %v", err)
+		}
+		if delta.Usage != nil {
+			lastUsage = delta.Usage
+		}
+	}
+
+	if lastUsage == nil {
+		t.Fatal("expected usage in stream, got nil")
+	}
+	if lastUsage.PromptTokens != 42 || lastUsage.CompletionTokens != 7 || lastUsage.TotalTokens != 49 {
+		t.Errorf("usage = %+v, want {42, 7, 49}", lastUsage)
+	}
+}
+
 func TestEnsureValidTokenRefreshesExpired(t *testing.T) {
 	p := NewOpenAICodexProvider("openai-codex")
 	p.now = func() time.Time { return time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC) }
