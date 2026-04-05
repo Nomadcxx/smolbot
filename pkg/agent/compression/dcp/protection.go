@@ -19,7 +19,20 @@ var DefaultProtectedTools = []string{
 }
 
 func IsToolProtected(toolName string, protectedPatterns []string) bool {
-	for _, pattern := range append([]string{}, append(DefaultProtectedTools, protectedPatterns...)...) {
+	// Check default patterns first, then user-supplied patterns.
+	for _, pattern := range DefaultProtectedTools {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if pattern == toolName {
+			return true
+		}
+		if matched, _ := filepath.Match(pattern, toolName); matched {
+			return true
+		}
+	}
+	for _, pattern := range protectedPatterns {
 		pattern = strings.TrimSpace(pattern)
 		if pattern == "" {
 			continue

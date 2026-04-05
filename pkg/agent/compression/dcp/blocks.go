@@ -91,7 +91,10 @@ func resolveBoundaryIndex(ref string, state *State, preferStart bool) (int, bool
 	if !strings.HasPrefix(ref, "b") {
 		return 0, false
 	}
-	id, _ := strconv.Atoi(strings.TrimPrefix(ref, "b"))
+	id, err := strconv.Atoi(strings.TrimPrefix(ref, "b"))
+	if err != nil {
+		return 0, false
+	}
 	block, ok := state.Blocks[id]
 	if !ok || block == nil {
 		return 0, false

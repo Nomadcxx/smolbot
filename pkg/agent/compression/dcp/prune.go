@@ -54,8 +54,12 @@ func ExpandBlockPlaceholders(summary string, blocks map[int]*CompressionBlock) s
 	return expandBlockPlaceholders(summary, blocks, 0)
 }
 
+// maxBlockNestingDepth limits recursive expansion of block placeholders
+// to prevent infinite recursion from circular references.
+const maxBlockNestingDepth = 10
+
 func expandBlockPlaceholders(summary string, blocks map[int]*CompressionBlock, depth int) string {
-	if depth >= 10 {
+	if depth >= maxBlockNestingDepth {
 		return summary
 	}
 	return blockPlaceholderPattern.ReplaceAllStringFunc(summary, func(match string) string {
@@ -63,7 +67,10 @@ func expandBlockPlaceholders(summary string, blocks map[int]*CompressionBlock, d
 		if len(sub) != 2 {
 			return match
 		}
-		id, _ := strconv.Atoi(sub[1])
+		id, err := strconv.Atoi(sub[1])
+		if err != nil {
+			return match
+		}
 		block, ok := blocks[id]
 		if !ok || block == nil {
 			return match

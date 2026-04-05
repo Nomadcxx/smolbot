@@ -151,9 +151,10 @@ func (a *AgentLoop) ProcessDirect(ctx context.Context, req Request, cb EventCall
 		}
 		pruned, dcpStats := dcp.Transform(history, dcpState, dcpCfg, a.tokenizer, a.config.Agents.Defaults.ContextWindowTokens)
 		if compCfg.DCP.CompressTool.Enabled {
-			runTools.Register(dcp.NewCompressTool(dcpStateManager, dcpCfg, a.tokenizer).WithMessageProvider(func() []provider.Message {
-				return history
-			}))
+			ct := dcp.NewCompressTool(dcpStateManager, dcpCfg, a.tokenizer).WithMessageProvider(func() []provider.Message {
+				return pruned
+			})
+			runTools.Register(ct)
 		}
 		if dcpStats.DedupCount > 0 || dcpStats.ErrorPurgeCount > 0 || dcpStats.BlocksApplied > 0 {
 			emit(cb, Event{
@@ -397,10 +398,10 @@ func (a *AgentLoop) handleSlashCommand(ctx context.Context, req Request) (string
 				log.Printf("[agent] memory consolidation failed on /new for session %s: %v", req.SessionKey, err)
 			}
 		}
-		if dcpStateManager, err := a.ensureDCPStateManager(); err == nil {
-			if err := dcpStateManager.Delete(req.SessionKey); err != nil {
-				return "", err
-			}
+		if dcpStateManager, err := a.ensureDCPStateManager(); err != nil {
+			log.Printf("[agent] dcp state manager init failed on /new for session %s: %v", req.SessionKey, err)
+		} else if err := dcpStateManager.Delete(req.SessionKey); err != nil {
+			return "", err
 		}
 		if err := a.sessions.ClearSession(req.SessionKey); err != nil {
 			return "", err

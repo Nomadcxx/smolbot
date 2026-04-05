@@ -96,7 +96,7 @@ func (sm *StateManager) Load(sessionKey string) (*State, error) {
 	case err == sql.ErrNoRows:
 		state := NewState(sessionKey)
 		sm.mu.Lock()
-		sm.cache[sessionKey] = cloneStateMust(state)
+		sm.cache[sessionKey] = cloneStateOrFallback(state)
 		sm.mu.Unlock()
 		return state, nil
 	case err != nil:
@@ -110,7 +110,7 @@ func (sm *StateManager) Load(sessionKey string) (*State, error) {
 	normalizeState(&state, sessionKey)
 
 	sm.mu.Lock()
-	sm.cache[sessionKey] = cloneStateMust(&state)
+	sm.cache[sessionKey] = cloneStateOrFallback(&state)
 	sm.mu.Unlock()
 	return &state, nil
 }
@@ -136,7 +136,7 @@ func (sm *StateManager) Save(state *State) error {
 	}
 
 	sm.mu.Lock()
-	sm.cache[state.SessionKey] = cloneStateMust(state)
+	sm.cache[state.SessionKey] = cloneStateOrFallback(state)
 	sm.mu.Unlock()
 	return nil
 }
@@ -181,10 +181,14 @@ func normalizeState(state *State, sessionKey string) {
 	}
 }
 
-func cloneStateMust(state *State) *State {
+// cloneStateOrFallback deep-copies state, falling back to the original on marshal error.
+// This avoids a panic in production while preserving cache isolation as best-effort.
+func cloneStateOrFallback(state *State) *State {
 	cloned, err := cloneState(state)
 	if err != nil {
-		panic(err)
+		// Return a normalized copy of the original rather than panicking.
+		normalizeState(state, state.SessionKey)
+		return state
 	}
 	return cloned
 }
