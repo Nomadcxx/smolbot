@@ -160,17 +160,90 @@ Configure in `config.json`:
 ```json
 {
   "tools": {
+    "restrictToWorkspace": true,
     "web": {
       "searchBackend": "duckduckgo",
       "maxResults": 5
     },
     "exec": {
-      "restrictToWorkspace": true,
       "denyPatterns": ["rm -rf /"]
     }
   }
 }
 ```
+
+### Hybrid Memory
+
+smolbot bundles the `hybrid-memory` MCP server as a first-class optional component. On fresh install or upgrade, the installer will:
+
+- initialize the `mcp/hybrid-memory` submodule
+- install the Node.js dependencies in `mcp/hybrid-memory/mcp`
+- create `~/.smolbot/memory`
+- add the `hybrid-memory` MCP server to `tools.mcpServers` when Node.js and npm are available
+
+The bundled server exposes these wrapped tools:
+
+- `mcp_hybrid-memory_memory_store`
+- `mcp_hybrid-memory_memory_search`
+- `mcp_hybrid-memory_memory_semantic`
+- `mcp_hybrid-memory_memory_get`
+- `mcp_hybrid-memory_memory_delete`
+- `mcp_hybrid-memory_memory_stats`
+- `mcp_hybrid-memory_memory_cleanup`
+
+The builtin `memory` skill is designed around a 5-stage workflow: startup gate, small recall, mid-session triggers, harvest gate, and distilled store. The full operating guidance lives in [skills/memory/SKILL.md](./skills/memory/SKILL.md) and its reference files under [skills/memory/references](./skills/memory/references).
+
+Default generated config:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "hybrid-memory": {
+        "enabled": true,
+        "type": "stdio",
+        "command": "node",
+        "args": ["/path/to/smolbot/mcp/hybrid-memory/mcp/mcp-server.js"],
+        "env": {
+          "HYBRID_MEMORY_DIR": "/home/you/.smolbot/memory",
+          "OLLAMA_HOST": "http://localhost:11434",
+          "OLLAMA_EMBED_MODEL": "mxbai-embed-large"
+        },
+        "toolTimeout": 30,
+        "enabledTools": ["*"]
+      }
+    }
+  }
+}
+```
+
+To disable it without removing the config, set:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "hybrid-memory": {
+        "enabled": false
+      }
+    }
+  }
+}
+```
+
+Notes:
+
+- `HYBRID_MEMORY_DIR` controls where SQLite and LanceDB data live. The default smolbot location is `~/.smolbot/memory`.
+- Ollama is optional. If it is unavailable, keyword search still works and semantic search degrades gracefully.
+- You can customize `OLLAMA_EMBED_MODEL` and `OLLAMA_HOST` in the MCP server `env` block.
+
+Troubleshooting:
+
+- If Node.js is missing or older than 18, the installer skips hybrid-memory and leaves the rest of the install intact.
+- If `npm install --production` fails, install build tooling and rerun the installer.
+- If semantic search returns weak or empty results, verify Ollama is running and the embed model is available.
+- If no memory tools appear after install, check `tools.mcpServers.hybrid-memory.enabled` and the `mcp-server.js` path in `~/.smolbot/config.json`.
+- If the memory directory is not writable, the MCP server will fail to start and smolbot will continue without those tools.
 
 ### Quota Tracking
 

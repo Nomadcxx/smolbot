@@ -136,6 +136,73 @@ func TestRegistryLoadContent(t *testing.T) {
 	}
 }
 
+func TestMemorySkillLoads(t *testing.T) {
+	reg, err := NewBuiltinRegistry()
+	if err != nil {
+		t.Fatalf("NewBuiltinRegistry: %v", err)
+	}
+
+	skill, ok := reg.Get("memory")
+	if !ok {
+		t.Fatal("memory skill missing")
+	}
+	if skill.Source != "builtin" {
+		t.Fatalf("memory skill source = %q, want builtin", skill.Source)
+	}
+	if strings.TrimSpace(skill.Content) == "" {
+		t.Fatal("memory skill content is empty")
+	}
+}
+
+func TestMemorySkillReferences(t *testing.T) {
+	reg, err := NewBuiltinRegistry()
+	if err != nil {
+		t.Fatalf("NewBuiltinRegistry: %v", err)
+	}
+
+	for _, resource := range []string{
+		"references/recall.md",
+		"references/triggers.md",
+		"references/harvest.md",
+	} {
+		if !reg.HasResource("memory", resource) {
+			t.Fatalf("missing memory skill resource %q", resource)
+		}
+	}
+}
+
+func TestMemorySkillLoadContent(t *testing.T) {
+	reg, err := NewBuiltinRegistry()
+	if err != nil {
+		t.Fatalf("NewBuiltinRegistry: %v", err)
+	}
+
+	content, err := reg.LoadContent("memory")
+	if err != nil {
+		t.Fatalf("LoadContent(memory): %v", err)
+	}
+	for _, phrase := range []string{"5-stage", "startup gate"} {
+		if !strings.Contains(strings.ToLower(content), strings.ToLower(phrase)) {
+			t.Fatalf("memory skill content missing %q", phrase)
+		}
+	}
+}
+
+func TestMemorySkillRequiresNode(t *testing.T) {
+	reg, err := NewBuiltinRegistry()
+	if err != nil {
+		t.Fatalf("NewBuiltinRegistry: %v", err)
+	}
+
+	skill, ok := reg.Get("memory")
+	if !ok {
+		t.Fatal("memory skill missing")
+	}
+	if !slices.Contains(skill.Requires.Bins, "node") {
+		t.Fatalf("memory skill bins = %#v, want node", skill.Requires.Bins)
+	}
+}
+
 func TestRegistryThreadSafety(t *testing.T) {
 	workspace := t.TempDir()
 	paths := config.NewPaths(t.TempDir())

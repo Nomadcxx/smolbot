@@ -87,6 +87,13 @@ func (m *Manager) DiscoverAndRegister(ctx context.Context, registry *tool.Regist
 	var warnings []string
 	for _, serverName := range serverNames {
 		cfg := servers[serverName]
+		if cfg.Enabled != nil && !*cfg.Enabled {
+			slog.Info("skipping disabled mcp server", "server", serverName)
+			m.mu.Lock()
+			m.toolCounts[serverName] = 0
+			m.mu.Unlock()
+			continue
+		}
 		spec := connectionSpec(serverName, cfg)
 		remoteTools, err := m.client.Discover(ctx, spec)
 		if err != nil {

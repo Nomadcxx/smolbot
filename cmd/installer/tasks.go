@@ -278,19 +278,30 @@ func writeConfig(m *model) error {
 			},
 		},
 		"tools": map[string]interface{}{
+			"restrictToWorkspace": true,
 			"web": map[string]interface{}{
 				"searchBackend": "duckduckgo",
 				"maxResults":    5,
 			},
 			"exec": map[string]interface{}{
-				"defaultTimeout":      60,
-				"maxTimeout":          600,
-				"denyPatterns":        []string{"rm -rf /", "dd if="},
-				"restrictToWorkspace": true,
+				"defaultTimeout": 60,
+				"maxTimeout":     600,
+				"denyPatterns":   []string{"rm -rf /", "dd if="},
 			},
 			"mcpServers": map[string]interface{}{},
 		},
 	}
+
+	mcpServers := map[string]any{}
+	if m.updateMode {
+		for key, value := range loadExistingMCPServers(m.configPath) {
+			mcpServers[key] = value
+		}
+	}
+	if _, exists := mcpServers["hybrid-memory"]; !exists && m.hybridMemoryReady {
+		mcpServers["hybrid-memory"] = hybridMemoryServerConfig(m.projectDir)
+	}
+	config["tools"].(map[string]interface{})["mcpServers"] = mcpServers
 
 	// Add provider-specific configuration
 	providers := config["providers"].(map[string]interface{})
@@ -394,6 +405,45 @@ func writeConfig(m *model) error {
 		return fmt.Errorf("write config: %w", err)
 	}
 
+	return nil
+}
+
+// mergeHybridMemoryConfig adds hybrid-memory MCP to an existing config during upgrade.
+func mergeHybridMemoryConfig(m *model) error {
+	if !m.hybridMemoryReady {
+		return nil
+	}
+	data, err := os.ReadFile(m.configPath)
+	if err != nil {
+		return fmt.Errorf("read config for MCP merge: %w", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("parse config for MCP merge: %w", err)
+	}
+
+	tools, _ := raw["tools"].(map[string]any)
+	if tools == nil {
+		tools = map[string]any{}
+		raw["tools"] = tools
+	}
+	mcpServers, _ := tools["mcpServers"].(map[string]any)
+	if mcpServers == nil {
+		mcpServers = map[string]any{}
+		tools["mcpServers"] = mcpServers
+	}
+	if _, exists := mcpServers["hybrid-memory"]; exists {
+		return nil
+	}
+	mcpServers["hybrid-memory"] = hybridMemoryServerConfig(m.projectDir)
+
+	configData, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config after MCP merge: %w", err)
+	}
+	if err := writeFileWithPerm(m.configPath, configData, 0600); err != nil {
+		return fmt.Errorf("write config after MCP merge: %w", err)
+	}
 	return nil
 }
 
@@ -546,7 +596,9 @@ func (m *model) initTasks() {
 			{name: "Stop service", description: "Stopping smolbot", execute: stopService},
 			{name: "Build smolbot", description: "Building daemon binary", execute: buildSmolbot},
 			{name: "Build smolbot-tui", description: "Building TUI binary", execute: buildSmolbotTUI},
+			{name: "Setup hybrid-memory", description: "Setting up hybrid-memory MCP", execute: setupHybridMemoryTask, optional: true},
 			{name: "Install binaries", description: "Installing to ~/.local/bin", execute: installBinaries},
+			{name: "Merge MCP config", description: "Adding hybrid-memory to config", execute: mergeHybridMemoryConfig, optional: true},
 			{name: "Setup systemd", description: "Updating systemd service", execute: setupSystemd, optional: true},
 		}
 
@@ -565,6 +617,7 @@ func (m *model) initTasks() {
 			{name: "Build smolbot-tui", description: "Building TUI binary", execute: buildSmolbotTUI},
 			{name: "Install binaries", description: "Installing to ~/.local/bin", execute: installBinaries},
 			{name: "Create workspace", description: "Creating ~/.smolbot/workspace", execute: createWorkspace},
+			{name: "Setup hybrid-memory", description: "Setting up hybrid-memory MCP", execute: setupHybridMemoryTask, optional: true},
 			{name: "Write config", description: "Writing config.json", execute: writeConfig},
 			{name: "Setup systemd", description: "Installing user service", execute: setupSystemd},
 		}

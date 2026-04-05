@@ -30,6 +30,9 @@ echo "Cloning smolbot..."
 git clone --depth 1 https://github.com/Nomadcxx/smolbot.git
 cd smolbot
 
+echo "Initializing submodules..."
+git submodule update --init --depth 1 || echo "Warning: submodule init failed; hybrid-memory will be skipped"
+
 echo "Building installer..."
 go build -o install-smolbot ./cmd/installer/
 

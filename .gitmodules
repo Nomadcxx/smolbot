@@ -1,0 +1,3 @@
+[submodule "mcp/hybrid-memory"]
+	path = mcp/hybrid-memory
+	url = https://github.com/Nomadcxx/hybrid-memory.git

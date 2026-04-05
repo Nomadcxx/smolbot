@@ -172,6 +172,7 @@ type MCPServerConfig struct {
 	Headers      map[string]string `json:"headers,omitempty"`
 	ToolTimeout  int               `json:"toolTimeout"`
 	EnabledTools []string          `json:"enabledTools"`
+	Enabled      *bool             `json:"enabled,omitempty"`
 }
 
 // DefaultConfig returns a config with sensible defaults.

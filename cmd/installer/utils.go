@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,22 +26,37 @@ type commandResult struct {
 }
 
 func runCommand(m *model, name string, args ...string) commandResult {
+	dir := ""
+	if m != nil {
+		dir = m.projectDir
+	}
+	return runCommandInDir(m, dir, name, args...)
+}
+
+func runCommandInDir(m *model, dir string, name string, args ...string) commandResult {
 	start := time.Now()
 
 	// Check for context cancellation
-	select {
-	case <-m.ctx.Done():
-		return commandResult{Err: m.ctx.Err()}
-	default:
+	if m != nil && m.ctx != nil {
+		select {
+		case <-m.ctx.Done():
+			return commandResult{Err: m.ctx.Err()}
+		default:
+		}
 	}
 
-	cmd := exec.CommandContext(m.ctx, name, args...)
-	if m.projectDir != "" {
-		cmd.Dir = m.projectDir
+	ctx := context.Background()
+	if m != nil && m.ctx != nil {
+		ctx = m.ctx
+	}
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
 	}
 
 	// Log command
-	if m.logFile != nil {
+	if m != nil && m.logFile != nil {
 		fmt.Fprintf(m.logFile, "[CMD] %s %s\n", name, strings.Join(args, " "))
 		if cmd.Dir != "" {
 			fmt.Fprintf(m.logFile, "[CWD] %s\n", cmd.Dir)
@@ -61,7 +77,7 @@ func runCommand(m *model, name string, args ...string) commandResult {
 	}
 
 	// Log result
-	if m.logFile != nil {
+	if m != nil && m.logFile != nil {
 		if err != nil {
 			fmt.Fprintf(m.logFile, "[FAIL] Exit code %d, duration %v\n%s\n\n",
 				result.ExitCode, duration, output)

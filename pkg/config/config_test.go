@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+func boolPtr(v bool) *bool { return &v }
+
 func TestConfigRoundTrip(t *testing.T) {
 	input := `{
 		"agents": {
@@ -245,6 +247,64 @@ func TestLoadTelegramConfig(t *testing.T) {
 	}
 	if got := cfg.Channels.Telegram.AllowedChatIDs; len(got) != 1 || got[0] != "42" {
 		t.Fatalf("telegram allowedChatIDs = %#v", got)
+	}
+}
+
+func TestMCPServerConfigEnabledTrue(t *testing.T) {
+	var cfg MCPServerConfig
+	if err := json.Unmarshal([]byte(`{"enabled":true}`), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.Enabled == nil || !*cfg.Enabled {
+		t.Fatalf("Enabled = %#v, want true", cfg.Enabled)
+	}
+}
+
+func TestMCPServerConfigEnabledFalse(t *testing.T) {
+	var cfg MCPServerConfig
+	if err := json.Unmarshal([]byte(`{"enabled":false}`), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.Enabled == nil || *cfg.Enabled {
+		t.Fatalf("Enabled = %#v, want false", cfg.Enabled)
+	}
+}
+
+func TestMCPServerConfigEnabledMissing(t *testing.T) {
+	var cfg MCPServerConfig
+	if err := json.Unmarshal([]byte(`{}`), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.Enabled != nil {
+		t.Fatalf("Enabled = %#v, want nil", cfg.Enabled)
+	}
+}
+
+func TestMCPServerConfigRoundTrip(t *testing.T) {
+	input := MCPServerConfig{
+		Type:         "stdio",
+		Command:      "node",
+		Args:         []string{"server.js"},
+		Env:          map[string]string{"A": "1"},
+		URL:          "https://example.com/mcp",
+		Headers:      map[string]string{"Authorization": "Bearer test"},
+		ToolTimeout:  30,
+		EnabledTools: []string{"*"},
+		Enabled:      boolPtr(false),
+	}
+
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got MCPServerConfig
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if !reflect.DeepEqual(got, input) {
+		t.Fatalf("round trip mismatch:\n got: %+v\nwant: %+v", got, input)
 	}
 }
 

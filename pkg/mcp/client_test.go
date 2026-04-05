@@ -11,6 +11,8 @@ import (
 	"github.com/Nomadcxx/smolbot/pkg/tool"
 )
 
+func boolPtr(v bool) *bool { return &v }
+
 func TestDetectTransport(t *testing.T) {
 	if got := DetectTransport(config.MCPServerConfig{Type: "stdio"}); got != TransportStdio {
 		t.Fatalf("expected stdio transport, got %q", got)
@@ -190,5 +192,97 @@ func TestManagerToolCountsTrackedAfterDiscovery(t *testing.T) {
 	counts := manager.ToolCounts()
 	if counts["my-server"] != 2 {
 		t.Fatalf("expected 2 tools for my-server, got %d", counts["my-server"])
+	}
+}
+
+func TestDiscoverSkipsDisabled(t *testing.T) {
+	client := &fakeDiscoveryClient{
+		tools: []RemoteTool{
+			{Name: "tool_a", Description: "A", InputSchema: map[string]any{"type": "object"}},
+		},
+	}
+	manager := NewManager(client)
+	registry := tool.NewRegistry()
+
+	warnings, err := manager.DiscoverAndRegister(context.Background(), registry, map[string]config.MCPServerConfig{
+		"disabled-server": {
+			Type:        "stdio",
+			Command:     "echo",
+			Enabled:     boolPtr(false),
+			ToolTimeout: 5,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DiscoverAndRegister: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+	if len(registry.Definitions()) != 0 {
+		t.Fatalf("expected no tools registered, got %#v", registry.Definitions())
+	}
+	if client.lastSpec.Name != "" {
+		t.Fatalf("expected disabled server not to be discovered, got spec %#v", client.lastSpec)
+	}
+}
+
+func TestDiscoverIncludesEnabled(t *testing.T) {
+	client := &fakeDiscoveryClient{
+		tools: []RemoteTool{
+			{Name: "tool_a", Description: "A", InputSchema: map[string]any{"type": "object"}},
+		},
+	}
+	manager := NewManager(client)
+	registry := tool.NewRegistry()
+
+	warnings, err := manager.DiscoverAndRegister(context.Background(), registry, map[string]config.MCPServerConfig{
+		"enabled-server": {
+			Type:        "stdio",
+			Command:     "echo",
+			Enabled:     boolPtr(true),
+			ToolTimeout: 5,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DiscoverAndRegister: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+	if len(registry.Definitions()) != 1 {
+		t.Fatalf("expected one tool registered, got %#v", registry.Definitions())
+	}
+	if client.lastSpec.Name != "enabled-server" {
+		t.Fatalf("expected enabled server discovery, got spec %#v", client.lastSpec)
+	}
+}
+
+func TestDiscoverIncludesEnabledByDefault(t *testing.T) {
+	client := &fakeDiscoveryClient{
+		tools: []RemoteTool{
+			{Name: "tool_a", Description: "A", InputSchema: map[string]any{"type": "object"}},
+		},
+	}
+	manager := NewManager(client)
+	registry := tool.NewRegistry()
+
+	warnings, err := manager.DiscoverAndRegister(context.Background(), registry, map[string]config.MCPServerConfig{
+		"default-server": {
+			Type:        "stdio",
+			Command:     "echo",
+			ToolTimeout: 5,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DiscoverAndRegister: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+	if len(registry.Definitions()) != 1 {
+		t.Fatalf("expected one tool registered, got %#v", registry.Definitions())
+	}
+	if client.lastSpec.Name != "default-server" {
+		t.Fatalf("expected default-enabled server discovery, got spec %#v", client.lastSpec)
 	}
 }

@@ -155,6 +155,8 @@ type model struct {
 	workspacePath    string
 	configPath       string
 	port             int
+	hybridMemoryReady   bool
+	hybridMemorySkipped string
 
 	// Quota configuration
 	quotaEnabled bool

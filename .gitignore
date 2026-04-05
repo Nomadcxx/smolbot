@@ -3,3 +3,4 @@ gateway.test
 ./smolbot-tui
 nanobot.test
 .worktrees/
+mcp/hybrid-memory/mcp/node_modules/
