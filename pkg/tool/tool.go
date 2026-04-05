@@ -152,6 +152,23 @@ func NewRegistry() *Registry {
 	return &Registry{tools: make(map[string]Tool)}
 }
 
+func (r *Registry) Clone() *Registry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	cloned := NewRegistry()
+	cloned.cancelSession = r.cancelSession
+	for name, toolImpl := range r.tools {
+		if searchTool, ok := toolImpl.(*ToolSearchTool); ok {
+			_ = searchTool
+			cloned.tools[name] = NewToolSearchTool(cloned)
+			continue
+		}
+		cloned.tools[name] = toolImpl
+	}
+	return cloned
+}
+
 func (r *Registry) Register(tool Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
