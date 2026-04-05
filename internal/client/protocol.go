@@ -59,6 +59,8 @@ type HelloPayload struct {
 type ChatSendParams struct {
 	Session string `json:"session"`
 	Message string `json:"message"`
+	Channel string `json:"channel,omitempty"`
+	ChatID  string `json:"chatID,omitempty"`
 }
 
 type ChatSendPayload struct {

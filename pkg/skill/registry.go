@@ -158,12 +158,12 @@ func (r *Registry) SummaryXML() string {
 	defer r.mu.RUnlock()
 
 	type skillSummary struct {
-		XMLName xml.Name `xml:"skill"`
-		Name    string   `xml:"name,attr"`
-		Status  string   `xml:"status,attr"`
-		Reason  string   `xml:"reason,attr,omitempty"`
-		Always  bool     `xml:"always,attr,omitempty"`
-		// Note: Text field removed - only metadata included
+		XMLName     xml.Name `xml:"skill"`
+		Name        string   `xml:"name,attr"`
+		Status      string   `xml:"status,attr"`
+		Reason      string   `xml:"reason,attr,omitempty"`
+		Always      bool     `xml:"always,attr,omitempty"`
+		Description string   `xml:",chardata"`
 	}
 	type wrapper struct {
 		XMLName xml.Name       `xml:"available_skills"`
@@ -180,10 +180,11 @@ func (r *Registry) SummaryXML() string {
 			reason = skill.UnavailableReason
 		}
 		out.Skills = append(out.Skills, skillSummary{
-			Name:   skill.Name,
-			Status: status,
-			Reason: reason,
-			Always: skill.Always,
+			Name:        skill.Name,
+			Status:      status,
+			Reason:      reason,
+			Always:      skill.Always,
+			Description: skill.Description,
 		})
 	}
 

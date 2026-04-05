@@ -9,6 +9,8 @@ func (c *Client) ChatSend(session, message string) (string, error) {
 	return c.SendAsync("chat.send", ChatSendParams{
 		Session: session,
 		Message: message,
+		Channel: "gateway",
+		ChatID:  session,
 	})
 }
 

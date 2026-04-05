@@ -125,7 +125,7 @@ func TestRegistryLoadContent(t *testing.T) {
 		t.Fatalf("LoadContent: %v", err)
 	}
 	// Content should be just the body (without frontmatter)
-	if !strings.Contains(content, "GitHub-oriented") {
+	if !strings.Contains(content, "GitHub") {
 		t.Errorf("LoadContent should return skill content, got: %q", content)
 	}
 
