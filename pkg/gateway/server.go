@@ -84,6 +84,8 @@ type Server struct {
 	startingSessions  map[string]struct{}
 	activeRuns        map[string]*runState
 	sessionRuns       map[string]string
+	sessionQueue      map[string][]queuedRequest
+	runSeq            atomic.Int64
 	wsTasks           map[*websocket.Conn]map[string]struct{}
 	completedDelivery map[string]bool
 	clients           map[*websocket.Conn]*clientState
@@ -96,12 +98,18 @@ type Server struct {
 	}
 }
 
+type pendingEvent struct {
+	name    string
+	payload map[string]any
+}
+
 type clientState struct {
-	conn       *websocket.Conn
-	mu         sync.Mutex
-	seq        int64
-	isLegacy   bool
-	sessionKey string
+	conn          *websocket.Conn
+	mu            sync.Mutex
+	seq           int64
+	isLegacy      bool
+	sessionKey    string
+	pendingEvents []pendingEvent
 }
 
 type runState struct {
@@ -109,6 +117,16 @@ type runState struct {
 	sessionKey string
 	cancel     context.CancelFunc
 	owner      *clientState
+	wasQueued  bool // true if this run was dequeued from a pending queue
+}
+
+// queuedRequest holds a chat.send that arrived while a run was already active
+// for the same session. It will be started automatically once the active run
+// completes.
+type queuedRequest struct {
+	req    agent.Request
+	client *clientState
+	runID  string
 }
 
 type ollamaContextCacheEntry struct {
@@ -155,6 +173,7 @@ func NewServer(deps ServerDeps) *Server {
 		startingSessions:  make(map[string]struct{}),
 		activeRuns:        make(map[string]*runState),
 		sessionRuns:       make(map[string]string),
+		sessionQueue:      make(map[string][]queuedRequest),
 		wsTasks:           make(map[*websocket.Conn]map[string]struct{}),
 		completedDelivery: make(map[string]bool),
 		clients:           make(map[*websocket.Conn]*clientState),
@@ -248,6 +267,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		if err := s.writeResponse(state, frame.Request.ID, resp); err != nil {
 			return
 		}
+		s.flushPendingEvents(state)
 	}
 }
 
@@ -261,7 +281,7 @@ func (s *Server) handleRequest(ctx context.Context, client *clientState, req Req
 			"methods": []string{
 				"hello", "status", "chat.send", "chat.history", "sessions.list", "sessions.reset", "models.list", "models.set", "compact", "skills.list", "mcps.list", "cron.list", "provider.configure", "provider.remove",
 			},
-			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.hint", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "compact.start", "compact.done", "context.compressed", "agent.spawned", "agent.completed", "agent.wait.started", "agent.wait.completed", "models.updated"},
+			"events": []string{"chat.progress", "chat.done", "chat.error", "chat.tool.hint", "chat.tool.start", "chat.tool.done", "chat.thinking", "chat.thinking.done", "chat.usage", "chat.queued", "chat.dequeued", "chat.queue.drained", "compact.start", "compact.done", "context.compressed", "agent.spawned", "agent.completed", "agent.wait.started", "agent.wait.completed", "models.updated"},
 		}, nil
 	case "status":
 		params := struct {
@@ -997,21 +1017,46 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
+func (s *Server) newRunID(sessionKey string) string {
+	n := s.runSeq.Add(1)
+	if n == 1 {
+		// First run ever: keep the original format so existing tests still pass.
+		return "run-" + sessionKey
+	}
+	return fmt.Sprintf("run-%s-%d", sessionKey, n)
+}
+
 func (s *Server) startRun(req agent.Request, client *clientState) (string, error) {
 	if s.agent == nil {
 		return "", fmt.Errorf("agent unavailable")
 	}
-	runID := "run-" + req.SessionKey
 
 	s.mu.Lock()
-	if _, starting := s.startingSessions[req.SessionKey]; starting {
+	_, starting := s.startingSessions[req.SessionKey]
+	_, active := s.sessionRuns[req.SessionKey]
+	if starting || active {
+		// Another run is already in flight for this session — enqueue.
+		runID := fmt.Sprintf("run-%s-q%d", req.SessionKey, s.runSeq.Add(1))
+		queued := queuedRequest{req: req, client: client, runID: runID}
+		s.sessionQueue[req.SessionKey] = append(s.sessionQueue[req.SessionKey], queued)
+		position := len(s.sessionQueue[req.SessionKey])
+		// Buffer the event so it is emitted AFTER the response frame for this
+		// request — clients must see the response (with the runId) before the event.
+		client.mu.Lock()
+		client.pendingEvents = append(client.pendingEvents, pendingEvent{
+			name: "chat.queued",
+			payload: map[string]any{
+				"runId":    runID,
+				"session":  req.SessionKey,
+				"position": position,
+			},
+		})
+		client.mu.Unlock()
 		s.mu.Unlock()
-		return "", fmt.Errorf("session %q already active", req.SessionKey)
+		return runID, nil
 	}
-	if _, active := s.sessionRuns[req.SessionKey]; active {
-		s.mu.Unlock()
-		return "", fmt.Errorf("session %q already active", req.SessionKey)
-	}
+
+	runID := "run-" + req.SessionKey
 	s.startingSessions[req.SessionKey] = struct{}{}
 	runCtx, cancel := context.WithCancel(context.Background())
 	state := &runState{
@@ -1137,7 +1182,9 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 	s.mu.Lock()
 	delete(s.activeRuns, state.runID)
 	delete(s.sessionRuns, state.sessionKey)
-	delete(s.wsTasks[state.owner.conn], state.runID)
+	if tasks := s.wsTasks[state.owner.conn]; tasks != nil {
+		delete(tasks, state.runID)
+	}
 	s.completedDelivery[state.runID] = delivered
 	// Prune oldest entries when map exceeds cap to prevent unbounded growth.
 	if len(s.completedDelivery) > 1000 {
@@ -1151,7 +1198,49 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 	if lastUsage.TotalTokens > 0 {
 		s.lastUsage = lastUsage
 	}
+
+	// Dequeue and start the next pending request for this session, if any.
+	var next *queuedRequest
+	if q := s.sessionQueue[state.sessionKey]; len(q) > 0 {
+		next = &q[0]
+		s.sessionQueue[state.sessionKey] = q[1:]
+		if len(s.sessionQueue[state.sessionKey]) == 0 {
+			delete(s.sessionQueue, state.sessionKey)
+		}
+	}
+	var nextState *runState
+	var nextCtx context.Context
+	if next != nil {
+		runCtx, cancel := context.WithCancel(context.Background())
+		nextState = &runState{
+			runID:      next.runID,
+			sessionKey: next.req.SessionKey,
+			cancel:     cancel,
+			owner:      next.client,
+			wasQueued:  true,
+		}
+		s.activeRuns[next.runID] = nextState
+		s.sessionRuns[next.req.SessionKey] = next.runID
+		if tasks := s.wsTasks[next.client.conn]; tasks != nil {
+			tasks[next.runID] = struct{}{}
+		}
+		nextCtx = runCtx
+	}
 	s.mu.Unlock()
+
+	if next != nil {
+		s.emitEvent(next.client, "chat.dequeued", map[string]any{
+			"runId":   next.runID,
+			"session": next.req.SessionKey,
+		})
+		go s.executeRun(nextCtx, nextState, next.req)
+	} else if state.wasQueued {
+		// Emit drained only when the completed run was itself dequeued, meaning
+		// there was previously a queue that is now fully exhausted.
+		s.emitEvent(state.owner, "chat.queue.drained", map[string]any{
+			"session": state.sessionKey,
+		})
+	}
 }
 
 func (s *Server) abortRun(runID string) error {
@@ -1235,6 +1324,19 @@ func (s *Server) writeEvent(client *clientState, name string, payload any) error
 		return err
 	}
 	return client.write(frame)
+}
+
+// flushPendingEvents drains buffered events accumulated during request handling
+// and sends them in order. Events are buffered so they arrive at the client
+// after the response frame for the triggering request.
+func (s *Server) flushPendingEvents(client *clientState) {
+	client.mu.Lock()
+	events := client.pendingEvents
+	client.pendingEvents = nil
+	client.mu.Unlock()
+	for _, ev := range events {
+		s.emitEvent(client, ev.name, ev.payload)
+	}
 }
 
 func (s *Server) emitEvent(client *clientState, name string, payload map[string]any) {

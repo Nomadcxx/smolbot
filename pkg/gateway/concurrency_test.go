@@ -13,14 +13,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// TestDuplicateSendCurrentlyRejects is a characterization test for the current
-// behavior where a same-session chat.send while a run is active returns an
-// "already active" error.
-//
-// TODO(queueing): Once Task 2 is implemented this test should be updated —
-// the second send must no longer error but instead return a runId and emit a
-// chat.queued event.
-func TestDuplicateSendCurrentlyRejects(t *testing.T) {
+// TestDuplicateSendQueuesInsteadOfRejecting verifies that a same-session
+// chat.send while a run is active is queued rather than rejected.
+func TestDuplicateSendQueuesInsteadOfRejecting(t *testing.T) {
 	processor := newBlockingAgent()
 	server := NewServer(ServerDeps{Agent: processor})
 	httpServer := httptest.NewServer(server.Handler())
@@ -34,9 +29,9 @@ func TestDuplicateSendCurrentlyRejects(t *testing.T) {
 		Method: "chat.send",
 		Params: json.RawMessage(`{"session":"reg","message":"first"}`),
 	})
-	first := readFrame(t, conn)
-	if !strings.Contains(string(first.Response.Result), "runId") {
-		t.Fatalf("expected runId in first response, got %#v", first)
+	first := readResponseFrame(t, conn, "reg-1")
+	if first.Response.Error != nil {
+		t.Fatalf("unexpected error on first send: %v", first.Response.Error)
 	}
 
 	writeFrame(t, conn, RequestFrame{
@@ -44,14 +39,26 @@ func TestDuplicateSendCurrentlyRejects(t *testing.T) {
 		Method: "chat.send",
 		Params: json.RawMessage(`{"session":"reg","message":"second"}`),
 	})
-	second := readFrame(t, conn)
-	// CURRENT BEHAVIOR — will change to queue after Task 2.
-	if second.Response.Error == nil || !strings.Contains(second.Response.Error.Message, "already active") {
-		t.Fatalf("REGRESSION: expected 'already active' error (to be replaced by queueing), got %#v", second)
+	second := readResponseFrame(t, conn, "reg-2")
+	if second.Response.Error != nil {
+		t.Fatalf("second send must queue, not error; got: %v", second.Response.Error)
+	}
+	if !strings.Contains(string(second.Response.Result), "runId") {
+		t.Fatalf("expected runId in queued response, got %#v", second)
 	}
 
-	processor.finish("reg", "done")
-	readUntilEvent(t, conn, "chat.done")
+	// chat.queued event must arrive.
+	readEventFrame(t, conn, "chat.queued")
+
+	// Finish the first run; the queued run starts automatically.
+	processor.finish("reg", "first done")
+	readEventFrame(t, conn, "chat.done")
+	readEventFrame(t, conn, "chat.dequeued")
+
+	// Finish the second run.
+	processor.finish("reg", "second done")
+	readEventFrame(t, conn, "chat.done")
+	readEventFrame(t, conn, "chat.queue.drained")
 }
 
 func TestGatewayConcurrency(t *testing.T) {
@@ -63,14 +70,17 @@ func TestGatewayConcurrency(t *testing.T) {
 	conn := dialWebsocket(t, httpServer.URL+"/ws")
 	defer conn.Close()
 
-	t.Run("starting sessions blocks duplicate chat send", func(t *testing.T) {
+	t.Run("same-session duplicate send is queued not rejected", func(t *testing.T) {
 		writeFrame(t, conn, RequestFrame{
 			ID:     "1",
 			Method: "chat.send",
 			Params: json.RawMessage(`{"session":"dup","message":"first"}`),
 		})
-		first := readFrame(t, conn)
-		if !strings.Contains(string(first.Response.Result), `"runId":"run-dup"`) {
+		first := readResponseFrame(t, conn, "1")
+		if first.Response.Error != nil {
+			t.Fatalf("unexpected error on first send: %v", first.Response.Error)
+		}
+		if !strings.Contains(string(first.Response.Result), "runId") {
 			t.Fatalf("unexpected first send response %#v", first)
 		}
 
@@ -79,13 +89,24 @@ func TestGatewayConcurrency(t *testing.T) {
 			Method: "chat.send",
 			Params: json.RawMessage(`{"session":"dup","message":"second"}`),
 		})
-		second := readFrame(t, conn)
-		if second.Response.Error == nil || !strings.Contains(second.Response.Error.Message, "already active") {
-			t.Fatalf("expected duplicate-send rejection, got %#v", second)
+		second := readResponseFrame(t, conn, "2")
+		if second.Response.Error != nil {
+			t.Fatalf("second send must queue not error, got: %v", second.Response.Error)
 		}
+		if !strings.Contains(string(second.Response.Result), "runId") {
+			t.Fatalf("expected runId in queued response, got %#v", second)
+		}
+		readEventFrame(t, conn, "chat.queued")
 
-		processor.finish("dup", "done")
-		readUntilEvent(t, conn, "chat.done")
+		// Finish first run; second starts automatically.
+		processor.finish("dup", "first done")
+		readEventFrame(t, conn, "chat.done")
+		readEventFrame(t, conn, "chat.dequeued")
+
+		// Finish second run and drain.
+		processor.finish("dup", "second done")
+		readEventFrame(t, conn, "chat.done")
+		readEventFrame(t, conn, "chat.queue.drained")
 	})
 
 	t.Run("chat abort respects run id", func(t *testing.T) {
@@ -264,7 +285,23 @@ func (b *blockingAgent) emit(sessionKey string, event agent.Event) {
 	}
 }
 
+// waitForSession blocks until ProcessDirect has been called for sessionKey.
+// This prevents a race where finish is called before the goroutine registers.
+func (b *blockingAgent) waitForSession(sessionKey string) {
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		b.mu.Lock()
+		_, ok := b.runs[sessionKey]
+		b.mu.Unlock()
+		if ok {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func (b *blockingAgent) finish(sessionKey, result string) {
+	b.waitForSession(sessionKey)
 	b.mu.Lock()
 	run := b.runs[sessionKey]
 	delete(b.runs, sessionKey)
