@@ -1568,6 +1568,44 @@ func TestSubmitDuringStreamingCurrentlyCallsChatSend(t *testing.T) {
 	}
 }
 
+func TestChatQueuedMsgShowsQueuedNotice(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+
+	updated, cmd := model.Update(ChatQueuedMsg{RunID: "run-q1", Position: 1})
+	got := updated.(Model)
+
+	if cmd != nil {
+		t.Fatalf("expected no command from ChatQueuedMsg, got %T", cmd)
+	}
+	view := plain(got.messages.View())
+	if !strings.Contains(view, "queued") {
+		t.Fatalf("expected queued notice in messages view, got %q", view)
+	}
+}
+
+func TestChatDequeuedMsgActivatesStreaming(t *testing.T) {
+	model := New(app.Config{})
+	model.width = 80
+	model.height = 24
+	model.streaming = false
+	model.currentRunID = ""
+
+	updated, cmd := model.Update(ChatDequeuedMsg{RunID: "run-q1"})
+	got := updated.(Model)
+
+	if !got.streaming {
+		t.Fatal("expected streaming=true after ChatDequeuedMsg")
+	}
+	if got.currentRunID != "run-q1" {
+		t.Fatalf("expected currentRunID to be set, got %q", got.currentRunID)
+	}
+	if cmd == nil {
+		t.Fatal("expected spinner commands from ChatDequeuedMsg")
+	}
+}
+
 func TestInterruptMsgIsMappedToCtrlCMessage(t *testing.T) {
 	msg := FilterProgramMsg(nil, tea.InterruptMsg{})
 	if _, ok := msg.(CtrlCMsg); !ok {

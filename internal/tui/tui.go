@@ -30,6 +30,11 @@ type EventMsg struct{ Event client.Event }
 type ChatStartedMsg struct{ RunID string }
 type ChatDoneMsg struct{ Content string }
 type ChatErrorMsg struct{ Message string }
+type ChatQueuedMsg struct {
+	RunID    string
+	Position int
+}
+type ChatDequeuedMsg struct{ RunID string }
 type ChatProgressMsg struct{ Content string }
 type ThinkingDoneMsg struct{ Content string }
 type HistoryLoadedMsg struct{ Messages []client.HistoryMessage }
@@ -481,6 +486,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ChatStartedMsg:
 		m.currentRunID = msg.RunID
 		return m, tea.Batch(m.spinnerTickCmd(), m.status.StatusSpinnerTick())
+	case ChatQueuedMsg:
+		// Show a compact notice so the user knows their message is queued.
+		m.messages.AppendSystem("⏳ Message queued — will run after the current response")
+		return m, nil
+	case ChatDequeuedMsg:
+		// The queued run is now active; update streaming state so spinner shows.
+		m.currentRunID = msg.RunID
+		m.streaming = true
+		m.status.SetStreaming(true)
+		m.messages.AppendSystem("▶ Queued message started")
+		return m, tea.Batch(m.spinnerTickCmd(), m.status.StatusSpinnerTick())
 	case ChatDoneMsg:
 		m.resetProgressFlush()
 		m.streaming = false
@@ -845,6 +861,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
 				mapped = ChatErrorMsg{Message: p.Message}
+			}
+		case "chat.queued":
+			var p client.ChatQueuedPayload
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
+			} else {
+				mapped = ChatQueuedMsg{RunID: p.RunID, Position: p.Position}
+			}
+		case "chat.dequeued":
+			var p client.ChatDequeuedPayload
+			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
+				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
+			} else {
+				mapped = ChatDequeuedMsg{RunID: p.RunID}
 			}
 		case "chat.thinking":
 			var p client.ThinkingPayload

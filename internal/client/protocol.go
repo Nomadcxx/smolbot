@@ -111,6 +111,17 @@ type ChatErrorPayload struct {
 	Message string `json:"message"`
 }
 
+type ChatQueuedPayload struct {
+	RunID    string `json:"runId"`
+	Session  string `json:"session"`
+	Position int    `json:"position"`
+}
+
+type ChatDequeuedPayload struct {
+	RunID   string `json:"runId"`
+	Session string `json:"session"`
+}
+
 type ThinkingDonePayload struct {
 	Content string `json:"content"`
 }
