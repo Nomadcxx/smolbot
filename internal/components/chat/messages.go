@@ -63,6 +63,11 @@ type MessagesModel struct {
 	// Phase 2 perf: cached rendered progress to avoid re-glamour-rendering unchanged content.
 	cachedProgressSource   string
 	cachedProgressRendered string
+
+	// Phase 3 perf: cached CollapseTools output.
+	cachedCollapseToolsVer int
+	cachedCollapseTools    []CollapsedBlock
+	toolsVersion           int // bumped on every StartTool/FinishTool
 }
 
 type selectionPoint struct {
@@ -197,6 +202,7 @@ func (m *MessagesModel) ReplaceHistory(history []ChatMessage) {
 
 func (m *MessagesModel) StartTool(id, name, input string) {
 	m.tools = append(m.tools, ToolCall{ID: id, Name: name, Input: input, Status: "running"})
+	m.toolsVersion++
 	m.sync(m.viewport.AtBottom())
 }
 
@@ -205,6 +211,7 @@ func (m *MessagesModel) FinishTool(id, name, status, output string) {
 		if m.tools[i].ID == id {
 			m.tools[i].Status = status
 			m.tools[i].Output = output
+			m.toolsVersion++
 			m.sync(m.viewport.AtBottom())
 			return
 		}
@@ -213,11 +220,13 @@ func (m *MessagesModel) FinishTool(id, name, status, output string) {
 		if m.tools[i].Name == name && m.tools[i].Status == "running" {
 			m.tools[i].Status = status
 			m.tools[i].Output = output
+			m.toolsVersion++
 			m.sync(m.viewport.AtBottom())
 			return
 		}
 	}
 	m.tools = append(m.tools, ToolCall{ID: id, Name: name, Status: status, Output: output})
+	m.toolsVersion++
 	m.sync(m.viewport.AtBottom())
 }
 
@@ -239,8 +248,12 @@ func (m *MessagesModel) IsVerbose() bool {
 }
 
 // AdvanceSpinner increments the spinner frame for animated group indicators.
+// Only marks dirty when there are active tools to animate.
 func (m *MessagesModel) AdvanceSpinner() {
 	m.spinnerFrame = (m.spinnerFrame + 1) % 4
+	if len(m.tools) > 0 {
+		m.dirty = true
+	}
 }
 
 func (m *MessagesModel) ScrollToBottom() {
@@ -499,7 +512,12 @@ func (m *MessagesModel) renderToolBlocks(t *theme.Theme) []string {
 		return result
 	}
 
-	collapsed := CollapseTools(m.tools)
+	// Cache collapsed tools: recompute only when tools change (version tracks mutations).
+	if m.toolsVersion != m.cachedCollapseToolsVer || m.cachedCollapseTools == nil {
+		m.cachedCollapseTools = CollapseTools(m.tools)
+		m.cachedCollapseToolsVer = m.toolsVersion
+	}
+	collapsed := m.cachedCollapseTools
 	result := make([]string, 0, len(collapsed))
 	for _, block := range collapsed {
 		if block.IsGroup {

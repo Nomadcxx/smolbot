@@ -178,6 +178,7 @@ type Model struct {
 	footerWidth          int
 	messagesWidth        int
 	sidebar              sidebarcmp.Model
+	lastLayoutSig        uint64 // guards redundant recalcLayout calls
 	clipboardWrite       func(string) error
 
 	returnToModelsAfterProvider bool
@@ -1755,6 +1756,13 @@ func (m *Model) recalcLayout() {
 		return
 	}
 
+	// Fast check: skip if nothing layout-relevant changed.
+	sig := layoutSignature(m.width, m.height, m.compactMode, m.sidebarVisible, m.detailsOpen, m.editor.Height(), m.header.Height())
+	if sig == m.lastLayoutSig {
+		return
+	}
+	m.lastLayoutSig = sig
+
 	m.mainWidth = m.width
 	m.sidebarWidth = 0
 	m.overlayHeight = 0
@@ -1798,6 +1806,20 @@ func (m *Model) recalcLayout() {
 
 func (m Model) shouldShowSidebar() bool {
 	return !m.compactMode && m.sidebarVisible && m.sidebarWidth > 0
+}
+
+func layoutSignature(width, height int, compact, sidebar, details bool, editorH, headerH int) uint64 {
+	h := uint64(width)<<32 | uint64(height)<<16 | uint64(editorH)<<8 | uint64(headerH)
+	if compact {
+		h |= 1 << 48
+	}
+	if sidebar {
+		h |= 1 << 49
+	}
+	if details {
+		h |= 1 << 50
+	}
+	return h
 }
 
 func (m Model) shouldConsumeMouse(mouse tea.Mouse) bool {

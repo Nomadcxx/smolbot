@@ -522,9 +522,16 @@ func subtleWash(accent color.Color) color.Color {
 	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", int(r)/5, int(g)/5, int(b)/5))
 }
 
+var colorHexCache = make(map[color.Color]string)
+
 func colorHex(value color.Color) string {
+	if hex, ok := colorHexCache[value]; ok {
+		return hex
+	}
 	r, g, b, _ := value.RGBA()
-	return fmt.Sprintf("#%02X%02X%02X", uint8(r>>8), uint8(g>>8), uint8(b>>8))
+	hex := fmt.Sprintf("#%02X%02X%02X", uint8(r>>8), uint8(g>>8), uint8(b>>8))
+	colorHexCache[value] = hex
+	return hex
 }
 
 func renderThinkingBlock(body string, dur time.Duration, accent color.Color, width int) string {
