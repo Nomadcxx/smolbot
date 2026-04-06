@@ -1263,6 +1263,21 @@ func (s *Server) cancelWsTasks(conn *websocket.Conn) {
 	for runID := range s.wsTasks[conn] {
 		runIDs = append(runIDs, runID)
 	}
+	// Also remove any queued requests owned by this connection so they do not
+	// start after the owner has disconnected.
+	for sessionKey, queue := range s.sessionQueue {
+		remaining := queue[:0]
+		for _, q := range queue {
+			if q.client.conn != conn {
+				remaining = append(remaining, q)
+			}
+		}
+		if len(remaining) == 0 {
+			delete(s.sessionQueue, sessionKey)
+		} else {
+			s.sessionQueue[sessionKey] = remaining
+		}
+	}
 	s.mu.Unlock()
 	for _, runID := range runIDs {
 		_ = s.abortRun(runID)
@@ -1278,6 +1293,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	clients := make([]*websocket.Conn, 0, len(s.clients))
 	for conn := range s.clients {
 		clients = append(clients, conn)
+	}
+	// Discard all pending queued work — no new runs should start during shutdown.
+	for k := range s.sessionQueue {
+		delete(s.sessionQueue, k)
 	}
 	s.mu.Unlock()
 
