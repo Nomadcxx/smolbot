@@ -23,6 +23,11 @@ import (
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
+type sendCall struct {
+	session string
+	message string
+}
+
 type fakeClient struct {
 	sessions       []client.SessionInfo
 	models         []client.ModelInfo
@@ -34,6 +39,7 @@ type fakeClient struct {
 	statuses       map[string]client.StatusPayload
 	compact        client.CompactResult
 	chatRun        string
+	sends          []sendCall
 	aborts         []abortCall
 	modelErr       error
 	resetErr       error
@@ -56,6 +62,7 @@ func (f *fakeClient) Close()                                 {}
 func (f *fakeClient) SetOnEvent(func(client.Event))          {}
 func (f *fakeClient) SetOnClose(func())                      {}
 func (f *fakeClient) ChatSend(session, message string) (string, error) {
+	f.sends = append(f.sends, sendCall{session: session, message: message})
 	if f.chatRun != "" {
 		return f.chatRun, nil
 	}
@@ -1523,6 +1530,41 @@ func TestCtrlCAbortsStreamingRun(t *testing.T) {
 	}
 	if fake.aborts[0].runID != "run-123" {
 		t.Fatalf("expected abort run id to match, got %#v", fake.aborts[0])
+	}
+}
+
+// TestSubmitDuringStreamingCurrentlyCallsChatSend characterizes the current TUI
+// behavior where submitting a message while streaming=true calls ChatSend
+// unconditionally. The gateway then rejects with "already active".
+//
+// TODO(queueing): After Tasks 2 and 5 this test should verify the TUI
+// correctly handles a queued run response rather than an error.
+func TestSubmitDuringStreamingCurrentlyCallsChatSend(t *testing.T) {
+	fake := &fakeClient{}
+	model := New(app.Config{})
+	model.client = fake
+	model.streaming = true
+	model.currentRunID = "run-existing"
+
+	// Simulate typing and submitting a follow-up while streaming.
+	model.editor.SetValue("follow-up")
+	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	model = updated.(Model)
+
+	// Current behavior: sendChatCmd is returned (will call ChatSend).
+	if cmd == nil {
+		t.Fatal("REGRESSION: expected a command (sendChatCmd) when submitting during streaming")
+	}
+	// Run the cmd synchronously and check it calls ChatSend.
+	msg := cmd()
+	if _, ok := msg.(ChatStartedMsg); !ok {
+		if errMsg, ok := msg.(ChatErrorMsg); ok {
+			// This is the error path that will be replaced by queue behavior.
+			// A "already active" error coming from the gateway.
+			t.Logf("REGRESSION: got ChatErrorMsg %q — will become ChatStartedMsg with queued runId after queueing", errMsg.Message)
+			return
+		}
+		t.Fatalf("expected ChatStartedMsg or ChatErrorMsg, got %T", msg)
 	}
 }
 

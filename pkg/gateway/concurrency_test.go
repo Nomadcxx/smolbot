@@ -13,6 +13,47 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// TestDuplicateSendCurrentlyRejects is a characterization test for the current
+// behavior where a same-session chat.send while a run is active returns an
+// "already active" error.
+//
+// TODO(queueing): Once Task 2 is implemented this test should be updated —
+// the second send must no longer error but instead return a runId and emit a
+// chat.queued event.
+func TestDuplicateSendCurrentlyRejects(t *testing.T) {
+	processor := newBlockingAgent()
+	server := NewServer(ServerDeps{Agent: processor})
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+
+	conn := dialWebsocket(t, httpServer.URL+"/ws")
+	defer conn.Close()
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "reg-1",
+		Method: "chat.send",
+		Params: json.RawMessage(`{"session":"reg","message":"first"}`),
+	})
+	first := readFrame(t, conn)
+	if !strings.Contains(string(first.Response.Result), "runId") {
+		t.Fatalf("expected runId in first response, got %#v", first)
+	}
+
+	writeFrame(t, conn, RequestFrame{
+		ID:     "reg-2",
+		Method: "chat.send",
+		Params: json.RawMessage(`{"session":"reg","message":"second"}`),
+	})
+	second := readFrame(t, conn)
+	// CURRENT BEHAVIOR — will change to queue after Task 2.
+	if second.Response.Error == nil || !strings.Contains(second.Response.Error.Message, "already active") {
+		t.Fatalf("REGRESSION: expected 'already active' error (to be replaced by queueing), got %#v", second)
+	}
+
+	processor.finish("reg", "done")
+	readUntilEvent(t, conn, "chat.done")
+}
+
 func TestGatewayConcurrency(t *testing.T) {
 	processor := newBlockingAgent()
 	server := NewServer(ServerDeps{Agent: processor})
