@@ -249,6 +249,9 @@ func (m *MessagesModel) ToggleToolExpand(index int) {
 // ToggleVerbose switches between collapsed and per-tool rendering.
 func (m *MessagesModel) ToggleVerbose() {
 	m.verbose = !m.verbose
+	m.clearSelection() // selection points become invalid after content change
+	m.messageBody = "" // force full re-render since tool blocks change
+	m.cachedPrefixRendered = ""
 	m.sync(m.viewport.AtBottom())
 }
 
@@ -641,6 +644,13 @@ func highlightRenderedTranscript(rendered string, offsets []int, start, end sele
 	if len(offsets) != len(lines) {
 		offsets = computedOffsets
 	}
+	// Clamp selection to actual line count.
+	if start.line >= len(lines) {
+		return rendered
+	}
+	if end.line >= len(lines) {
+		end.line = len(lines) - 1
+	}
 
 	width := 0
 	for _, line := range lines {
@@ -737,6 +747,9 @@ func (m *MessagesModel) highlightViewportOnly(rendered string, plainLines []stri
 		}
 	} else {
 		regionEnd = len(rendered)
+	}
+	if regionStart >= regionEnd || regionStart >= len(rendered) {
+		return highlightRenderedTranscript(rendered, offsets, start, end)
 	}
 	regionRendered := rendered[regionStart:regionEnd]
 

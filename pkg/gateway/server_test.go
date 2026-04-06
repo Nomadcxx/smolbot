@@ -345,7 +345,7 @@ func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
 		{
 			SessionKey:       "s1",
 			ProviderID:       "ollama",
-			ModelName:        "llama3.2",
+			ModelName:        "ollama/llama3.2",
 			RequestType:      "chat",
 			PromptTokens:     12,
 			CompletionTokens: 8,
@@ -357,7 +357,7 @@ func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
 		{
 			SessionKey:       "s1",
 			ProviderID:       "ollama",
-			ModelName:        "llama3.2",
+			ModelName:        "ollama/llama3.2",
 			RequestType:      "chat",
 			PromptTokens:     18,
 			CompletionTokens: 12,
@@ -369,7 +369,7 @@ func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
 		{
 			SessionKey:       "s2",
 			ProviderID:       "ollama",
-			ModelName:        "llama3.2",
+			ModelName:        "ollama/llama3.2",
 			RequestType:      "chat",
 			PromptTokens:     24,
 			CompletionTokens: 16,
@@ -440,8 +440,8 @@ func TestServerStatusIncludesPersistedUsageSummary(t *testing.T) {
 	if decoded.PersistedUsage.ProviderID != "ollama" {
 		t.Fatalf("providerId = %q, want ollama", decoded.PersistedUsage.ProviderID)
 	}
-	if decoded.PersistedUsage.ModelName != "llama3.2" {
-		t.Fatalf("modelName = %q, want llama3.2", decoded.PersistedUsage.ModelName)
+	if decoded.PersistedUsage.ModelName != "ollama/llama3.2" {
+		t.Fatalf("modelName = %q, want ollama/llama3.2", decoded.PersistedUsage.ModelName)
 	}
 	if decoded.PersistedUsage.SessionTokens != 50 || decoded.PersistedUsage.TodayTokens != 50 || decoded.PersistedUsage.WeeklyTokens != 90 {
 		t.Fatalf("unexpected persisted usage summary: %#v", decoded.PersistedUsage)

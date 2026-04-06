@@ -971,9 +971,6 @@ func normalizeOllamaModelID(model string) string {
 }
 
 func statusSummaryModel(providerID, model string) string {
-	if providerID == "ollama" {
-		return normalizeOllamaModelID(model)
-	}
 	return model
 }
 
