@@ -174,6 +174,7 @@ type Model struct {
 	mainWidth            int
 	sidebarWidth         int
 	overlayHeight        int
+	cachedCompactView    string // compact sidebar output cached in recalcLayout
 	headerWidth          int
 	statusWidth          int
 	footerWidth          int
@@ -1423,13 +1424,11 @@ func (m Model) View() tea.View {
 
 	content := main
 	if m.compactMode && m.detailsOpen && m.width >= 80 {
-		overlaySidebar := m.sidebar
-		overlaySidebar.SetSize(mainWidth, m.height)
 		overlay := lipgloss.NewStyle().
 			Width(mainWidth).
 			Background(t.SidebarBg).
 			Foreground(t.Text).
-			Render(overlaySidebar.CompactView())
+			Render(m.cachedCompactView)
 		content = lipgloss.JoinVertical(lipgloss.Left, overlay, main)
 	} else if m.shouldShowSidebar() {
 		mainWithFooter := lipgloss.NewStyle().
@@ -1782,7 +1781,8 @@ func (m *Model) recalcLayout() {
 		if m.detailsOpen && m.width >= 80 {
 			overlaySidebar := m.sidebar
 			overlaySidebar.SetSize(m.mainWidth, m.height-1)
-			m.overlayHeight = lipgloss.Height(overlaySidebar.CompactView())
+			m.cachedCompactView = overlaySidebar.CompactView()
+			m.overlayHeight = lipgloss.Height(m.cachedCompactView)
 		}
 	} else if m.sidebarVisible && m.width >= 120 {
 		m.sidebarWidth = sidebarcmp.DefaultWidth

@@ -296,6 +296,9 @@ func (m *MessagesModel) HandleMouseDrag(x, y int) bool {
 	if !ok {
 		return false
 	}
+	if point.line == m.selection.focus.line && point.col == m.selection.focus.col {
+		return false
+	}
 	m.selection.focus = point
 	m.selectionOnly = true
 	m.dirty = true
@@ -407,6 +410,7 @@ func (m *MessagesModel) InvalidateTheme() {
 	m.cache = nil
 	m.messageBody = ""
 	m.dirty = true
+	clearRoleStyleCache()
 }
 
 func (m MessagesModel) LastAssistantContent() string {
@@ -448,7 +452,7 @@ func (m *MessagesModel) sync(follow bool) {
 		m.selectionOnly = false
 		if m.selection.active && len(m.plainLines) > 0 {
 			start, end := m.normalizedSelection()
-			highlighted := m.highlightViewportOnly(m.rendered, m.plainOffsets, start, end)
+			highlighted := m.highlightViewportOnly(m.rendered, m.plainLines, m.plainOffsets, start, end)
 			if highlighted != m.rendered {
 				m.viewport.SetContent(highlighted)
 				// Mark rendered as highlighted so the full path detects
@@ -528,7 +532,7 @@ func (m *MessagesModel) renderTranscript() (string, []string, []int) {
 	lines, offsets := m.visibleTranscriptLinesCached(rendered, prefix)
 	if m.selection.active && len(lines) > 0 {
 		start, end := m.normalizedSelection()
-		rendered = m.highlightViewportOnly(rendered, offsets, start, end)
+		rendered = m.highlightViewportOnly(rendered, lines, offsets, start, end)
 		lines, offsets = visibleTranscriptLines(rendered)
 	}
 	return rendered, lines, offsets
@@ -677,7 +681,7 @@ func highlightRenderedTranscript(rendered string, offsets []int, start, end sele
 
 // highlightViewportOnly limits the expensive ScreenBuffer allocation to lines
 // visible in the viewport (± small margin) instead of the full transcript.
-func (m *MessagesModel) highlightViewportOnly(rendered string, offsets []int, start, end selectionPoint) string {
+func (m *MessagesModel) highlightViewportOnly(rendered string, plainLines []string, offsets []int, start, end selectionPoint) string {
 	yOff := m.viewport.YOffset()
 	vHeight := m.viewport.Height()
 	margin := 5 // small margin for partial lines
@@ -689,8 +693,8 @@ func (m *MessagesModel) highlightViewportOnly(rendered string, offsets []int, st
 		return rendered
 	}
 
-	// Fall through to full highlight if viewport covers entire content.
-	lines, computedOffsets := visibleTranscriptLines(rendered)
+	// Reuse pre-computed lines instead of re-splitting.
+	lines := plainLines
 	if len(lines) == 0 {
 		return rendered
 	}
@@ -701,25 +705,35 @@ func (m *MessagesModel) highlightViewportOnly(rendered string, offsets []int, st
 	// Clamp to actual line count.
 	visEnd = min(visEnd, len(lines))
 	if len(offsets) != len(lines) {
-		offsets = computedOffsets
+		// Fallback: recompute offsets if mismatch.
+		_, offsets = visibleTranscriptLines(rendered)
 	}
 
 	// Build ScreenBuffer for only the visible region.
 	regionLines := lines[visStart:visEnd]
 	width := 0
 	for _, line := range regionLines {
-		width = max(width, lipgloss.Width(line))
+		if w := len([]rune(line)); w > width {
+			width = w
+		}
 	}
 	if width == 0 {
 		return rendered
 	}
 
-	// Extract the rendered substring for just the visible lines.
-	rawLines := strings.Split(strings.ReplaceAll(rendered, "\r\n", "\n"), "\n")
-	if visEnd > len(rawLines) {
-		visEnd = len(rawLines)
+	// Extract the rendered substring for just the visible lines using offsets.
+	regionStart := offsets[visStart]
+	var regionEnd int
+	if visEnd < len(offsets) {
+		regionEnd = offsets[visEnd]
+		// Back up past the preceding newline.
+		if regionEnd > 0 && regionEnd <= len(rendered) && rendered[regionEnd-1] == '\n' {
+			regionEnd--
+		}
+	} else {
+		regionEnd = len(rendered)
 	}
-	regionRendered := strings.Join(rawLines[visStart:visEnd], "\n")
+	regionRendered := rendered[regionStart:regionEnd]
 
 	buf := uv.NewScreenBuffer(width, visEnd-visStart)
 	uv.NewStyledString(regionRendered).Draw(&buf, uv.Rect(0, 0, width, visEnd-visStart))
@@ -730,7 +744,7 @@ func (m *MessagesModel) highlightViewportOnly(rendered string, offsets []int, st
 		if localY < 0 || localY >= visEnd-visStart {
 			continue
 		}
-		lineWidth := lipgloss.Width(lines[y])
+		lineWidth := len([]rune(lines[y]))
 		colStart := 0
 		if y == start.line {
 			colStart = clampInt(start.col, 0, lineWidth)
@@ -756,22 +770,20 @@ func (m *MessagesModel) highlightViewportOnly(rendered string, offsets []int, st
 	}
 
 	// Reconstruct: pre + highlighted region + post.
-	pre := strings.Join(rawLines[:visStart], "\n")
+	pre := rendered[:regionStart]
 	highlighted := buf.Render()
 	post := ""
-	if visEnd < len(rawLines) {
-		post = strings.Join(rawLines[visEnd:], "\n")
+	if regionEnd < len(rendered) {
+		post = rendered[regionEnd:]
 	}
 
 	var b strings.Builder
 	b.Grow(len(pre) + len(highlighted) + len(post) + 4)
 	if pre != "" {
 		b.WriteString(pre)
-		b.WriteByte('\n')
 	}
 	b.WriteString(highlighted)
 	if post != "" {
-		b.WriteByte('\n')
 		b.WriteString(post)
 	}
 	return b.String()
@@ -1156,7 +1168,12 @@ func (m *MessagesModel) renderMessageBody(t *theme.Theme) string {
 	}
 	if len(m.cache) == len(m.messages)-1 && m.messageBody != "" {
 		block := m.renderCachedMessage(len(m.messages)-1, m.messages[len(m.messages)-1], t, signature)
-		m.messageBody = m.messageBody + "\n\n" + block
+		var b strings.Builder
+		b.Grow(len(m.messageBody) + 2 + len(block))
+		b.WriteString(m.messageBody)
+		b.WriteString("\n\n")
+		b.WriteString(block)
+		m.messageBody = b.String()
 		return m.messageBody
 	}
 

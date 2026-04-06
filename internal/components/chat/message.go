@@ -474,28 +474,37 @@ func renderRoleBlock(label, body string, accent color.Color, width int) string {
 		accent = t.Primary
 	}
 	innerWidth := cappedWidth(width)
-	badge := lipgloss.NewStyle().
-		Background(accent).
-		Foreground(t.Background).
-		Bold(true).
-		Padding(0, 1).
-		Render(label)
 
-	header := lipgloss.NewStyle().
-		Background(subtleWash(accent)).
-		Width(innerWidth).
-		Padding(0, 1).
-		Render(badge)
-	contentBody := lipgloss.NewStyle().
-		Foreground(t.Text).
-		Width(innerWidth).
-		Padding(0, 1).
-		Render(body)
+	// Get or create cached styles for this accent color.
+	accentKey := colorHex(accent)
+	rs, ok := roleStyleCache[accentKey]
+	if !ok || rs.themeName != t.Name {
+		rs = &roleStyles{
+			badgeStyle: lipgloss.NewStyle().
+				Background(accent).
+				Foreground(t.Background).
+				Bold(true).
+				Padding(0, 1),
+			headerStyle: lipgloss.NewStyle().
+				Background(subtleWash(accent)).
+				Padding(0, 1),
+			contentStyle: lipgloss.NewStyle().
+				Foreground(t.Text).
+				Padding(0, 1),
+			borderStyle: lipgloss.NewStyle().
+				Border(lipgloss.ThickBorder(), false, false, false, true).
+				BorderForeground(accent).
+				Padding(0, 0),
+			themeName: t.Name,
+		}
+		roleStyleCache[accentKey] = rs
+	}
+
+	badge := rs.badgeStyle.Render(label)
+	header := rs.headerStyle.Width(innerWidth).Render(badge)
+	contentBody := rs.contentStyle.Width(innerWidth).Render(body)
 	content := lipgloss.JoinVertical(lipgloss.Left, header, contentBody)
-	style := lipgloss.NewStyle().
-		Border(lipgloss.ThickBorder(), false, false, false, true).
-		BorderForeground(accent).
-		Padding(0, 0)
+	style := rs.borderStyle
 	if width > 4 {
 		style = style.Width(width - 2)
 	}
@@ -509,6 +518,9 @@ func subtleWash(accent color.Color) color.Color {
 		}
 		return lipgloss.Color("#111111")
 	}
+	if cached, ok := subtleWashCache[accent]; ok {
+		return cached
+	}
 	hex := colorHex(accent)
 	if len(hex) != 7 || hex[0] != '#' {
 		if t := theme.Current(); t != nil {
@@ -519,10 +531,32 @@ func subtleWash(accent color.Color) color.Color {
 	r, _ := strconv.ParseInt(hex[1:3], 16, 64)
 	g, _ := strconv.ParseInt(hex[3:5], 16, 64)
 	b, _ := strconv.ParseInt(hex[5:7], 16, 64)
-	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", int(r)/5, int(g)/5, int(b)/5))
+	result := lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", int(r)/5, int(g)/5, int(b)/5))
+	subtleWashCache[accent] = result
+	return result
 }
 
 var colorHexCache = make(map[color.Color]string)
+
+// subtleWashCache avoids repeated hex parsing + color math per render.
+var subtleWashCache = make(map[color.Color]color.Color)
+
+// roleStyleCache caches pre-built lipgloss styles for renderRoleBlock.
+// Key: colorHex(accent). Invalidated on theme change via clearRoleStyleCache().
+type roleStyles struct {
+	badgeStyle   lipgloss.Style
+	headerStyle  lipgloss.Style
+	contentStyle lipgloss.Style
+	borderStyle  lipgloss.Style
+	themeName    string
+}
+
+var roleStyleCache = make(map[string]*roleStyles)
+
+func clearRoleStyleCache() {
+	roleStyleCache = make(map[string]*roleStyles)
+	subtleWashCache = make(map[color.Color]color.Color)
+}
 
 func colorHex(value color.Color) string {
 	if hex, ok := colorHexCache[value]; ok {
@@ -543,18 +577,34 @@ func renderThinkingBlock(body string, dur time.Duration, accent color.Color, wid
 		accent = t.Primary
 	}
 	innerWidth := cappedWidth(width)
-	badge := lipgloss.NewStyle().
-		Background(accent).
-		Foreground(t.Background).
-		Bold(true).
-		Padding(0, 1).
-		Render("THINKING")
 
-	header := lipgloss.NewStyle().
-		Background(subtleWash(accent)).
-		Width(innerWidth).
-		Padding(0, 1).
-		Render(badge)
+	accentKey := colorHex(accent)
+	rs, ok := roleStyleCache[accentKey]
+	if !ok || rs.themeName != t.Name {
+		// Will be populated by renderRoleBlock; create minimal entry.
+		rs = &roleStyles{
+			badgeStyle: lipgloss.NewStyle().
+				Background(accent).
+				Foreground(t.Background).
+				Bold(true).
+				Padding(0, 1),
+			headerStyle: lipgloss.NewStyle().
+				Background(subtleWash(accent)).
+				Padding(0, 1),
+			contentStyle: lipgloss.NewStyle().
+				Foreground(t.Text).
+				Padding(0, 1),
+			borderStyle: lipgloss.NewStyle().
+				Border(lipgloss.ThickBorder(), false, false, false, true).
+				BorderForeground(accent).
+				Padding(0, 0),
+			themeName: t.Name,
+		}
+		roleStyleCache[accentKey] = rs
+	}
+
+	badge := rs.badgeStyle.Render("THINKING")
+	header := rs.headerStyle.Width(innerWidth).Render(badge)
 
 	bodyLines := strings.Split(body, "\n")
 	truncHint := ""
@@ -564,11 +614,7 @@ func renderThinkingBlock(body string, dur time.Duration, accent color.Color, wid
 		truncHint = fmt.Sprintf("… (%d lines hidden)", hidden)
 	}
 
-	contentBody := lipgloss.NewStyle().
-		Foreground(t.Text).
-		Width(innerWidth).
-		Padding(0, 1).
-		Render(body)
+	contentBody := rs.contentStyle.Width(innerWidth).Render(body)
 
 	var rows []string
 	rows = append(rows, header, contentBody)
@@ -583,20 +629,15 @@ func renderThinkingBlock(body string, dur time.Duration, accent color.Color, wid
 	}
 
 	if dur > 0 {
-		footer := lipgloss.NewStyle().
-			Background(subtleWash(accent)).
+		footer := rs.headerStyle.
 			Foreground(t.TextMuted).
 			Width(innerWidth).
-			Padding(0, 1).
 			Render("Thought for " + formatDuration(dur))
 		rows = append(rows, footer)
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	style := lipgloss.NewStyle().
-		Border(lipgloss.ThickBorder(), false, false, false, true).
-		BorderForeground(accent).
-		Padding(0, 0)
+	style := rs.borderStyle
 	if width > 4 {
 		style = style.Width(width - 2)
 	}
