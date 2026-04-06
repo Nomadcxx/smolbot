@@ -54,6 +54,15 @@ type MessagesModel struct {
 	plainLines    []string
 	plainOffsets  []int
 	selection     selectionRange
+
+	// Phase 2 perf: cached plainLines for the stable message prefix.
+	cachedPrefixPlainLines   []string
+	cachedPrefixPlainOffsets []int
+	cachedPrefixRendered     string // the rendered messageBody when cache was built
+
+	// Phase 2 perf: cached rendered progress to avoid re-glamour-rendering unchanged content.
+	cachedProgressSource   string
+	cachedProgressRendered string
 }
 
 type selectionPoint struct {
@@ -404,8 +413,16 @@ func (m *MessagesModel) HandleKey(key string) {
 
 func (m *MessagesModel) sync(follow bool) {
 	offset := m.viewport.YOffset()
-	m.rendered, m.plainLines, m.plainOffsets = m.renderTranscript()
-	m.viewport.SetContent(m.rendered)
+	rendered, plainLines, plainOffsets := m.renderTranscript()
+
+	// Skip expensive viewport.SetContent if the rendered output hasn't changed.
+	if rendered != m.rendered {
+		m.rendered = rendered
+		m.viewport.SetContent(rendered)
+	}
+	m.plainLines = plainLines
+	m.plainOffsets = plainOffsets
+
 	if follow {
 		m.viewport.GotoBottom()
 	} else {
@@ -420,27 +437,46 @@ func (m *MessagesModel) renderTranscript() (string, []string, []int) {
 		return "", nil, nil
 	}
 
-	blocks := make([]string, 0, len(m.messages)+len(m.tools)+2)
-	signature := transcriptRenderSignature()
-	for i, msg := range m.messages {
-		blocks = append(blocks, m.renderCachedMessage(i, msg, t, signature))
-	}
+	// Use cached messageBody for the stable prefix of completed messages.
+	prefix := m.renderMessageBody(t)
+
+	// Build only the streaming tail (progress, thinking, tools).
+	tail := make([]string, 0, 4)
 	if m.progress != "" {
-		blocks = append(blocks, renderRoleBlock("ASSISTANT", m.renderAssistant(m.progress), t.TranscriptStreaming, m.width))
+		tail = append(tail, renderRoleBlock("ASSISTANT", m.renderAssistantCached(m.progress), t.TranscriptStreaming, m.width))
 	}
 	if m.thinking != "" {
 		duration := m.thinkingDuration()
-		blocks = append(blocks, renderThinkingBlock(m.thinking, duration, t.TranscriptThinking, m.width))
+		tail = append(tail, renderThinkingBlock(m.thinking, duration, t.TranscriptThinking, m.width))
 	}
 	for _, block := range m.renderToolBlocks(t) {
-		blocks = append(blocks, block)
+		tail = append(tail, block)
 	}
 
-	rendered := strings.Join(blocks, "\n\n")
-	lines, offsets := visibleTranscriptLines(rendered)
+	// Join prefix + tail efficiently.
+	var rendered string
+	switch {
+	case prefix == "" && len(tail) == 0:
+		rendered = ""
+	case prefix == "":
+		rendered = strings.Join(tail, "\n\n")
+	case len(tail) == 0:
+		rendered = prefix
+	default:
+		var b strings.Builder
+		b.Grow(len(prefix) + 4 + len(tail[0])*len(tail))
+		b.WriteString(prefix)
+		for _, block := range tail {
+			b.WriteString("\n\n")
+			b.WriteString(block)
+		}
+		rendered = b.String()
+	}
+
+	lines, offsets := m.visibleTranscriptLinesCached(rendered, prefix)
 	if m.selection.active && len(lines) > 0 {
 		start, end := m.normalizedSelection()
-		rendered = highlightRenderedTranscript(rendered, offsets, start, end)
+		rendered = m.highlightViewportOnly(rendered, offsets, start, end)
 		lines, offsets = visibleTranscriptLines(rendered)
 	}
 	return rendered, lines, offsets
@@ -494,6 +530,43 @@ func visibleTranscriptLines(rendered string) ([]string, []int) {
 	return lines, offsets
 }
 
+// visibleTranscriptLinesCached reuses cached plainLines for the stable message
+// prefix portion, only computing ANSI stripping for new tail lines.
+func (m *MessagesModel) visibleTranscriptLinesCached(rendered, stablePrefix string) ([]string, []int) {
+	if rendered == "" {
+		return nil, nil
+	}
+
+	// If the prefix hasn't changed and we have a cache, reuse prefix lines.
+	if stablePrefix != "" && stablePrefix == m.cachedPrefixRendered &&
+		len(m.cachedPrefixPlainLines) > 0 &&
+		strings.HasPrefix(rendered, stablePrefix) {
+		// Only compute lines for the tail portion.
+		tailStr := rendered[len(stablePrefix):]
+		if tailStr == "" {
+			return m.cachedPrefixPlainLines, m.cachedPrefixPlainOffsets
+		}
+		tailLines, tailOffsets := visibleTranscriptLines(tailStr)
+		lines := make([]string, 0, len(m.cachedPrefixPlainLines)+len(tailLines))
+		offsets := make([]int, 0, len(m.cachedPrefixPlainOffsets)+len(tailOffsets))
+		lines = append(lines, m.cachedPrefixPlainLines...)
+		offsets = append(offsets, m.cachedPrefixPlainOffsets...)
+		lines = append(lines, tailLines...)
+		offsets = append(offsets, tailOffsets...)
+		return lines, offsets
+	}
+
+	// Full recompute — update the prefix cache.
+	allLines, allOffsets := visibleTranscriptLines(rendered)
+	if stablePrefix != "" {
+		prefixLines, prefixOffsets := visibleTranscriptLines(stablePrefix)
+		m.cachedPrefixPlainLines = prefixLines
+		m.cachedPrefixPlainOffsets = prefixOffsets
+		m.cachedPrefixRendered = stablePrefix
+	}
+	return allLines, allOffsets
+}
+
 func highlightRenderedTranscript(rendered string, offsets []int, start, end selectionPoint) string {
 	lines, computedOffsets := visibleTranscriptLines(rendered)
 	if len(lines) == 0 {
@@ -543,6 +616,108 @@ func highlightRenderedTranscript(rendered string, offsets []int, start, end sele
 		}
 	}
 	return buf.Render()
+}
+
+// highlightViewportOnly limits the expensive ScreenBuffer allocation to lines
+// visible in the viewport (± small margin) instead of the full transcript.
+func (m *MessagesModel) highlightViewportOnly(rendered string, offsets []int, start, end selectionPoint) string {
+	yOff := m.viewport.YOffset()
+	vHeight := m.viewport.Height()
+	margin := 5 // small margin for partial lines
+	visStart := max(0, yOff-margin)
+	visEnd := yOff + vHeight + margin
+
+	// If selection is entirely outside viewport, skip highlighting entirely.
+	if start.line > visEnd || end.line < visStart {
+		return rendered
+	}
+
+	// Fall through to full highlight if viewport covers entire content.
+	lines, computedOffsets := visibleTranscriptLines(rendered)
+	if len(lines) == 0 {
+		return rendered
+	}
+	if visEnd >= len(lines) && visStart <= 0 {
+		return highlightRenderedTranscript(rendered, offsets, start, end)
+	}
+
+	// Clamp to actual line count.
+	visEnd = min(visEnd, len(lines))
+	if len(offsets) != len(lines) {
+		offsets = computedOffsets
+	}
+
+	// Build ScreenBuffer for only the visible region.
+	regionLines := lines[visStart:visEnd]
+	width := 0
+	for _, line := range regionLines {
+		width = max(width, lipgloss.Width(line))
+	}
+	if width == 0 {
+		return rendered
+	}
+
+	// Extract the rendered substring for just the visible lines.
+	rawLines := strings.Split(strings.ReplaceAll(rendered, "\r\n", "\n"), "\n")
+	if visEnd > len(rawLines) {
+		visEnd = len(rawLines)
+	}
+	regionRendered := strings.Join(rawLines[visStart:visEnd], "\n")
+
+	buf := uv.NewScreenBuffer(width, visEnd-visStart)
+	uv.NewStyledString(regionRendered).Draw(&buf, uv.Rect(0, 0, width, visEnd-visStart))
+
+	// Apply highlighting with adjusted coordinates.
+	for y := max(start.line, visStart); y <= min(end.line, visEnd-1); y++ {
+		localY := y - visStart
+		if localY < 0 || localY >= visEnd-visStart {
+			continue
+		}
+		lineWidth := lipgloss.Width(lines[y])
+		colStart := 0
+		if y == start.line {
+			colStart = clampInt(start.col, 0, lineWidth)
+		}
+		colEnd := lineWidth
+		if y == end.line {
+			colEnd = clampInt(end.col, 0, lineWidth)
+		}
+		if colStart >= colEnd {
+			continue
+		}
+		lineOffset := 0
+		if y < len(offsets) {
+			lineOffset = offsets[y]
+		}
+		for x := colStart; x < colEnd; x++ {
+			cell := buf.Line(localY).At(x + lineOffset)
+			if cell == nil || cell.Content == "" || cell.Content == " " {
+				continue
+			}
+			applySelectionHighlight(cell)
+		}
+	}
+
+	// Reconstruct: pre + highlighted region + post.
+	pre := strings.Join(rawLines[:visStart], "\n")
+	highlighted := buf.Render()
+	post := ""
+	if visEnd < len(rawLines) {
+		post = strings.Join(rawLines[visEnd:], "\n")
+	}
+
+	var b strings.Builder
+	b.Grow(len(pre) + len(highlighted) + len(post) + 4)
+	if pre != "" {
+		b.WriteString(pre)
+		b.WriteByte('\n')
+	}
+	b.WriteString(highlighted)
+	if post != "" {
+		b.WriteByte('\n')
+		b.WriteString(post)
+	}
+	return b.String()
 }
 
 func transcriptLineOffset(line string) int {
@@ -993,6 +1168,18 @@ func (m *MessagesModel) renderAssistant(content string) string {
 		return content
 	}
 	return strings.TrimSpace(rendered)
+}
+
+// renderAssistantCached returns glamour-rendered content, reusing the cached
+// result when the source text hasn't changed (avoids re-parsing on every frame).
+func (m *MessagesModel) renderAssistantCached(content string) string {
+	if content == m.cachedProgressSource && m.cachedProgressRendered != "" {
+		return m.cachedProgressRendered
+	}
+	rendered := m.renderAssistant(content)
+	m.cachedProgressSource = content
+	m.cachedProgressRendered = rendered
+	return rendered
 }
 
 func (m *MessagesModel) markdownRenderer() *glamour.TermRenderer {
