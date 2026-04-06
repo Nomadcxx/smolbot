@@ -167,6 +167,7 @@ type Model struct {
 	pendingTools         []pendingToolEvent
 	toolFlushPending     bool
 	toolFlushSeq         int
+	eventListenerActive  bool // guards against duplicate waitForEventCmd goroutines
 	sidebarVisible       bool
 	compactMode          bool
 	detailsOpen          bool
@@ -236,6 +237,14 @@ func (m Model) connectCmd() tea.Cmd {
 		}
 		return ConnectedMsg{Hello: hello}
 	}
+}
+
+func (m *Model) guardedWaitForEventCmd() tea.Cmd {
+	if m.eventListenerActive {
+		return nil
+	}
+	m.eventListenerActive = true
+	return m.waitForEventCmd()
 }
 
 func (m Model) waitForEventCmd() tea.Cmd {
@@ -809,9 +818,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.reconnectWait < 8*time.Second {
 			m.reconnectWait *= 2
 		}
-		return m, tea.Batch(m.reconnectCmd(m.reconnectWait), m.waitForEventCmd())
+		return m, tea.Batch(m.reconnectCmd(m.reconnectWait), m.guardedWaitForEventCmd())
 	case EventMsg:
-		cmds = append(cmds, m.waitForEventCmd())
+		m.eventListenerActive = false
+		cmds = append(cmds, m.guardedWaitForEventCmd())
 		var mapped tea.Msg
 		switch msg.Event.Event {
 		case "chat.done":
@@ -1041,11 +1051,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.MouseWheelMsg:
 		if m.dialog == nil {
+			const scrollDelta = 3
 			switch msg.Button {
 			case tea.MouseWheelUp:
-				m.messages.HandleKey("pgup")
+				m.messages.ScrollBy(-scrollDelta)
 			case tea.MouseWheelDown:
-				m.messages.HandleKey("pgdown")
+				m.messages.ScrollBy(scrollDelta)
 			}
 		}
 		return m, nil

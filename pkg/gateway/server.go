@@ -1139,6 +1139,15 @@ func (s *Server) executeRun(ctx context.Context, state *runState, req agent.Requ
 	delete(s.sessionRuns, state.sessionKey)
 	delete(s.wsTasks[state.owner.conn], state.runID)
 	s.completedDelivery[state.runID] = delivered
+	// Prune oldest entries when map exceeds cap to prevent unbounded growth.
+	if len(s.completedDelivery) > 1000 {
+		for k := range s.completedDelivery {
+			delete(s.completedDelivery, k)
+			if len(s.completedDelivery) <= 500 {
+				break
+			}
+		}
+	}
 	if lastUsage.TotalTokens > 0 {
 		s.lastUsage = lastUsage
 	}

@@ -9,6 +9,13 @@ import (
 	"github.com/Nomadcxx/smolbot/internal/theme"
 )
 
+// cachedHomeDir is resolved once at init to avoid a syscall on every frame.
+var cachedHomeDir string
+
+func init() {
+	cachedHomeDir, _ = os.UserHomeDir()
+}
+
 type SessionSection struct {
 	sessionKey string
 	cwd        string
@@ -63,9 +70,8 @@ func prettyPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	home, err := os.UserHomeDir()
-	if err == nil && home != "" && strings.HasPrefix(path, home) {
-		return "~" + strings.TrimPrefix(path, home)
+	if cachedHomeDir != "" && strings.HasPrefix(path, cachedHomeDir) {
+		return "~" + strings.TrimPrefix(path, cachedHomeDir)
 	}
 	return path
 }

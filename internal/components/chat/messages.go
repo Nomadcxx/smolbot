@@ -424,6 +424,11 @@ func (m *MessagesModel) HandleKey(key string) {
 	}
 }
 
+// ScrollBy scrolls the viewport by the given number of lines (positive = down).
+func (m *MessagesModel) ScrollBy(delta int) {
+	m.viewport.SetYOffset(m.viewport.YOffset() + delta)
+}
+
 func (m *MessagesModel) sync(follow bool) {
 	offset := m.viewport.YOffset()
 	rendered, plainLines, plainOffsets := m.renderTranscript()
