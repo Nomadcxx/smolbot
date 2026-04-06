@@ -26,6 +26,14 @@ type Model struct {
 	channels ChannelsSection
 	mcps     MCPsSection
 	cron     CronSection
+
+	// Cached sidebar output to avoid rebuilding every frame.
+	cachedView    string
+	cacheDirty    bool
+	cacheWidth    int
+	cacheHeight   int
+	cacheBg       color.Color
+	cacheThemeSig string
 }
 
 func New() Model {
@@ -42,6 +50,7 @@ func (m *Model) SetSize(width, height int) {
 	if height > 0 {
 		m.height = height
 	}
+	m.cacheDirty = true
 }
 
 func (m Model) Width() int {
@@ -57,57 +66,81 @@ func (m Model) Visible() bool {
 
 func (m *Model) Toggle() {
 	m.visible = !m.visible
+	m.cacheDirty = true
 }
 
 func (m *Model) SetVisible(v bool) {
 	m.visible = v
+	m.cacheDirty = true
 }
 
 func (m *Model) SetSidebarBg(bg color.Color) {
 	m.sidebarBg = bg
+	m.cacheDirty = true
 }
 
 func (m *Model) SetSession(session string) {
 	m.session.sessionKey = session
+	m.cacheDirty = true
 }
 
 func (m *Model) SetCWD(cwd string) {
 	m.session.cwd = cwd
+	m.cacheDirty = true
 }
 
 func (m *Model) SetModel(model string) {
 	m.session.model = model
+	m.cacheDirty = true
 }
 
 func (m *Model) SetUsage(usage client.UsageInfo) {
 	m.context.usage = usage
+	m.cacheDirty = true
 }
 
 func (m *Model) SetPersistedUsage(summary *client.UsageSummary) {
 	m.usage.summary = summary
+	m.cacheDirty = true
 }
 
 func (m *Model) SetCompression(info *client.CompressionInfo) {
 	m.context.compression = info
+	m.cacheDirty = true
 }
 
 func (m *Model) SetChannels(channels []ChannelEntry) {
 	m.channels.channels = append([]ChannelEntry(nil), channels...)
+	m.cacheDirty = true
 }
 
 func (m *Model) SetMCPs(servers []MCPEntry) {
 	m.mcps.servers = append([]MCPEntry(nil), servers...)
+	m.cacheDirty = true
 }
 
 func (m *Model) SetCronJobs(jobs []client.CronJob) {
 	m.cron.jobs = append([]client.CronJob(nil), jobs...)
+	m.cacheDirty = true
 }
 
-func (m Model) View() string {
+func (m *Model) View() string {
 	if !m.visible {
 		return ""
 	}
+
+	// Return cached view if nothing changed.
 	t := theme.Current()
+	themeSig := ""
+	if t != nil {
+		themeSig = t.Name
+	}
+	if !m.cacheDirty && m.cachedView != "" &&
+		m.cacheWidth == m.width && m.cacheHeight == m.height &&
+		m.cacheBg == m.sidebarBg && m.cacheThemeSig == themeSig {
+		return m.cachedView
+	}
+
 	limits := m.getDynamicLimits()
 
 	// Content width accounts for left padding
@@ -144,7 +177,9 @@ func (m Model) View() string {
 		for _, block := range blocks {
 			wrapped = append(wrapped, blockStyle.Render(block))
 		}
-		return strings.Join(wrapped, "\n"+gap+"\n")
+		output := strings.Join(wrapped, "\n"+gap+"\n")
+		m.storeCache(output, themeSig)
+		return output
 	}
 
 	rendered := make([]string, 0, len(blocks))
@@ -164,7 +199,18 @@ func (m Model) View() string {
 			remaining -= 1 // gap line
 		}
 	}
-	return strings.Join(rendered, "\n"+gap+"\n")
+	output := strings.Join(rendered, "\n"+gap+"\n")
+	m.storeCache(output, themeSig)
+	return output
+}
+
+func (m *Model) storeCache(output, themeSig string) {
+	m.cachedView = output
+	m.cacheDirty = false
+	m.cacheWidth = m.width
+	m.cacheHeight = m.height
+	m.cacheBg = m.sidebarBg
+	m.cacheThemeSig = themeSig
 }
 
 func (m Model) CompactView() string {

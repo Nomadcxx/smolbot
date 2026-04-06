@@ -43,6 +43,7 @@ type MessagesModel struct {
 	viewport      viewport.Model
 	rendered      string
 	dirty         bool
+	selectionOnly bool // when true, only re-highlight (skip message rebuild)
 	renderer      *glamour.TermRenderer
 	rendererWidth int
 	rendererStyle string
@@ -119,6 +120,9 @@ func (m *MessagesModel) AppendAssistant(content string) {
 	m.progress = ""
 	m.thinking = ""
 	m.tools = nil
+	m.expandedTools = make(map[string]bool)
+	m.cachedCollapseTools = nil
+	m.toolsVersion++
 	if len(m.cache) != len(m.messages)-1 {
 		m.messageBody = ""
 	}
@@ -143,6 +147,9 @@ func (m *MessagesModel) AppendSystem(content string) {
 	m.progress = ""
 	m.thinking = ""
 	m.tools = nil // Clear stale tool output on abort/system messages
+	m.expandedTools = make(map[string]bool)
+	m.cachedCollapseTools = nil
+	m.toolsVersion++
 	if len(m.cache) != len(m.messages)-1 {
 		m.messageBody = ""
 	}
@@ -196,6 +203,9 @@ func (m *MessagesModel) ReplaceHistory(history []ChatMessage) {
 	m.thinking = ""
 	m.cache = nil
 	m.messageBody = ""
+	m.expandedTools = make(map[string]bool)
+	m.cachedCollapseTools = nil
+	m.toolsVersion++
 	m.clearSelection()
 	m.sync(true)
 }
@@ -287,6 +297,7 @@ func (m *MessagesModel) HandleMouseDrag(x, y int) bool {
 		return false
 	}
 	m.selection.focus = point
+	m.selectionOnly = true
 	m.dirty = true
 	return true
 }
@@ -431,6 +442,29 @@ func (m *MessagesModel) ScrollBy(delta int) {
 
 func (m *MessagesModel) sync(follow bool) {
 	offset := m.viewport.YOffset()
+
+	// Fast path: only selection changed, skip full transcript rebuild.
+	if m.selectionOnly && m.rendered != "" {
+		m.selectionOnly = false
+		if m.selection.active && len(m.plainLines) > 0 {
+			start, end := m.normalizedSelection()
+			highlighted := m.highlightViewportOnly(m.rendered, m.plainOffsets, start, end)
+			if highlighted != m.rendered {
+				m.viewport.SetContent(highlighted)
+				// Mark rendered as highlighted so the full path detects
+				// a change when selection is later cleared.
+				m.rendered = highlighted
+			}
+		} else {
+			// Selection cleared — restore un-highlighted content.
+			m.viewport.SetContent(m.rendered)
+		}
+		m.dirty = false
+		m.viewport.SetYOffset(offset)
+		return
+	}
+	m.selectionOnly = false
+
 	rendered, plainLines, plainOffsets := m.renderTranscript()
 
 	// Skip expensive viewport.SetContent if the rendered output hasn't changed.

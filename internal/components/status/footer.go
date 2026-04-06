@@ -33,6 +33,10 @@ type FooterModel struct {
 	toolsError        int
 	toolActivityText  string
 	toolActivityWidth int
+
+	// View cache
+	cachedView string
+	cacheDirty bool
 }
 
 func NewFooter(a *app.App) FooterModel {
@@ -46,31 +50,37 @@ func NewFooter(a *app.App) FooterModel {
 
 func (m *FooterModel) SetWidth(w int) {
 	m.width = w
+	m.cacheDirty = true
 }
 
 func (m *FooterModel) SetMetadata(value string) {
 	m.metadata = value
 	m.metadataText = strings.TrimSpace(value)
 	m.metadataWidth = lipgloss.Width(m.metadataText)
+	m.cacheDirty = true
 }
 
 func (m *FooterModel) SetModel(value string) {
 	m.modelText = "model " + footerValue(value, "connecting...")
 	m.modelWidth = lipgloss.Width(m.modelText)
+	m.cacheDirty = true
 }
 
 func (m *FooterModel) SetSession(value string) {
 	m.sessionText = "session " + footerValue(value, "none")
 	m.sessionWidth = lipgloss.Width(m.sessionText)
+	m.cacheDirty = true
 }
 
 func (m *FooterModel) SetUsage(value client.UsageInfo) {
 	m.usage = value
 	m.syncUsageLayout()
+	m.cacheDirty = true
 }
 
 func (m *FooterModel) SetCompression(info *client.CompressionInfo) {
 	m.compression = info
+	m.cacheDirty = true
 }
 
 func (m *FooterModel) SetCompacting(v bool) {
@@ -78,6 +88,7 @@ func (m *FooterModel) SetCompacting(v bool) {
 	if !v {
 		m.compactFrame = 0
 	}
+	m.cacheDirty = true
 }
 
 func (m *FooterModel) IsCompacting() bool {
@@ -86,6 +97,7 @@ func (m *FooterModel) IsCompacting() bool {
 
 func (m *FooterModel) SetCompactionFrame(frame int) {
 	m.compactFrame = frame
+	m.cacheDirty = true
 }
 
 // SetToolCounts sets all tool activity counters at once.
@@ -94,12 +106,14 @@ func (m *FooterModel) SetToolCounts(running, done, errored int) {
 	m.toolsDone = done
 	m.toolsError = errored
 	m.syncToolActivity()
+	m.cacheDirty = true
 }
 
 // IncrementToolRunning increments the running tool count.
 func (m *FooterModel) IncrementToolRunning() {
 	m.toolsRunning++
 	m.syncToolActivity()
+	m.cacheDirty = true
 }
 
 // ToolDone moves one tool from running to done.
@@ -109,6 +123,7 @@ func (m *FooterModel) ToolDone() {
 	}
 	m.toolsDone++
 	m.syncToolActivity()
+	m.cacheDirty = true
 }
 
 // ToolError moves one tool from running to error.
@@ -118,6 +133,7 @@ func (m *FooterModel) ToolError() {
 	}
 	m.toolsError++
 	m.syncToolActivity()
+	m.cacheDirty = true
 }
 
 // ResetToolCounts clears all tool counters (called at start of each turn).
@@ -127,6 +143,7 @@ func (m *FooterModel) ResetToolCounts() {
 	m.toolsError = 0
 	m.toolActivityText = ""
 	m.toolActivityWidth = 0
+	m.cacheDirty = true
 }
 
 func (m *FooterModel) syncToolActivity() {
@@ -232,6 +249,9 @@ func (m *FooterModel) View() string {
 			m.SetSession(m.app.Session)
 		}
 	}
+	if !m.cacheDirty && m.cachedView != "" {
+		return m.cachedView
+	}
 	parts := []string{m.modelText, m.sessionText}
 	leftWidth := 1 + m.modelWidth + 3 + m.sessionWidth
 	if m.metadataText != "" {
@@ -252,11 +272,11 @@ func (m *FooterModel) View() string {
 	right := m.renderUsage(t, false)
 	rightWidth := m.usageFullWidth
 	if right == "" {
-		return lipgloss.NewStyle().
+		return m.cacheFooter(lipgloss.NewStyle().
 			Width(m.width).
 			Background(t.Panel).
 			Foreground(t.TextMuted).
-			Render(left)
+			Render(left))
 	}
 
 	if m.width > 0 && leftWidth+1+rightWidth > m.width {
@@ -264,12 +284,12 @@ func (m *FooterModel) View() string {
 		rightWidth = m.usageCompactWidth
 	}
 	if m.width > 0 && rightWidth+1 >= m.width {
-		return lipgloss.NewStyle().
+		return m.cacheFooter(lipgloss.NewStyle().
 			Width(m.width).
 			Background(t.Panel).
 			Foreground(t.TextMuted).
 			Align(lipgloss.Right).
-			Render(right)
+			Render(right))
 	}
 
 	if m.width > 0 {
@@ -284,11 +304,17 @@ func (m *FooterModel) View() string {
 			gap = strings.Repeat(" ", gapWidth)
 		}
 	}
-	return lipgloss.NewStyle().
+	return m.cacheFooter(lipgloss.NewStyle().
 		Width(m.width).
 		Background(t.Panel).
 		Foreground(t.TextMuted).
-		Render(left + gap + right)
+		Render(left + gap + right))
+}
+
+func (m *FooterModel) cacheFooter(output string) string {
+	m.cachedView = output
+	m.cacheDirty = false
+	return output
 }
 
 func footerValue(value, fallback string) string {
