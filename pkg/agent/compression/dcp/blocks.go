@@ -85,6 +85,13 @@ func (s *State) firstBrokenToolPair(startIndex, endIndex int) *ToolPairState {
 }
 
 func resolveBoundaryIndex(ref string, state *State, preferStart bool) (int, bool) {
+	return resolveBoundaryIndexDepth(ref, state, preferStart, 0)
+}
+
+func resolveBoundaryIndexDepth(ref string, state *State, preferStart bool, depth int) (int, bool) {
+	if depth > maxBlockNestingDepth {
+		return 0, false
+	}
 	if idx, ok := state.MessageIDs.ByRef[ref]; ok {
 		return idx, true
 	}
@@ -100,7 +107,7 @@ func resolveBoundaryIndex(ref string, state *State, preferStart bool) (int, bool
 		return 0, false
 	}
 	if preferStart {
-		return resolveBoundaryIndex(block.StartRef, state, true)
+		return resolveBoundaryIndexDepth(block.StartRef, state, true, depth+1)
 	}
-	return resolveBoundaryIndex(block.EndRef, state, false)
+	return resolveBoundaryIndexDepth(block.EndRef, state, false, depth+1)
 }

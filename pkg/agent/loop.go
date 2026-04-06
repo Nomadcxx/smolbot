@@ -398,10 +398,12 @@ func (a *AgentLoop) handleSlashCommand(ctx context.Context, req Request) (string
 				log.Printf("[agent] memory consolidation failed on /new for session %s: %v", req.SessionKey, err)
 			}
 		}
-		if dcpStateManager, err := a.ensureDCPStateManager(); err != nil {
-			log.Printf("[agent] dcp state manager init failed on /new for session %s: %v", req.SessionKey, err)
-		} else if err := dcpStateManager.Delete(req.SessionKey); err != nil {
-			return "", err
+		if a.config.Agents.Defaults.Compression.Engine == "dcp" {
+			if dcpStateManager, err := a.ensureDCPStateManager(); err != nil {
+				log.Printf("[agent] dcp state manager init failed on /new for session %s: %v", req.SessionKey, err)
+			} else if err := dcpStateManager.Delete(req.SessionKey); err != nil {
+				return "", err
+			}
 		}
 		if err := a.sessions.ClearSession(req.SessionKey); err != nil {
 			return "", err

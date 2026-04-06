@@ -21,6 +21,9 @@ func Transform(messages []provider.Message, state *State, cfg Config, tok *token
 	if state == nil {
 		state = NewState("")
 	}
+	if err := cfg.Validate(); err != nil {
+		cfg = DefaultConfig()
+	}
 	out := deepCopyMessages(messages)
 	state.CurrentTurn = countUserTurns(out)
 	state.RequestCount++

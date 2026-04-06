@@ -14,7 +14,15 @@ func InjectNudges(messages []provider.Message, state *State, cfg Config, tok *to
 		return 0
 	}
 
-	target := len(messages) - 1
+	// Find last user message to attach nudge — avoids injecting into
+	// assistant tool-call messages which some providers reject.
+	target := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			target = i
+			break
+		}
+	}
 	if target < 0 {
 		return 0
 	}

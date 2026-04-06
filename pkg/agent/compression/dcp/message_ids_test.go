@@ -77,3 +77,24 @@ func TestStripDCPTags(t *testing.T) {
 		t.Fatalf("StripDCPTags() = %q", got)
 	}
 }
+
+func TestStripMessages_TagOnlyContent(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: "user", Content: "real content <dcp-id>PROTECTED</dcp-id>"},
+		{Role: "assistant", Content: "<dcp-id>m0001</dcp-id>"},
+		{Role: "user", Content: nil},
+	}
+	stripped := StripMessages(msgs)
+	if got := stripped[0].StringContent(); strings.Contains(got, "dcp-id") {
+		t.Fatalf("msg 0 still has DCP tag: %q", got)
+	}
+	if got := stripped[0].StringContent(); got != "real content" {
+		t.Fatalf("msg 0 content = %q, want %q", got, "real content")
+	}
+	if got := stripped[1].StringContent(); strings.Contains(got, "dcp-id") {
+		t.Fatalf("msg 1 tag-only content leaked: %q", got)
+	}
+	if stripped[2].Content != nil {
+		t.Fatalf("msg 2 nil content changed to: %v", stripped[2].Content)
+	}
+}

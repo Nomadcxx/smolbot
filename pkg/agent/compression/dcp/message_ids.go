@@ -94,11 +94,7 @@ func StripMessages(messages []provider.Message) []provider.Message {
 func stripContent(content any) any {
 	switch value := content.(type) {
 	case string:
-		stripped := StripDCPTags(value)
-		if stripped == "" && value != "" {
-			return value
-		}
-		return stripped
+		return StripDCPTags(value)
 	case []provider.ContentBlock:
 		blocks := make([]provider.ContentBlock, len(value))
 		for i, b := range value {

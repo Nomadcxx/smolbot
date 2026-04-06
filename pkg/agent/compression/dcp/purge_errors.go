@@ -9,6 +9,18 @@ import (
 const ErrorInputPlaceholder = "[input removed — failed tool call]"
 
 func PurgeErroredInputs(messages []provider.Message, currentTurn int, cfg Config) int {
+	// Build call-ID → (message index, toolcall index) map for O(1) lookup.
+	type callLoc struct{ msgIdx, tcIdx int }
+	callIndex := make(map[string]callLoc)
+	for j, msg := range messages {
+		if msg.Role != "assistant" {
+			continue
+		}
+		for k, tc := range msg.ToolCalls {
+			callIndex[tc.ID] = callLoc{j, k}
+		}
+	}
+
 	count := 0
 	for i, msg := range messages {
 		if msg.Role != "tool" || !isErrorResult(msg.StringContent()) {
@@ -21,17 +33,9 @@ func PurgeErroredInputs(messages []provider.Message, currentTurn int, cfg Config
 		if currentTurn-callTurn < cfg.PurgeErrors.TurnThreshold {
 			continue
 		}
-		for j := range messages {
-			if messages[j].Role != "assistant" {
-				continue
-			}
-			for k := range messages[j].ToolCalls {
-				if messages[j].ToolCalls[k].ID != msg.ToolCallID {
-					continue
-				}
-				messages[j].ToolCalls[k].Function.Arguments = ErrorInputPlaceholder
-				count++
-			}
+		if loc, ok := callIndex[msg.ToolCallID]; ok {
+			messages[loc.msgIdx].ToolCalls[loc.tcIdx].Function.Arguments = ErrorInputPlaceholder
+			count++
 		}
 	}
 	return count
