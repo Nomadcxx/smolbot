@@ -1272,8 +1272,8 @@ func TestClearResetsBufferedProgress(t *testing.T) {
 
 	updated, _ = got.handleSlashCommand("/clear")
 	got = updated.(Model)
-	if got.progressBuffer != "" || got.progressFlushPending {
-		t.Fatalf("expected /clear to reset buffered progress, got buffer=%q pending=%v", got.progressBuffer, got.progressFlushPending)
+	if got.progressBuffer.Len() != 0 || got.progressFlushPending {
+		t.Fatalf("expected /clear to reset buffered progress, got buffer=%q pending=%v", got.progressBuffer.String(), got.progressFlushPending)
 	}
 
 	updated, _ = got.Update(flushProgressMsg{Seq: staleSeq})
@@ -1293,8 +1293,8 @@ func TestSessionNewResetsBufferedProgress(t *testing.T) {
 
 	updated, _ = got.handleSlashCommand("/session new")
 	got = updated.(Model)
-	if got.progressBuffer != "" || got.progressFlushPending {
-		t.Fatalf("expected /session new to reset buffered progress, got buffer=%q pending=%v", got.progressBuffer, got.progressFlushPending)
+	if got.progressBuffer.Len() != 0 || got.progressFlushPending {
+		t.Fatalf("expected /session new to reset buffered progress, got buffer=%q pending=%v", got.progressBuffer.String(), got.progressFlushPending)
 	}
 
 	updated, _ = got.Update(flushProgressMsg{Seq: staleSeq})
@@ -1460,6 +1460,10 @@ func TestEventMsgUpdatesToolLifecycle(t *testing.T) {
 	updated, _ = got.Update(EventMsg{
 		Event: client.Event{Type: client.FrameEvent, Event: "chat.tool.done", Payload: donePayload, Seq: 2},
 	})
+	got = updated.(Model)
+
+	// Tool events are debounced; flush the pending batch.
+	updated, _ = got.Update(flushToolsMsg{Seq: got.toolFlushSeq})
 	got = updated.(Model)
 
 	// Collapsed mode: read_file renders as a group summary

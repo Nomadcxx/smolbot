@@ -84,8 +84,19 @@ type ClipboardCopiedMsg struct{ Text string }
 type ClipboardErrorMsg struct{ Err error }
 type flashClearMsg struct{ Seq int }
 type flushProgressMsg struct{ Seq int }
+type flushThinkingMsg struct{ Seq int }
+type flushToolsMsg struct{ Seq int }
 type clearMetadataMsg struct{}
 type spinnerTickMsg struct{}
+
+type pendingToolEvent struct {
+	ID     string
+	Name   string
+	Input  string
+	Status string
+	Output string
+	IsStart bool
+}
 
 type InterruptKeyState int
 
@@ -147,9 +158,15 @@ type Model struct {
 	usageAlertKey        string
 	flashSeq             int
 	compactionFrame      int
-	progressBuffer       string
+	progressBuffer       *strings.Builder
 	progressFlushPending bool
 	progressFlushSeq     int
+	thinkingBuffer       *strings.Builder
+	thinkingFlushPending bool
+	thinkingFlushSeq     int
+	pendingTools         []pendingToolEvent
+	toolFlushPending     bool
+	toolFlushSeq         int
 	sidebarVisible       bool
 	compactMode          bool
 	detailsOpen          bool
@@ -173,7 +190,7 @@ func New(cfg app.Config) Model {
 		_ = theme.Set("nord")
 	}
 
-	eventCh := make(chan tea.Msg, 64)
+	eventCh := make(chan tea.Msg, 256)
 	c := client.New(a.WSURL())
 
 	return Model{
@@ -188,6 +205,8 @@ func New(cfg app.Config) Model {
 		eventCh:        eventCh,
 		sidebarVisible: a.SidebarVisible,
 		sidebar:        newSidebar(a, cfg.MCPServers),
+		progressBuffer: &strings.Builder{},
+		thinkingBuffer: &strings.Builder{},
 	}
 }
 
@@ -388,10 +407,24 @@ func (m Model) progressFlushCmd(seq int) tea.Cmd {
 	return tea.Tick(16*time.Millisecond, func(time.Time) tea.Msg { return flushProgressMsg{Seq: seq} })
 }
 
+func (m Model) thinkingFlushCmd(seq int) tea.Cmd {
+	return tea.Tick(16*time.Millisecond, func(time.Time) tea.Msg { return flushThinkingMsg{Seq: seq} })
+}
+
+func (m Model) toolFlushCmd(seq int) tea.Cmd {
+	return tea.Tick(50*time.Millisecond, func(time.Time) tea.Msg { return flushToolsMsg{Seq: seq} })
+}
+
 func (m *Model) resetProgressFlush() {
-	m.progressBuffer = ""
+	m.progressBuffer.Reset()
 	m.progressFlushPending = false
 	m.progressFlushSeq++
+	m.thinkingBuffer.Reset()
+	m.thinkingFlushPending = false
+	m.thinkingFlushSeq++
+	m.pendingTools = m.pendingTools[:0]
+	m.toolFlushPending = false
+	m.toolFlushSeq++
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -508,7 +541,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages.AppendSystem("Request aborted")
 		return m, nil
 	case ChatProgressMsg:
-		m.progressBuffer += msg.Content
+		m.progressBuffer.WriteString(msg.Content)
 		if m.progressFlushPending {
 			return m, nil
 		}
@@ -532,11 +565,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.progressFlushPending = false
-		if m.progressBuffer == "" {
+		if m.progressBuffer.Len() == 0 {
 			return m, nil
 		}
-		m.messages.SetProgress(m.messages.GetProgress() + m.progressBuffer)
-		m.progressBuffer = ""
+		m.messages.SetProgress(m.messages.GetProgress() + m.progressBuffer.String())
+		m.progressBuffer.Reset()
+		return m, nil
+	case flushThinkingMsg:
+		if msg.Seq != m.thinkingFlushSeq {
+			return m, nil
+		}
+		m.thinkingFlushPending = false
+		if m.thinkingBuffer.Len() == 0 {
+			return m, nil
+		}
+		m.messages.SetThinking(m.messages.GetThinking() + m.thinkingBuffer.String())
+		m.thinkingBuffer.Reset()
+		return m, nil
+	case flushToolsMsg:
+		if msg.Seq != m.toolFlushSeq {
+			return m, nil
+		}
+		m.toolFlushPending = false
+		if len(m.pendingTools) == 0 {
+			return m, nil
+		}
+		for _, evt := range m.pendingTools {
+			if evt.IsStart {
+				m.messages.StartTool(evt.ID, evt.Name, evt.Input)
+			} else {
+				m.messages.FinishTool(evt.ID, evt.Name, evt.Status, evt.Output)
+			}
+		}
+		m.pendingTools = m.pendingTools[:0]
 		return m, nil
 	case ClipboardCopiedMsg:
 		m.messages.ClearSelection()
@@ -778,7 +839,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
 				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
-				m.messages.SetThinking(m.messages.GetThinking() + p.Content)
+				m.thinkingBuffer.WriteString(p.Content)
+				if !m.thinkingFlushPending {
+					m.thinkingFlushPending = true
+					m.thinkingFlushSeq++
+					cmds = append(cmds, m.thinkingFlushCmd(m.thinkingFlushSeq))
+				}
 			}
 		case "chat.thinking.done":
 			var p client.ThinkingDonePayload
@@ -792,8 +858,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := json.Unmarshal(msg.Event.Payload, &p); err != nil {
 				slog.Debug("tui: malformed event payload", "event", msg.Event.Event, "err", err)
 			} else {
-				m.messages.StartTool(p.ID, p.Name, p.Input)
+				m.pendingTools = append(m.pendingTools, pendingToolEvent{
+					ID: p.ID, Name: p.Name, Input: p.Input, IsStart: true,
+				})
 				m.footer.IncrementToolRunning()
+				if !m.toolFlushPending {
+					m.toolFlushPending = true
+					m.toolFlushSeq++
+					cmds = append(cmds, m.toolFlushCmd(m.toolFlushSeq))
+				}
 			}
 		case "chat.tool.done":
 			var p client.ToolDonePayload
@@ -807,7 +880,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.footer.ToolDone()
 				}
-				m.messages.FinishTool(p.ID, p.Name, status, p.Output)
+				m.pendingTools = append(m.pendingTools, pendingToolEvent{
+					ID: p.ID, Name: p.Name, Status: status, Output: p.Output,
+				})
+				if !m.toolFlushPending {
+					m.toolFlushPending = true
+					m.toolFlushSeq++
+					cmds = append(cmds, m.toolFlushCmd(m.toolFlushSeq))
+				}
 			}
 		case "agent.spawned":
 			var p client.AgentSpawnedPayload
