@@ -39,6 +39,10 @@ type FooterModel struct {
 	queueText      string
 	queueTextWidth int
 
+	// Scroll position tracking
+	scrollText      string
+	scrollTextWidth int
+
 	// View cache
 	cachedView string
 	cacheDirty bool
@@ -170,6 +174,33 @@ func (m *FooterModel) SetQueueCount(n int) {
 	m.cacheDirty = true
 }
 
+// SetScrollPosition updates the scroll position indicator.
+// current is the top visible line (0-based), total is total lines, visible is viewport height.
+func (m *FooterModel) SetScrollPosition(current, total, visible int) {
+	if total <= visible || total <= 0 {
+		if m.scrollText != "" {
+			m.scrollText = ""
+			m.scrollTextWidth = 0
+			m.cacheDirty = true
+		}
+		return
+	}
+	t := theme.Current()
+	if t == nil {
+		return
+	}
+	bottom := current + visible
+	if bottom > total {
+		bottom = total
+	}
+	text := fmt.Sprintf("↕ %d/%d", bottom, total)
+	if text != m.scrollText {
+		m.scrollText = lipgloss.NewStyle().Foreground(t.TextMuted).Render(text)
+		m.scrollTextWidth = lipgloss.Width(m.scrollText)
+		m.cacheDirty = true
+	}
+}
+
 func (m *FooterModel) syncToolActivity() {
 	t := theme.Current()
 	if t == nil {
@@ -291,6 +322,11 @@ func (m *FooterModel) View() string {
 	if m.queueText != "" {
 		parts = append(parts, m.queueText)
 		leftWidth += 3 + m.queueTextWidth
+	}
+	// Add scroll position
+	if m.scrollText != "" {
+		parts = append(parts, m.scrollText)
+		leftWidth += 3 + m.scrollTextWidth
 	}
 	// Add compression indicator if available
 	if comp := m.renderCompression(t); comp != "" {

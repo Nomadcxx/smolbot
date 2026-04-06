@@ -15,6 +15,13 @@ type EditorModel struct {
 	history   []string
 	histIdx   int
 	compact   bool
+
+	// Cached styles — rebuilt on theme change
+	cachedTheme        string
+	compactPromptStyle lipgloss.Style
+	compactBoxStyle    lipgloss.Style
+	borderStyle        lipgloss.Style
+	bodyStyle          lipgloss.Style
 }
 
 func NewEditor() EditorModel {
@@ -25,6 +32,20 @@ func NewEditor() EditorModel {
 	ta.ShowLineNumbers = false
 	ta.Focus()
 	return EditorModel{textarea: ta, histIdx: -1}
+}
+
+func (m *EditorModel) rebuildStyles(t *theme.Theme) {
+	m.cachedTheme = t.Name
+	m.compactPromptStyle = lipgloss.NewStyle().
+		Foreground(t.BorderFocus).Bold(true)
+	m.compactBoxStyle = lipgloss.NewStyle().
+		Background(t.Element).Foreground(t.Text)
+	m.borderStyle = lipgloss.NewStyle().
+		Background(t.Element).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.BorderFocus)
+	m.bodyStyle = lipgloss.NewStyle().
+		Background(t.Element).Foreground(t.Text)
 }
 
 func (m EditorModel) Init() tea.Cmd {
@@ -148,29 +169,19 @@ func (m EditorModel) View() string {
 	if t == nil {
 		return m.textarea.View()
 	}
-	if m.compact {
-		line := lipgloss.NewStyle().
-			Foreground(t.BorderFocus).
-			Bold(true).
-			Render("› ")
-		line += m.textarea.View()
-		return lipgloss.NewStyle().
-			Width(m.width).
-			Background(t.Element).
-			Foreground(t.Text).
-			Render(line)
+	if t.Name != m.cachedTheme {
+		m.rebuildStyles(t)
 	}
-	border := lipgloss.NewStyle().
-		Background(t.Element).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.BorderFocus)
+	if m.compact {
+		line := m.compactPromptStyle.Render("› ")
+		line += m.textarea.View()
+		return m.compactBoxStyle.Width(m.width).Render(line)
+	}
+	border := m.borderStyle
 	if m.width > 2 {
 		border = border.Width(m.width - 2)
 	}
-	body := lipgloss.NewStyle().
-		Background(t.Element).
-		Foreground(t.Text).
-		Render(m.textarea.View())
+	body := m.bodyStyle.Render(m.textarea.View())
 	input := border.Render(body)
 	hint := renderQuickStartHint(m.width)
 	if hint == "" {

@@ -4,11 +4,24 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/Nomadcxx/smolbot/internal/assets"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 )
+
+var (
+	cachedHomeDir     string
+	cachedHomeDirOnce sync.Once
+)
+
+func userHomeDir() string {
+	cachedHomeDirOnce.Do(func() {
+		cachedHomeDir, _ = os.UserHomeDir()
+	})
+	return cachedHomeDir
+}
 
 type Model struct {
 	width        int
@@ -197,7 +210,7 @@ func (m *Model) renderInfoLine(t *theme.Theme) string {
 }
 
 func trimWorkDir(path string, segments int) string {
-	home, _ := os.UserHomeDir()
+	home := userHomeDir()
 	display := path
 	if home != "" && strings.HasPrefix(path, home) {
 		display = "~" + path[len(home):]

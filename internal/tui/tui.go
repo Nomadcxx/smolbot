@@ -190,6 +190,12 @@ type Model struct {
 	lastLayoutSig        uint64 // guards redundant recalcLayout calls
 	clipboardWrite       func(string) error
 
+	// Cached View() styles — rebuilt in recalcLayout when theme/dims change
+	overlayStyle      lipgloss.Style
+	mainColumnStyle   lipgloss.Style
+	sidebarBoxStyle   lipgloss.Style
+	viewStyleTheme    string // theme name when styles were last built
+
 	returnToModelsAfterProvider bool
 }
 
@@ -398,7 +404,7 @@ func (m Model) abortSessionCmd() tea.Cmd {
 }
 
 func (m Model) flashClearCmd(seq int) tea.Cmd {
-	return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return flashClearMsg{Seq: seq} })
+	return tea.Tick(4*time.Second, func(time.Time) tea.Msg { return flashClearMsg{Seq: seq} })
 }
 
 func (m Model) copyTextCmd(content string) tea.Cmd {
@@ -1233,14 +1239,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.footer.SetMetadata("verbose OFF")
 			}
 			return m, clearMetadataAfterDelay(500 * time.Millisecond)
-		case "ctrl+e":
-			m.messages.ToggleVerbose()
-			if m.messages.IsVerbose() {
-				m.footer.SetMetadata("verbose ON")
-			} else {
-				m.footer.SetMetadata("verbose OFF")
-			}
-			return m, clearMetadataAfterDelay(500 * time.Millisecond)
 		case "c", "y":
 			if !m.editor.Focused() {
 				if cmd := m.copyLastAssistantCmd(); cmd != nil {
@@ -1484,24 +1482,18 @@ func (m Model) View() tea.View {
 	)
 
 	content := main
+	// Update scroll position for footer display (ephemeral per-frame)
+	yOff, total, vis := m.messages.ScrollInfo()
+	m.footer.SetScrollPosition(yOff, total, vis)
+
 	if m.compactMode && m.detailsOpen && m.width >= 80 {
-		overlay := lipgloss.NewStyle().
-			Width(mainWidth).
-			Background(t.SidebarBg).
-			Foreground(t.Text).
-			Render(m.cachedCompactView)
+		overlay := m.overlayStyle.Render(m.cachedCompactView)
 		content = lipgloss.JoinVertical(lipgloss.Left, overlay, main)
 	} else if m.shouldShowSidebar() {
-		mainWithFooter := lipgloss.NewStyle().
-			Width(m.mainWidth).
-			MaxWidth(m.mainWidth).
+		mainWithFooter := m.mainColumnStyle.
 			Render(lipgloss.JoinVertical(lipgloss.Left, main, m.footer.View()))
-		sidebar := lipgloss.NewStyle().
-			Width(m.sidebarWidth).
-			MaxWidth(m.sidebarWidth).
+		sidebar := m.sidebarBoxStyle.
 			Height(lipgloss.Height(mainWithFooter)).
-			Background(t.SidebarBg).
-			Foreground(t.Text).
 			Render(m.sidebar.View())
 		separator := m.renderSidebarSeparator(lipgloss.Height(mainWithFooter))
 		content = lipgloss.JoinHorizontal(lipgloss.Top, mainWithFooter, separator, sidebar)
@@ -1873,6 +1865,27 @@ func (m *Model) recalcLayout() {
 		m.sidebar.SetVisible(false)
 	} else {
 		m.sidebar.SetVisible(m.sidebarVisible && m.width >= 120)
+	}
+
+	// Rebuild cached View() styles when layout or theme changes.
+	themeName := ""
+	if t := theme.Current(); t != nil {
+		themeName = t.Name
+		if themeName != m.viewStyleTheme || sig != m.lastLayoutSig {
+			m.overlayStyle = lipgloss.NewStyle().
+				Width(m.mainWidth).
+				Background(t.SidebarBg).
+				Foreground(t.Text)
+			m.mainColumnStyle = lipgloss.NewStyle().
+				Width(m.mainWidth).
+				MaxWidth(m.mainWidth)
+			m.sidebarBoxStyle = lipgloss.NewStyle().
+				Width(m.sidebarWidth).
+				MaxWidth(m.sidebarWidth).
+				Background(t.SidebarBg).
+				Foreground(t.Text)
+			m.viewStyleTheme = themeName
+		}
 	}
 }
 

@@ -274,6 +274,11 @@ func (m *MessagesModel) Height() int {
 	return m.height
 }
 
+// ScrollInfo returns (yOffset, totalLines, visibleHeight) for scroll position display.
+func (m *MessagesModel) ScrollInfo() (int, int, int) {
+	return m.viewport.YOffset(), m.viewport.TotalLineCount(), m.height
+}
+
 func (m *MessagesModel) HandleMouseDown(x, y int) bool {
 	point, ok := m.selectionPointAt(x, y)
 	if !ok {
@@ -1455,9 +1460,38 @@ func (m *MessagesModel) View() string {
 		return m.rendered
 	}
 	if strings.TrimSpace(m.rendered) == "" {
-		return strings.Repeat("\n", max(0, m.height-1))
+		return m.emptyViewport()
 	}
 	return m.viewport.View()
+}
+
+func (m *MessagesModel) emptyViewport() string {
+	t := theme.Current()
+	if m.height <= 0 {
+		return ""
+	}
+	pad := max(0, m.height/3)
+	var sb strings.Builder
+	for range pad {
+		sb.WriteByte('\n')
+	}
+	if t != nil {
+		hint := lipgloss.NewStyle().Foreground(t.TextMuted).Render("Type a message to begin...")
+		center := ""
+		if m.width > 0 {
+			w := lipgloss.Width(hint)
+			if m.width > w {
+				center = strings.Repeat(" ", (m.width-w)/2)
+			}
+		}
+		sb.WriteString(center)
+		sb.WriteString(hint)
+	}
+	remaining := max(0, m.height-1-pad)
+	for range remaining {
+		sb.WriteByte('\n')
+	}
+	return sb.String()
 }
 
 func headingBlock(prefix string, color *string) ansi.StyleBlock {

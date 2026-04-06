@@ -354,12 +354,16 @@ func renderPanelBlock(content string, width int, t *theme.Theme) string {
 	}
 	lines := strings.Split(content, "\n")
 	out := make([]string, 0, len(lines))
+	var lineStyle lipgloss.Style
+	if t != nil {
+		lineStyle = lipgloss.NewStyle().Foreground(t.Text)
+	}
 	for _, line := range lines {
 		if lipgloss.Width(line) > width {
 			line = ansi.Cut(line, 0, width-1) + "…"
 		}
 		if t != nil {
-			line = lipgloss.NewStyle().Foreground(t.Text).Render(line)
+			line = lineStyle.Render(line)
 		}
 		out = append(out, line)
 	}
