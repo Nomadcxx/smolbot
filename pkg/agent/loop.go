@@ -592,6 +592,21 @@ func (a *AgentLoop) consumeStream(stream *provider.Stream, cb EventCallback, sup
 				toolCalls[toolCall.Index] = &copyCall
 				continue
 			}
+			// If the delta carries a new ID or name, this is a distinct
+			// tool call that collides on the same index (common with
+			// Ollama and other OpenAI-compatible providers). Promote it
+			// to the next available index instead of appending args.
+			if (toolCall.ID != "" && toolCall.ID != existing.ID) ||
+				(toolCall.Function.Name != "" && existing.Function.Name != "" && toolCall.Function.Name != existing.Function.Name) {
+				nextIdx := toolCall.Index + 1
+				for toolCalls[nextIdx] != nil {
+					nextIdx++
+				}
+				copyCall := toolCall
+				copyCall.Index = nextIdx
+				toolCalls[nextIdx] = &copyCall
+				continue
+			}
 			if toolCall.ID != "" {
 				existing.ID = toolCall.ID
 			}

@@ -1011,6 +1011,82 @@ func TestConsumeStreamSparseIndices(t *testing.T) {
 	}
 }
 
+func TestConsumeStreamDuplicateIndexDifferentToolCalls(t *testing.T) {
+	// Simulates providers (e.g. Ollama) that send multiple complete tool
+	// calls in separate deltas all using index 0. Without the collision
+	// guard the arguments get concatenated → invalid JSON.
+	deltas := []*provider.StreamDelta{
+		{ToolCalls: []provider.ToolCall{
+			{Index: 0, ID: "call_1", Function: provider.FunctionCall{Name: "read_file", Arguments: `{"path":"/etc/hostname"}`}},
+		}},
+		{ToolCalls: []provider.ToolCall{
+			{Index: 0, ID: "call_2", Function: provider.FunctionCall{Name: "list_dir", Arguments: `{"path":"/tmp"}`}},
+		}},
+	}
+	idx := 0
+	stream := provider.NewStream(func() (*provider.StreamDelta, error) {
+		if idx >= len(deltas) {
+			return nil, io.EOF
+		}
+		d := deltas[idx]
+		idx++
+		return d, nil
+	}, func() error { return nil })
+
+	loop := &AgentLoop{}
+	resp, err := loop.consumeStream(stream, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("want 2 tool calls, got %d: %+v", len(resp.ToolCalls), resp.ToolCalls)
+	}
+	// First tool call should be read_file with valid JSON.
+	if resp.ToolCalls[0].Function.Name != "read_file" {
+		t.Errorf("call[0] name = %q, want read_file", resp.ToolCalls[0].Function.Name)
+	}
+	var args0 map[string]any
+	if err := json.Unmarshal([]byte(resp.ToolCalls[0].Function.Arguments), &args0); err != nil {
+		t.Errorf("call[0] args invalid JSON: %v (raw: %s)", err, resp.ToolCalls[0].Function.Arguments)
+	}
+	// Second tool call should be list_dir with valid JSON.
+	if resp.ToolCalls[1].Function.Name != "list_dir" {
+		t.Errorf("call[1] name = %q, want list_dir", resp.ToolCalls[1].Function.Name)
+	}
+	var args1 map[string]any
+	if err := json.Unmarshal([]byte(resp.ToolCalls[1].Function.Arguments), &args1); err != nil {
+		t.Errorf("call[1] args invalid JSON: %v (raw: %s)", err, resp.ToolCalls[1].Function.Arguments)
+	}
+}
+
+func TestConsumeStreamDuplicateIndexSingleDelta(t *testing.T) {
+	// Both tool calls arrive in the same delta with the same index.
+	deltas := []*provider.StreamDelta{
+		{ToolCalls: []provider.ToolCall{
+			{Index: 0, ID: "call_a", Function: provider.FunctionCall{Name: "exec", Arguments: `{"command":"ls"}`}},
+			{Index: 0, ID: "call_b", Function: provider.FunctionCall{Name: "read_file", Arguments: `{"path":"."}`}},
+		}},
+	}
+	idx := 0
+	stream := provider.NewStream(func() (*provider.StreamDelta, error) {
+		if idx >= len(deltas) {
+			return nil, io.EOF
+		}
+		d := deltas[idx]
+		idx++
+		return d, nil
+	}, func() error { return nil })
+
+	loop := &AgentLoop{}
+	resp, err := loop.consumeStream(stream, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("want 2 tool calls, got %d: %+v", len(resp.ToolCalls), resp.ToolCalls)
+	}
+}
+
 func newTestAgentLoop(t *testing.T, p provider.Provider, tools ...tool.Tool) (*AgentLoop, *session.Store, *fakeLoopMemory) {
 	return newTestAgentLoopWithUsage(t, p, nil, tools...)
 }
