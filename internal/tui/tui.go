@@ -484,6 +484,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CtrlCMsg:
 		return m.handleCtrlC()
 	case ChatStartedMsg:
+		if m.streaming {
+			// A run is already active — this runID is for a queued message.
+			// Don't overwrite currentRunID; ChatDequeuedMsg will update it
+			// when the queued run actually starts.
+			return m, nil
+		}
 		m.currentRunID = msg.RunID
 		return m, tea.Batch(m.spinnerTickCmd(), m.status.StatusSpinnerTick())
 	case ChatQueuedMsg:

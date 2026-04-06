@@ -1568,6 +1568,50 @@ func TestSubmitDuringStreamingCurrentlyCallsChatSend(t *testing.T) {
 	}
 }
 
+// TestChatStartedWhileStreamingDoesNotOverwriteRunID verifies that a
+// ChatStartedMsg that arrives while already streaming (i.e. for a queued run)
+// does not overwrite the active run's ID.
+func TestChatStartedWhileStreamingDoesNotOverwriteRunID(t *testing.T) {
+	model := New(app.Config{})
+	model.streaming = true
+	model.currentRunID = "run-active"
+
+	updated, cmd := model.Update(ChatStartedMsg{RunID: "run-queued"})
+	got := updated.(Model)
+
+	if got.currentRunID != "run-active" {
+		t.Fatalf("expected currentRunID to stay 'run-active', got %q", got.currentRunID)
+	}
+	if cmd != nil {
+		t.Fatalf("expected no command when ignoring queued ChatStartedMsg, got %T", cmd)
+	}
+}
+
+// TestAbortDuringQueuedRunUsesActiveRunID verifies that Ctrl+C while a
+// queued run is pending aborts the active run, not the queued one.
+func TestAbortDuringQueuedRunUsesActiveRunID(t *testing.T) {
+	fake := &fakeClient{}
+	model := New(app.Config{})
+	model.client = fake
+	model.streaming = true
+	model.currentRunID = "run-active"
+
+	// Simulate receiving a queued runID — must NOT overwrite currentRunID.
+	updated, _ := model.Update(ChatStartedMsg{RunID: "run-queued"})
+	model = updated.(Model)
+
+	// Now Ctrl+C — must abort "run-active", not "run-queued".
+	updated, _ = model.Update(CtrlCMsg{})
+	model = updated.(Model)
+
+	if len(fake.aborts) != 1 {
+		t.Fatalf("expected one abort, got %d", len(fake.aborts))
+	}
+	if fake.aborts[0].runID != "run-active" {
+		t.Fatalf("expected abort of 'run-active', got %q", fake.aborts[0].runID)
+	}
+}
+
 func TestChatQueuedMsgShowsQueuedNotice(t *testing.T) {
 	model := New(app.Config{})
 	model.width = 80
