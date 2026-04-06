@@ -122,6 +122,10 @@ type ChatDequeuedPayload struct {
 	Session string `json:"session"`
 }
 
+type ChatQueueDrainedPayload struct {
+	Session string `json:"session"`
+}
+
 type ThinkingDonePayload struct {
 	Content string `json:"content"`
 }

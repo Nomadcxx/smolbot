@@ -1036,6 +1036,11 @@ func (s *Server) startRun(req agent.Request, client *clientState) (string, error
 	_, active := s.sessionRuns[req.SessionKey]
 	if starting || active {
 		// Another run is already in flight for this session — enqueue.
+		const maxQueuePerSession = 50
+		if len(s.sessionQueue[req.SessionKey]) >= maxQueuePerSession {
+			s.mu.Unlock()
+			return "", fmt.Errorf("queue for session %q is full (%d pending)", req.SessionKey, maxQueuePerSession)
+		}
 		runID := fmt.Sprintf("run-%s-q%d", req.SessionKey, s.runSeq.Add(1))
 		queued := queuedRequest{req: req, client: client, runID: runID}
 		s.sessionQueue[req.SessionKey] = append(s.sessionQueue[req.SessionKey], queued)

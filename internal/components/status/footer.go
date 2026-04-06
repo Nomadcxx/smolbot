@@ -34,6 +34,11 @@ type FooterModel struct {
 	toolActivityText  string
 	toolActivityWidth int
 
+	// Queue tracking
+	queueCount     int
+	queueText      string
+	queueTextWidth int
+
 	// View cache
 	cachedView string
 	cacheDirty bool
@@ -143,6 +148,25 @@ func (m *FooterModel) ResetToolCounts() {
 	m.toolsError = 0
 	m.toolActivityText = ""
 	m.toolActivityWidth = 0
+	m.cacheDirty = true
+}
+
+// SetQueueCount updates the queued message count display.
+func (m *FooterModel) SetQueueCount(n int) {
+	m.queueCount = n
+	t := theme.Current()
+	if n <= 0 || t == nil {
+		m.queueText = ""
+		m.queueTextWidth = 0
+	} else {
+		arrows := "▶"
+		if n > 1 {
+			arrows = strings.Repeat("▶", min(n, 5))
+		}
+		m.queueText = lipgloss.NewStyle().Foreground(t.Warning).Bold(true).
+			Render(fmt.Sprintf("%s %d queued", arrows, n))
+		m.queueTextWidth = lipgloss.Width(m.queueText)
+	}
 	m.cacheDirty = true
 }
 
@@ -262,6 +286,11 @@ func (m *FooterModel) View() string {
 	if m.toolActivityText != "" {
 		parts = append(parts, m.toolActivityText)
 		leftWidth += 3 + m.toolActivityWidth
+	}
+	// Add queue count if messages are queued
+	if m.queueText != "" {
+		parts = append(parts, m.queueText)
+		leftWidth += 3 + m.queueTextWidth
 	}
 	// Add compression indicator if available
 	if comp := m.renderCompression(t); comp != "" {

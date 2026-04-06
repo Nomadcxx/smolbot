@@ -158,6 +158,8 @@ type Model struct {
 	reconnectWait        time.Duration
 	streaming            bool
 	currentRunID         string
+	queuedCount          int    // number of messages queued behind active run
+	queuedRunID          string // most recent queued run ID
 	interruptKeyState    InterruptKeyState
 	contextWarned        bool
 	usageAlertKey        string
@@ -493,12 +495,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentRunID = msg.RunID
 		return m, tea.Batch(m.spinnerTickCmd(), m.status.StatusSpinnerTick())
 	case ChatQueuedMsg:
-		// Show a compact notice so the user knows their message is queued.
-		m.messages.AppendSystem("⏳ Message queued — will run after the current response")
+		// Track queue depth and show notice with position.
+		m.queuedCount = msg.Position
+		m.queuedRunID = msg.RunID
+		m.footer.SetQueueCount(m.queuedCount)
+		m.messages.AppendSystem(fmt.Sprintf("⏳ Message queued (position %d)", msg.Position))
 		return m, nil
 	case ChatDequeuedMsg:
 		// The queued run is now active; update streaming state so spinner shows.
 		m.currentRunID = msg.RunID
+		m.queuedRunID = ""
+		m.queuedCount--
+		if m.queuedCount < 0 {
+			m.queuedCount = 0
+		}
+		m.footer.SetQueueCount(m.queuedCount)
 		m.streaming = true
 		m.status.SetStreaming(true)
 		m.messages.AppendSystem("▶ Queued message started")
@@ -1144,6 +1155,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m.handleCtrlC()
 		case "esc":
+			// If there are queued messages, ESC clears them.
+			if m.queuedCount > 0 {
+				m.queuedCount = 0
+				m.queuedRunID = ""
+				m.footer.SetQueueCount(0)
+				m.flashSeq++
+				m.status.SetFlash("Queue cleared")
+				return m, m.flashClearCmd(m.flashSeq)
+			}
 			// Double-ESC to interrupt active streaming request
 			if m.streaming {
 				switch m.interruptKeyState {
@@ -1246,8 +1266,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSlashCommand(submitted)
 		}
 		m.messages.AppendUser(submitted)
-		m.streaming = true
-		m.status.SetStreaming(true)
+		if !m.streaming {
+			m.streaming = true
+			m.status.SetStreaming(true)
+		}
 		cmds = append(cmds, m.sendChatCmd(submitted))
 	}
 	return m, tea.Batch(cmds...)
@@ -1306,6 +1328,9 @@ func (m Model) handleCtrlC() (tea.Model, tea.Cmd) {
 		m.resetProgressFlush()
 		m.streaming = false
 		m.currentRunID = ""
+		m.queuedCount = 0
+		m.queuedRunID = ""
+		m.footer.SetQueueCount(0)
 		m.status.SetStreaming(false)
 		return m, nil
 	}
