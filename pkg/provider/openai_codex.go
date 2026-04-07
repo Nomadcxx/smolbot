@@ -321,10 +321,18 @@ func (p *OpenAICodexProvider) buildCodexRequest(req ChatRequest) codexRequest {
 					Content: content,
 				})
 			}
-			for _, tc := range msg.ToolCalls {
+			for i, tc := range msg.ToolCalls {
+				// Skip corrupt tool calls with no function name.
+				if tc.Function.Name == "" {
+					continue
+				}
+				callID := tc.ID
+				if callID == "" {
+					callID = fmt.Sprintf("call_fallback_%d", i)
+				}
 				cr.Input = append(cr.Input, codexInputItem{
 					Type:      "function_call",
-					CallID:    tc.ID,
+					CallID:    callID,
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
 				})

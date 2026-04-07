@@ -1087,6 +1087,47 @@ func TestConsumeStreamDuplicateIndexSingleDelta(t *testing.T) {
 	}
 }
 
+func TestConsumeStreamEmptyToolCallIDGeneratesFallback(t *testing.T) {
+	calls := 0
+	stream := provider.NewStream(func() (*provider.StreamDelta, error) {
+		calls++
+		switch calls {
+		case 1:
+			return &provider.StreamDelta{
+				ToolCalls: []provider.ToolCall{
+					{Index: 0, ID: "", Function: provider.FunctionCall{Name: "exec", Arguments: `{"cmd":"ls"}`}},
+				},
+			}, nil
+		case 2:
+			return &provider.StreamDelta{
+				ToolCalls: []provider.ToolCall{
+					{Index: 1, ID: "", Function: provider.FunctionCall{Name: "read", Arguments: `{"path":"."}`}},
+				},
+			}, nil
+		default:
+			return nil, io.EOF
+		}
+	}, func() error { return nil })
+
+	loop := &AgentLoop{}
+	resp, err := loop.consumeStream(stream, nil, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.ToolCalls) != 2 {
+		t.Fatalf("want 2 tool calls, got %d", len(resp.ToolCalls))
+	}
+	for i, tc := range resp.ToolCalls {
+		if tc.ID == "" {
+			t.Errorf("tool call %d has empty ID", i)
+		}
+	}
+	// IDs should be unique.
+	if resp.ToolCalls[0].ID == resp.ToolCalls[1].ID {
+		t.Errorf("tool call IDs should be unique, got %q and %q", resp.ToolCalls[0].ID, resp.ToolCalls[1].ID)
+	}
+}
+
 func newTestAgentLoop(t *testing.T, p provider.Provider, tools ...tool.Tool) (*AgentLoop, *session.Store, *fakeLoopMemory) {
 	return newTestAgentLoopWithUsage(t, p, nil, tools...)
 }

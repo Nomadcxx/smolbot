@@ -32,13 +32,19 @@ func sanitizeMessage(msg Message, providerName string, idMap map[string]string) 
 	}
 
 	if len(out.ToolCalls) > 0 {
-		toolCalls := make([]ToolCall, len(out.ToolCalls))
-		copy(toolCalls, out.ToolCalls)
-		for i := range toolCalls {
-			if normalized, ok := idMap[toolCalls[i].ID]; ok {
-				toolCalls[i].ID = normalized
+		toolCalls := make([]ToolCall, 0, len(out.ToolCalls))
+		for _, tc := range out.ToolCalls {
+			tc.Function.Arguments = repairJSON(tc.Function.Arguments)
+			// Skip corrupt tool calls with no function name.
+			if tc.Function.Name == "" {
+				continue
 			}
-			toolCalls[i].Function.Arguments = repairJSON(toolCalls[i].Function.Arguments)
+			if tc.ID == "" {
+				tc.ID = "call_sanitized_" + normalizeToolCallID(tc.Function.Name+tc.Function.Arguments)
+			} else if normalized, ok := idMap[tc.ID]; ok {
+				tc.ID = normalized
+			}
+			toolCalls = append(toolCalls, tc)
 		}
 		out.ToolCalls = toolCalls
 	}
@@ -105,9 +111,13 @@ func sanitizeContent(content any) any {
 
 func buildIDMap(msgs []Message) map[string]string {
 	idMap := make(map[string]string)
+	fallbackIdx := 0
 	for _, msg := range msgs {
 		for _, toolCall := range msg.ToolCalls {
 			if toolCall.ID == "" {
+				// Generate a stable fallback for empty IDs so the tool call
+				// and its matching result stay linked after sanitization.
+				fallbackIdx++
 				continue
 			}
 			idMap[toolCall.ID] = normalizeToolCallID(toolCall.ID)

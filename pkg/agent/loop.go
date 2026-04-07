@@ -631,6 +631,11 @@ func (a *AgentLoop) consumeStream(stream *provider.Stream, cb EventCallback, sup
 	}
 	for idx := 0; idx <= maxIdx; idx++ {
 		if call, ok := toolCalls[idx]; ok {
+			// Ensure every tool call has a non-empty ID. Providers
+			// reject tool calls (and matching results) with missing IDs.
+			if call.ID == "" {
+				call.ID = fmt.Sprintf("call_%d_%d", time.Now().UnixMilli(), idx)
+			}
 			resp.ToolCalls = append(resp.ToolCalls, *call)
 		}
 	}
@@ -690,6 +695,17 @@ func normalizeMessagesForSave(messages []provider.Message) []provider.Message {
 			out.Content = stripThinkBlocks(msg.StringContent())
 			out.ReasoningContent = ""
 			out.ThinkingBlocks = nil
+			// Filter out corrupt tool calls with empty function names.
+			if len(out.ToolCalls) > 0 {
+				clean := make([]provider.ToolCall, 0, len(out.ToolCalls))
+				for _, tc := range out.ToolCalls {
+					if tc.Function.Name == "" {
+						continue
+					}
+					clean = append(clean, tc)
+				}
+				out.ToolCalls = clean
+			}
 		case "tool":
 			out.Content = truncateString(msg.StringContent(), 16000)
 		}

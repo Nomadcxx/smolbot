@@ -184,3 +184,58 @@ func TestRepairJSONClosesUnclosedBrace(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeGeneratesFallbackIDForEmptyToolCalls(t *testing.T) {
+msgs := []Message{
+{
+Role: "assistant",
+ToolCalls: []ToolCall{
+{ID: "", Function: FunctionCall{Name: "exec", Arguments: `{"cmd":"ls"}`}},
+{ID: "call_abc", Function: FunctionCall{Name: "read", Arguments: `{"path":"."}`}},
+},
+},
+{
+Role:       "tool",
+ToolCallID: "",
+Content:    "file1.txt",
+},
+{
+Role:       "tool",
+ToolCallID: "call_abc",
+Content:    "contents",
+},
+}
+
+sanitized := SanitizeMessages(msgs, "openai")
+
+// The empty-ID tool call should get a generated fallback.
+if len(sanitized[0].ToolCalls) < 1 {
+t.Fatal("expected at least 1 tool call after sanitize")
+}
+for i, tc := range sanitized[0].ToolCalls {
+if tc.ID == "" {
+t.Errorf("tool call %d still has empty ID after sanitize", i)
+}
+}
+}
+
+func TestSanitizeDropsCorruptToolCallsWithNoName(t *testing.T) {
+msgs := []Message{
+{
+Role: "assistant",
+ToolCalls: []ToolCall{
+{ID: "call_1", Function: FunctionCall{Name: "", Arguments: ""}},
+{ID: "call_2", Function: FunctionCall{Name: "exec", Arguments: `{}`}},
+},
+},
+}
+
+sanitized := SanitizeMessages(msgs, "openai")
+
+if len(sanitized[0].ToolCalls) != 1 {
+t.Fatalf("expected 1 tool call (corrupt one dropped), got %d", len(sanitized[0].ToolCalls))
+}
+if sanitized[0].ToolCalls[0].Function.Name != "exec" {
+t.Errorf("expected exec tool call, got %q", sanitized[0].ToolCalls[0].Function.Name)
+}
+}
