@@ -56,6 +56,11 @@ var providerCatalogue = map[string][]CatalogueEntry{
 		{ID: "MiniMax-Text-01", Name: "MiniMax Text-01", Capability: "chat", ReleaseDate: "2025-01", ContextWindow: 1000000},
 		{ID: "abab6.5s-chat", Name: "ABAB 6.5s", Capability: "chat", ReleaseDate: "2024-06", ContextWindow: 245000},
 	},
+	"minimax-portal": {
+		{ID: "minimax-portal/MiniMax-M2.7", Name: "MiniMax M2.7", Capability: "chat", ReleaseDate: "2025-03", ContextWindow: 1000000, IsFree: true},
+		{ID: "minimax-portal/MiniMax-M2.5", Name: "MiniMax M2.5", Capability: "chat", ReleaseDate: "2025-02", ContextWindow: 1000000, IsFree: true},
+		{ID: "minimax-portal/MiniMax-Text-01", Name: "MiniMax Text-01", Capability: "chat", ReleaseDate: "2025-01", ContextWindow: 1000000, IsFree: true},
+	},
 	"openai-codex": {
 		{ID: "openai-codex/gpt-5.4", Name: "GPT-5.4", Capability: "chat", ReleaseDate: "2025-07", ContextWindow: 200000, IsFree: true},
 		{ID: "openai-codex/gpt-5.3-codex", Name: "GPT-5.3 Codex", Capability: "chat", ReleaseDate: "2025-06", ContextWindow: 200000, IsFree: true},
