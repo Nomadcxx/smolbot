@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -35,7 +36,7 @@ func TestMiniMaxOAuth_InitiateAuth_SendsExpectedPayload(t *testing.T) {
 	p.SetHTTPClient(&mockHTTPClient{
 		resp: &http.Response{
 			StatusCode: 200,
-			Body:        io.NopCloser(strings.NewReader(`{"user_code":"CODE123","device_code":"DEVICE456","verification_uri":"https://minimax.ai/verify","expires_in":300,"interval":5}`)),
+			Body:        io.NopCloser(strings.NewReader(`{"user_code":"CODE123","device_code":"DEVICE456","verification_uri":"https://minimax.ai/verify","expired_in":1712000000000,"interval":2000,"state":"test"}`)),
 		},
 	})
 
@@ -61,7 +62,7 @@ func TestMiniMaxOAuth_PollToken_StateMismatchRejected(t *testing.T) {
 		resp: &http.Response{
 			StatusCode: 200,
 			Body: io.NopCloser(strings.NewReader(
-				`{"user_code":"CODE","device_code":"DEV","verification_uri":"https://x.ai/verify","expires_in":300,"interval":5}`)),
+				`{"user_code":"CODE","device_code":"DEV","verification_uri":"https://x.ai/verify","expired_in":1712000000000,"interval":2000}`)),
 		},
 	})
 
@@ -78,12 +79,13 @@ func TestMiniMaxOAuth_PollToken_StateMismatchRejected(t *testing.T) {
 }
 
 func TestMiniMaxOAuth_ExchangeCode_SetsTokenCorrectly(t *testing.T) {
+	futureMs := time.Now().Add(time.Hour).UnixMilli()
 	p := NewMiniMaxOAuthProvider("minimax-portal")
 	p.SetHTTPClient(&mockHTTPClient{
 		resp: &http.Response{
 			StatusCode: 200,
 			Body: io.NopCloser(strings.NewReader(
-				`{"access_token":"tok123","refresh_token":"ref456","expires_in":3600,"token_type":"Bearer","scope":"data:read"}`)),
+				`{"status":"success","access_token":"tok123","refresh_token":"ref456","expired_in":` + json.Number(fmt.Sprintf("%d", futureMs)).String() + `,"token_type":"Bearer","scope":"data:read"}`)),
 		},
 	})
 
@@ -91,15 +93,18 @@ func TestMiniMaxOAuth_ExchangeCode_SetsTokenCorrectly(t *testing.T) {
 		UserCode:        "CODE",
 		DeviceCode:      "DEV",
 		VerificationURI: "https://x.ai/verify",
-		ExpiresIn:       300,
-		Interval:        1,
+		ExpiredIn:       time.Now().Add(5 * time.Minute).UnixMilli(),
+		Interval:        2000,
 		State:           "test-state",
 		Verifier:        "test-verifier",
 	}
 
-	token, err := p.exchangeDeviceCode(context.Background(), dc.DeviceCode, dc.Verifier)
+	token, pending, err := p.exchangeUserCode(context.Background(), dc.UserCode, dc.Verifier)
 	if err != nil {
-		t.Fatalf("exchangeDeviceCode failed: %v", err)
+		t.Fatalf("exchangeUserCode failed: %v", err)
+	}
+	if pending {
+		t.Fatal("expected non-pending result")
 	}
 
 	if token.AccessToken != "tok123" {
@@ -127,10 +132,11 @@ func TestMiniMaxOAuth_RefreshToken_PostsExpectedForm(t *testing.T) {
 		ExpiresAt:    time.Now().Add(-1 * time.Hour),
 	}
 
+	futureMs := time.Now().Add(2 * time.Hour).UnixMilli()
 	p.SetHTTPClient(&mockHTTPClient{
 		resp: &http.Response{
 			StatusCode: 200,
-			Body:       io.NopCloser(strings.NewReader(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":7200,"token_type":"Bearer","scope":"data:read"}`)),
+			Body:       io.NopCloser(strings.NewReader(fmt.Sprintf(`{"status":"success","access_token":"new-access","refresh_token":"new-refresh","expired_in":%d,"token_type":"Bearer","scope":"data:read"}`, futureMs))),
 		},
 	})
 
@@ -195,11 +201,12 @@ func TestMiniMaxOAuth_Chat_RefreshOnExpiry(t *testing.T) {
 		ExpiresAt:    time.Now().Add(-1 * time.Hour),
 	})
 
+	futureMs := time.Now().Add(time.Hour).UnixMilli()
 	p.SetHTTPClient(&mockHTTPClient{
 		resp: &http.Response{
 			StatusCode: 200,
 			Body: io.NopCloser(strings.NewReader(
-				`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600,"token_type":"Bearer","scope":"data:read"}`)),
+				fmt.Sprintf(`{"status":"success","access_token":"new-access","refresh_token":"new-refresh","expired_in":%d,"token_type":"Bearer","scope":"data:read"}`, futureMs))),
 		},
 	})
 
@@ -288,7 +295,7 @@ func TestMiniMaxOAuth_RevokeToken_NoTokenNoOp(t *testing.T) {
 }
 
 func TestDeviceCodeResponse_JSON(t *testing.T) {
-	raw := `{"user_code":"CODE123","device_code":"DEV456","verification_uri":"https://x.ai/verify","expires_in":300,"interval":5}`
+	raw := `{"user_code":"CODE123","device_code":"DEV456","verification_uri":"https://x.ai/verify","expired_in":1712000000000,"interval":2000}`
 	var dc DeviceCodeResponse
 	if err := json.Unmarshal([]byte(raw), &dc); err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
@@ -299,16 +306,16 @@ func TestDeviceCodeResponse_JSON(t *testing.T) {
 	if dc.DeviceCode != "DEV456" {
 		t.Errorf("DeviceCode = %q", dc.DeviceCode)
 	}
-	if dc.ExpiresIn != 300 {
-		t.Errorf("ExpiresIn = %d", dc.ExpiresIn)
+	if dc.ExpiredIn != 1712000000000 {
+		t.Errorf("ExpiredIn = %d", dc.ExpiredIn)
 	}
-	if dc.Interval != 5 {
+	if dc.Interval != 2000 {
 		t.Errorf("Interval = %d", dc.Interval)
 	}
 }
 
 func TestTokenResponse_JSON(t *testing.T) {
-	raw := `{"access_token":"tok","refresh_token":"ref","expires_in":3600,"token_type":"Bearer","scope":"data:read"}`
+	raw := `{"status":"success","access_token":"tok","refresh_token":"ref","expired_in":1712000000000,"token_type":"Bearer","scope":"data:read"}`
 	var tr TokenResponse
 	if err := json.Unmarshal([]byte(raw), &tr); err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
@@ -319,19 +326,33 @@ func TestTokenResponse_JSON(t *testing.T) {
 	if tr.RefreshToken != "ref" {
 		t.Errorf("RefreshToken = %q", tr.RefreshToken)
 	}
+	if tr.Status != "success" {
+		t.Errorf("Status = %q", tr.Status)
+	}
 }
 
-func TestTokenResponse_Error_JSON(t *testing.T) {
-	raw := `{"error":"authorization_pending","error_description":"user not yet approved"}`
+func TestTokenResponse_Pending_JSON(t *testing.T) {
+	raw := `{"status":"pending"}`
 	var tr TokenResponse
 	if err := json.Unmarshal([]byte(raw), &tr); err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
-	if tr.Error != "authorization_pending" {
-		t.Errorf("Error = %q", tr.Error)
+	if tr.Status != "pending" {
+		t.Errorf("Status = %q, want pending", tr.Status)
 	}
-	if tr.ErrorDesc != "user not yet approved" {
-		t.Errorf("ErrorDesc = %q", tr.ErrorDesc)
+}
+
+func TestTokenResponse_Error_JSON(t *testing.T) {
+	raw := `{"status":"error","base_resp":{"status_code":1004,"status_msg":"user not yet approved"}}`
+	var tr TokenResponse
+	if err := json.Unmarshal([]byte(raw), &tr); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if tr.Status != "error" {
+		t.Errorf("Status = %q", tr.Status)
+	}
+	if tr.BaseResp == nil || tr.BaseResp.StatusMsg != "user not yet approved" {
+		t.Errorf("BaseResp.StatusMsg unexpected")
 	}
 }
 
@@ -363,11 +384,12 @@ func TestEnsureValidTokenRefreshesWhenExpiringWithinFiveMinutes(t *testing.T) {
 		ExpiresAt:    time.Now().Add(3 * time.Minute),
 	})
 
+	futureMs := time.Now().Add(2 * time.Hour).UnixMilli()
 	p.SetHTTPClient(&mockHTTPClient{
 		resp: &http.Response{
 			StatusCode: 200,
 			Body: io.NopCloser(strings.NewReader(
-				`{"access_token":"proactive-new-access","refresh_token":"proactive-new-refresh","expires_in":7200,"token_type":"Bearer","scope":"data:read"}`)),
+				fmt.Sprintf(`{"status":"success","access_token":"proactive-new-access","refresh_token":"proactive-new-refresh","expired_in":%d,"token_type":"Bearer","scope":"data:read"}`, futureMs))),
 		},
 	})
 

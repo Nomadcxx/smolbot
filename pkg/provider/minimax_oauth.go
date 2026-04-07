@@ -90,8 +90,8 @@ type DeviceCodeResponse struct {
 	UserCode        string `json:"user_code"`
 	DeviceCode      string `json:"device_code"`
 	VerificationURI string `json:"verification_uri"`
-	ExpiresIn       int    `json:"expires_in"`
-	Interval        int    `json:"interval"`
+	ExpiredIn       int64  `json:"expired_in"` // absolute unix ms timestamp
+	Interval        int    `json:"interval"`   // polling interval in ms
 	State           string `json:"state,omitempty"`
 	Verifier        string `json:"-"`
 	Error           string `json:"error,omitempty"`
@@ -99,13 +99,16 @@ type DeviceCodeResponse struct {
 }
 
 type TokenResponse struct {
+	Status       string `json:"status"` // "success", "pending", "error"
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token,omitempty"`
-	ExpiresIn    int    `json:"expires_in"`
+	ExpiredIn    int64  `json:"expired_in"` // absolute unix ms timestamp
 	TokenType    string `json:"token_type"`
 	Scope        string `json:"scope"`
-	Error        string `json:"error,omitempty"`
-	ErrorDesc    string `json:"error_description,omitempty"`
+	BaseResp     *struct {
+		StatusCode int    `json:"status_code"`
+		StatusMsg  string `json:"status_msg"`
+	} `json:"base_resp"`
 }
 
 func (p *MiniMaxOAuthProvider) InitiateAuth(ctx context.Context) (*DeviceCodeResponse, string, error) {
@@ -168,13 +171,21 @@ func (p *MiniMaxOAuthProvider) PollForToken(ctx context.Context, dc *DeviceCodeR
 		return nil, fmt.Errorf("state mismatch: expected %q, got %q", state, dc.State)
 	}
 
-	interval := time.Duration(dc.Interval) * time.Second
-	if interval < 5*time.Second {
-		interval = 5 * time.Second
+	// interval is in ms; default 2s
+	intervalMs := dc.Interval
+	if intervalMs <= 0 {
+		intervalMs = 2000
 	}
+	interval := time.Duration(intervalMs) * time.Millisecond
 
-	deadline := time.NewTimer(time.Duration(dc.ExpiresIn) * time.Second)
-	defer deadline.Stop()
+	// expired_in is an absolute unix timestamp in ms
+	var expireAt time.Time
+	if dc.ExpiredIn > 0 {
+		expireAt = time.UnixMilli(dc.ExpiredIn)
+	}
+	if expireAt.IsZero() || expireAt.Before(time.Now().Add(5*time.Second)) {
+		expireAt = time.Now().Add(5 * time.Minute)
+	}
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -183,23 +194,16 @@ func (p *MiniMaxOAuthProvider) PollForToken(ctx context.Context, dc *DeviceCodeR
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-deadline.C:
-			return nil, fmt.Errorf("device code expired")
 		case <-ticker.C:
-			token, err := p.exchangeDeviceCode(ctx, dc.DeviceCode, dc.Verifier)
+			if time.Now().After(expireAt) {
+				return nil, fmt.Errorf("device code expired")
+			}
+			token, pending, err := p.exchangeUserCode(ctx, dc.UserCode, dc.Verifier)
 			if err != nil {
-				if strings.Contains(err.Error(), "authorization_pending") {
-					continue
-				}
-				if strings.Contains(err.Error(), "slow_down") {
-					interval += 5 * time.Second
-					ticker.Reset(interval)
-					continue
-				}
-				if strings.Contains(err.Error(), "expired") {
-					return nil, fmt.Errorf("device code expired")
-				}
-				return nil, err
+				continue
+			}
+			if pending {
+				continue
 			}
 			p.mu.Lock()
 			p.token = token
@@ -209,55 +213,78 @@ func (p *MiniMaxOAuthProvider) PollForToken(ctx context.Context, dc *DeviceCodeR
 	}
 }
 
-func (p *MiniMaxOAuthProvider) exchangeDeviceCode(ctx context.Context, deviceCode, codeVerifier string) (*TokenInfo, error) {
+// exchangeUserCode posts to /oauth/token using MiniMax's user_code grant type.
+// Returns (token, false, nil) on success, (nil, true, nil) when pending,
+// or (nil, false, err) on a terminal error.
+func (p *MiniMaxOAuthProvider) exchangeUserCode(ctx context.Context, userCode, codeVerifier string) (*TokenInfo, bool, error) {
 	data := url.Values{}
 	data.Set("client_id", p.config.ClientID)
-	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-	data.Set("device_code", deviceCode)
+	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:user_code")
+	data.Set("user_code", userCode)
 	data.Set("code_verifier", codeVerifier)
 
 	tokenURL := p.config.BaseURL + p.config.TokenURL
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("create token request: %w", err)
+		return nil, false, fmt.Errorf("create token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("do token request: %w", err)
+		return nil, false, fmt.Errorf("do token request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
 	if err != nil {
-		return nil, fmt.Errorf("read token response: %w", err)
+		return nil, false, fmt.Errorf("read token response: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		var tokenResp TokenResponse
-		if json.Unmarshal(body, &tokenResp) == nil && tokenResp.Error != "" {
-			if tokenResp.Error == "authorization_pending" || tokenResp.Error == "slow_down" {
-				return nil, fmt.Errorf("%s", tokenResp.Error)
-			}
-			return nil, fmt.Errorf("%s: %s", tokenResp.Error, tokenResp.ErrorDesc)
+	var tr TokenResponse
+	if err := json.Unmarshal(body, &tr); err != nil {
+		return nil, false, fmt.Errorf("token request failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	switch tr.Status {
+	case "success":
+		if tr.AccessToken == "" {
+			return nil, false, fmt.Errorf("incomplete token payload: %s", string(body))
 		}
-		return nil, fmt.Errorf("token request failed: %d %s", resp.StatusCode, string(body))
-	}
+		expiresAt := time.UnixMilli(tr.ExpiredIn)
+		if expiresAt.Before(time.Now()) {
+			expiresAt = time.Now().Add(time.Hour)
+		}
+		return &TokenInfo{
+			AccessToken:  tr.AccessToken,
+			RefreshToken: tr.RefreshToken,
+			ExpiresAt:    expiresAt,
+			TokenType:    tr.TokenType,
+			Scope:        tr.Scope,
+			ProviderID:   p.provider,
+		}, false, nil
 
-	var tokenResp TokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, fmt.Errorf("decode token response: %w", err)
-	}
+	case "pending", "":
+		return nil, true, nil
 
-	return &TokenInfo{
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: tokenResp.RefreshToken,
-		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
-		TokenType:    tokenResp.TokenType,
-		Scope:        tokenResp.Scope,
-		ProviderID:   p.provider,
-	}, nil
+	case "error":
+		msg := "authorization error"
+		if tr.BaseResp != nil && tr.BaseResp.StatusMsg != "" {
+			msg = tr.BaseResp.StatusMsg
+		}
+		return nil, false, fmt.Errorf("%s", msg)
+
+	default:
+		if resp.StatusCode != http.StatusOK {
+			msg := string(body)
+			if tr.BaseResp != nil && tr.BaseResp.StatusMsg != "" {
+				msg = tr.BaseResp.StatusMsg
+			}
+			return nil, false, fmt.Errorf("token request failed (%d): %s", resp.StatusCode, msg)
+		}
+		return nil, true, nil
+	}
 }
 
 func (p *MiniMaxOAuthProvider) RefreshToken(ctx context.Context) (*TokenInfo, error) {
@@ -296,14 +323,23 @@ func (p *MiniMaxOAuthProvider) RefreshToken(ctx context.Context) (*TokenInfo, er
 		return nil, fmt.Errorf("decode refresh response: %w", err)
 	}
 
-	if tokenResp.Error != "" {
-		return nil, fmt.Errorf("%s: %s", tokenResp.Error, tokenResp.ErrorDesc)
+	if tokenResp.Status == "error" {
+		msg := "refresh failed"
+		if tokenResp.BaseResp != nil && tokenResp.BaseResp.StatusMsg != "" {
+			msg = tokenResp.BaseResp.StatusMsg
+		}
+		return nil, fmt.Errorf("%s", msg)
+	}
+
+	expiresAt := time.UnixMilli(tokenResp.ExpiredIn)
+	if expiresAt.Before(time.Now()) {
+		expiresAt = time.Now().Add(time.Hour)
 	}
 
 	newToken := &TokenInfo{
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
-		ExpiresAt:    time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
+		ExpiresAt:    expiresAt,
 		TokenType:    tokenResp.TokenType,
 		Scope:        tokenResp.Scope,
 		ProviderID:   p.provider,
