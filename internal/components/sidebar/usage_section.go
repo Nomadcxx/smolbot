@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Nomadcxx/smolbot/internal/client"
+	dialogcmp "github.com/Nomadcxx/smolbot/internal/components/dialog"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 )
 
@@ -50,14 +51,15 @@ func (s UsageSection) Render(width, _ int, t *theme.Theme) string {
 }
 
 func usageLabel(provider, model string) string {
+	displayProvider := dialogcmp.ProviderDisplayName(provider)
 	switch {
 	case provider != "" && model != "":
 		if strings.HasPrefix(model, provider+"/") {
-			return model
+			model = strings.TrimPrefix(model, provider+"/")
 		}
-		return provider + " / " + model
+		return displayProvider + " / " + model
 	case provider != "":
-		return provider
+		return displayProvider
 	case model != "":
 		return model
 	default:

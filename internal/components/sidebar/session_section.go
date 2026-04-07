@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	lipgloss "charm.land/lipgloss/v2"
+	dialogcmp "github.com/Nomadcxx/smolbot/internal/components/dialog"
 	"github.com/Nomadcxx/smolbot/internal/theme"
 )
 
@@ -42,6 +43,8 @@ func (s SessionSection) Render(width, _ int, t *theme.Theme) string {
 	model := strings.TrimSpace(s.model)
 	if model == "" {
 		model = "—"
+	} else {
+		model = prettyModelName(model)
 	}
 
 	primary := renderValue(name, width, t, func(th *theme.Theme) color.Color { return th.Text })
@@ -74,4 +77,17 @@ func prettyPath(path string) string {
 		return "~" + strings.TrimPrefix(path, cachedHomeDir)
 	}
 	return path
+}
+
+// prettyModelName converts "openai-codex/gpt-5.4-mini" → "OpenAI Codex / gpt-5.4-mini".
+func prettyModelName(model string) string {
+	if idx := strings.IndexByte(model, '/'); idx > 0 && idx < len(model)-1 {
+		providerID := model[:idx]
+		modelName := model[idx+1:]
+		displayProvider := dialogcmp.ProviderDisplayName(providerID)
+		if displayProvider != providerID {
+			return displayProvider + " / " + modelName
+		}
+	}
+	return model
 }

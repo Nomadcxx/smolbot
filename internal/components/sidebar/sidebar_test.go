@@ -111,8 +111,9 @@ func TestUsageSectionAvoidsDuplicatingQualifiedProviderModel(t *testing.T) {
 	}
 
 	got := plain(section.Render(28, 0, theme.Current()))
-	if !strings.Contains(got, "ollama/llama3.2") {
-		t.Fatalf("expected qualified provider/model label, got %q", got)
+	// Should show friendly name "Ollama / llama3.2", not raw "ollama / ollama/llama3.2"
+	if !strings.Contains(got, "Ollama / llama3.2") {
+		t.Fatalf("expected friendly provider/model label, got %q", got)
 	}
 	if strings.Contains(got, "ollama / ollama/llama3.2") {
 		t.Fatalf("expected provider label to avoid duplication, got %q", got)
