@@ -403,10 +403,18 @@ func (s *whatsmeowSeam) Login(ctx context.Context, report func(loginUpdate) erro
 			return ctx.Err()
 		case item, ok := <-qrChan:
 			if !ok {
-				if s.client.IsLoggedIn() {
+				// QR channel closed — wait for Store.ID to be persisted.
+				// The pairing handshake may still be completing.
+				for i := 0; i < 25; i++ {
+					if s.client.Store.ID != nil {
+						break
+					}
+					time.Sleep(200 * time.Millisecond)
+				}
+				if s.client.Store.ID != nil {
 					return report(loginUpdate{State: "connected"})
 				}
-				return nil
+				return errors.New("whatsapp pairing did not complete — try again")
 			}
 			if err := report(loginUpdateFromQR(item)); err != nil {
 				return err
