@@ -142,9 +142,11 @@ func (m *whatsappLoginModel) View() string {
 	}
 
 	if m.connected {
+		msg := fmt.Sprintf("\n  ✓ %s\n", m.status)
+		msg += "\n  To re-link, run: smolbot channels login whatsapp --force\n"
 		return lipgloss.NewStyle().
 			Foreground(lipgloss.Color("2")).
-			Render(fmt.Sprintf("\n  ✓ %s\n\n  Press any key to exit.\n", m.status))
+			Render(msg)
 	}
 
 	var s strings.Builder
@@ -192,7 +194,7 @@ type connectedMsg struct{}
 type timeoutMsg struct{}
 type errorMsg struct{ err error }
 
-func runWhatsAppLogin(ctx context.Context, opts rootOptions) error {
+func runWhatsAppLogin(ctx context.Context, opts rootOptions, force bool) error {
 	configPath := opts.configPath
 	if configPath == "" {
 		configPath = defaultConfigPath(opts)
@@ -201,6 +203,15 @@ func runWhatsAppLogin(ctx context.Context, opts rootOptions) error {
 	cfg, _, err := loadRuntimeConfig(configPath, opts.workspace, 0)
 	if err != nil {
 		return err
+	}
+
+	if force {
+		storePath := strings.TrimSpace(cfg.Channels.WhatsApp.StorePath)
+		if storePath != "" {
+			if err := os.Remove(storePath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("clear whatsapp session: %w", err)
+			}
+		}
 	}
 
 	model, err := newWhatsAppLoginModel(cfg)

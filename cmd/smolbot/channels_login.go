@@ -6,6 +6,7 @@ import (
 
 func newChannelsLoginCmd(opts *rootOptions) *cobra.Command {
 	var jsonOutput bool
+	var force bool
 
 	cmd := &cobra.Command{
 		Use:   "login <channel>",
@@ -20,7 +21,7 @@ func newChannelsLoginCmd(opts *rootOptions) *cobra.Command {
 				if jsonOutput {
 					return runWhatsAppLoginJSON(cmd.Context(), *opts)
 				}
-				return runWhatsAppLogin(cmd.Context(), *opts)
+				return runWhatsAppLogin(cmd.Context(), *opts, force)
 			}
 			if err := runChannelLogin(cmd.Context(), *opts, channelName, cmd.OutOrStdout()); err != nil {
 				return err
@@ -30,6 +31,7 @@ func newChannelsLoginCmd(opts *rootOptions) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output login events as JSON (for installer integration)")
+	cmd.Flags().BoolVar(&force, "force", false, "Clear existing session and re-link (generates a new QR code)")
 
 	return cmd
 }
