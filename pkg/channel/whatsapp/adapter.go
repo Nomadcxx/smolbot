@@ -411,10 +411,17 @@ func (s *whatsmeowSeam) Login(ctx context.Context, report func(loginUpdate) erro
 					}
 					time.Sleep(200 * time.Millisecond)
 				}
-				if s.client.Store.ID != nil {
-					return report(loginUpdate{State: "connected"})
+				if s.client.Store.ID == nil {
+					return errors.New("whatsapp pairing did not complete — try again")
 				}
-				return errors.New("whatsapp pairing did not complete — try again")
+				// Store.ID is set, but WhatsApp's server-side device
+				// registration continues after the local store is written.
+				// Keep the connection alive so the server can finish
+				// syncing (this mirrors the installer, where the client
+				// stays connected until the user navigates away).
+				_ = report(loginUpdate{State: "device-link", Detail: "Finalizing registration..."})
+				time.Sleep(5 * time.Second)
+				return report(loginUpdate{State: "connected"})
 			}
 			if err := report(loginUpdateFromQR(item)); err != nil {
 				return err
