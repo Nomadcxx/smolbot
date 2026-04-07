@@ -418,10 +418,11 @@ func (s *whatsmeowSeam) Login(ctx context.Context, report func(loginUpdate) erro
 				}
 				return errors.New("whatsapp login failed")
 			case whatsmeow.QRChannelSuccess.Event:
-				if err := report(loginUpdate{State: "connected"}); err != nil {
-					return err
-				}
-				return nil
+				// Do NOT return/disconnect yet — the client must stay
+				// connected for the pairing handshake to complete and
+				// Store.ID to be persisted. Wait for the QR channel to
+				// close (handled by the !ok branch above).
+				_ = report(loginUpdate{State: "device-link", Detail: "Completing handshake..."})
 			case whatsmeow.QRChannelTimeout.Event:
 				return errors.New("whatsapp login timed out")
 			}
