@@ -19,12 +19,18 @@ import (
 
 const codexAuthTimeout = 5 * time.Minute
 
+// registerMiniMaxAuth is set by auth_minimax.go init; called from newAuthCmd.
+var registerMiniMaxAuth func(parent *cobra.Command, opts *rootOptions)
+
 func newAuthCmd(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Authenticate with OAuth providers",
 	}
 	cmd.AddCommand(newAuthCodexCmd(opts))
+	if registerMiniMaxAuth != nil {
+		registerMiniMaxAuth(cmd, opts)
+	}
 	return cmd
 }
 

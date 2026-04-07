@@ -832,6 +832,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleRemoveProvider(msg)
 	case dialogcmp.SwitchProviderMsg:
 		return m.handleSwitchProvider(msg)
+	case dialogcmp.LaunchOAuthMsg:
+		return m.handleLaunchOAuth(msg)
 	case dialogcmp.CommandChosenMsg:
 		m.dialog = nil
 		m.editor.SetValue("")
@@ -1276,6 +1278,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleSwitchProvider(msg dialogcmp.SwitchProviderMsg) (tea.Model, tea.Cmd) {
 	m.dialog = nil
 	return m, nil
+}
+
+// oauthAuthCommands maps OAuth provider IDs to their CLI auth subcommands.
+var oauthAuthCommands = map[string]string{
+	"openai-codex":   "smolbot auth codex",
+	"minimax-portal": "smolbot auth minimax",
+}
+
+func (m Model) handleLaunchOAuth(msg dialogcmp.LaunchOAuthMsg) (tea.Model, tea.Cmd) {
+	m.dialog = nil
+	cmd := oauthAuthCommands[msg.ProviderID]
+	if cmd == "" {
+		cmd = "the installer"
+	}
+	name := dialogcmp.ProviderDisplayName(msg.ProviderID)
+	m.status.SetFlash(name + " requires OAuth — run: " + cmd)
+	return m, clearMetadataAfterDelay(8 * time.Second)
 }
 
 func nextRecentModel(recents []string, current string) string {

@@ -25,6 +25,12 @@ type SwitchProviderMsg struct {
 	ProviderID string
 }
 
+// LaunchOAuthMsg is emitted when an unconfigured OAuth provider is selected.
+// The TUI should auto-configure the provider and guide the user to authenticate.
+type LaunchOAuthMsg struct {
+	ProviderID string
+}
+
 type providerMode int
 
 const (
@@ -56,6 +62,13 @@ var providerMeta = map[string]providerMetaEntry{
 var providersWithoutAPIKey = map[string]bool{
 	"ollama": true,
 	"vllm":   true,
+}
+
+// knownOAuthProviders lists providers that authenticate via OAuth device code flow.
+// Used to detect OAuth providers even when they aren't yet in the config.
+var knownOAuthProviders = map[string]bool{
+	"minimax-portal": true,
+	"openai-codex":   true,
 }
 
 // ProviderDisplayName returns a human-friendly name for a provider ID.
@@ -184,7 +197,7 @@ func buildProviderInfoList(models []client.ModelInfo, currentModel, activeProvid
 			Type:        providerTypeName(activeProvider),
 			APIBase:     pc.APIBase,
 			HasAuth:     pc.APIKey != "" || pc.AuthType == "oauth",
-			IsOAuth:     pc.AuthType == "oauth",
+			IsOAuth:     pc.AuthType == "oauth" || knownOAuthProviders[activeProvider],
 			IsActive:    true,
 			Description: meta.Description,
 		})
@@ -203,8 +216,8 @@ func buildProviderInfoList(models []client.ModelInfo, currentModel, activeProvid
 		pc := configuredProviders[name]
 		meta := providerMeta[name]
 		hasAuth := pc.APIKey != "" || pc.AuthType == "oauth"
-		isOAuth := pc.AuthType == "oauth"
-		isPartial := !hasAuth && pc.APIBase == ""
+		isOAuth := pc.AuthType == "oauth" || knownOAuthProviders[name]
+		isPartial := !hasAuth && !isOAuth && pc.APIBase == ""
 		infoList = append(infoList, ProviderInfo{
 			Name:        name,
 			Type:        providerTypeName(name),
@@ -231,7 +244,7 @@ func buildProviderInfoList(models []client.ModelInfo, currentModel, activeProvid
 			Type:    providerTypeName(name),
 			APIBase: pc.APIBase,
 			HasAuth: hasAuth,
-			IsOAuth: pc.AuthType == "oauth",
+			IsOAuth: pc.AuthType == "oauth" || knownOAuthProviders[name],
 		})
 	}
 
@@ -490,6 +503,9 @@ func (m ProvidersModel) handleBrowseEnter() (ProvidersModel, tea.Cmd) {
 		return m, func() tea.Msg { return SwitchProviderMsg{ProviderID: m.activeProvider} }
 	}
 	if row.hasAuth || row.isOAuth {
+		if row.isOAuth && !row.hasAuth {
+			return m, func() tea.Msg { return LaunchOAuthMsg{ProviderID: name} }
+		}
 		return m, func() tea.Msg { return SwitchProviderMsg{ProviderID: name} }
 	}
 	m.mode = providerModeConfigure
