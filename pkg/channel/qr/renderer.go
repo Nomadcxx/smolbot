@@ -1,14 +1,13 @@
 package qr
 
 import (
-	"bytes"
-	"image"
-	"image/png"
+	"strings"
 
 	"github.com/skip2/go-qrcode"
 )
 
 type Renderer struct {
+	// size is unused but kept for API compatibility.
 	size int
 }
 
@@ -19,53 +18,30 @@ func New(size int) *Renderer {
 	return &Renderer{size: size}
 }
 
+// RenderToASCII produces a compact terminal QR code using Unicode half-block
+// characters (▀ ▄ █). Output is typically ~35-45 columns wide and ~20 rows
+// tall — fits comfortably in any terminal.
 func (r *Renderer) RenderToASCII(data string) (string, error) {
 	if data == "" {
 		return "", nil
 	}
 
-	pngBytes, err := qrcode.Encode(data, qrcode.Medium, r.size)
+	code, err := qrcode.New(data, qrcode.Medium)
 	if err != nil {
 		return "", err
 	}
+	code.DisableBorder = false
 
-	img, err := png.Decode(bytes.NewReader(pngBytes))
-	if err != nil {
-		return "", err
+	// ToSmallString packs 2 vertical modules per character row.
+	// inverseColor=false → dark modules are filled blocks.
+	raw := code.ToSmallString(false)
+
+	// Indent each line for visual padding in the terminal.
+	var buf strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(raw, "\n"), "\n") {
+		buf.WriteString("  ")
+		buf.WriteString(line)
+		buf.WriteString("\n")
 	}
-
-	return r.imageToBlocks(img), nil
-}
-
-func (r *Renderer) imageToBlocks(img image.Image) string {
-	var buf bytes.Buffer
-	width := img.Bounds().Dx()
-	height := img.Bounds().Dy()
-
-	for y := 0; y < height; y += 2 {
-		for x := 0; x < width; x++ {
-			c1 := r.pixelColor(img, x, y)
-			c2 := r.pixelColor(img, x, y+1)
-			if c1 || c2 {
-				buf.WriteString("\u2588")
-			} else {
-				buf.WriteString(" ")
-			}
-		}
-		if y+2 < height {
-			buf.WriteString("\n")
-		}
-	}
-	return buf.String()
-}
-
-func (r *Renderer) pixelColor(img image.Image, x, y int) bool {
-	if x >= img.Bounds().Dx() || y >= img.Bounds().Dy() {
-		return false
-	}
-	ir, ig, ib, a := img.At(x, y).RGBA()
-	if a == 0 {
-		return false
-	}
-	return (ir+ig+ib)/3 < 32896
+	return strings.TrimRight(buf.String(), "\n"), nil
 }

@@ -1,8 +1,6 @@
 package qr
 
 import (
-	"image"
-	"image/color"
 	"strings"
 	"testing"
 )
@@ -46,20 +44,23 @@ func TestQRRendererRenderToASCIIReturnsStableNonEmptyOutput(t *testing.T) {
 	}
 }
 
-func TestQRRendererImageToBlocksUsesDarkModules(t *testing.T) {
+func TestQRRendererOutputIsCompact(t *testing.T) {
 	renderer := New(256)
+	const data = "https://example.com/whatsapp-link-token"
 
-	dark := image.NewRGBA(image.Rect(0, 0, 1, 2))
-	dark.SetRGBA(0, 0, color.RGBA{R: 0, G: 0, B: 0, A: 255})
-	dark.SetRGBA(0, 1, color.RGBA{R: 0, G: 0, B: 0, A: 255})
-	if got := renderer.imageToBlocks(dark); got != "█" {
-		t.Fatalf("expected dark modules to render as filled blocks, got %q", got)
+	out, err := renderer.RenderToASCII(data)
+	if err != nil {
+		t.Fatalf("RenderToASCII: %v", err)
 	}
 
-	light := image.NewRGBA(image.Rect(0, 0, 1, 2))
-	light.SetRGBA(0, 0, color.RGBA{R: 255, G: 255, B: 255, A: 255})
-	light.SetRGBA(0, 1, color.RGBA{R: 255, G: 255, B: 255, A: 255})
-	if got := renderer.imageToBlocks(light); got != " " {
-		t.Fatalf("expected light modules to stay empty, got %q", got)
+	lines := strings.Split(out, "\n")
+	if len(lines) > 40 {
+		t.Fatalf("expected compact output (<40 rows), got %d rows", len(lines))
+	}
+	for i, line := range lines {
+		// Each line should be well under 80 cols (module count + 2 indent)
+		if len([]rune(line)) > 80 {
+			t.Fatalf("line %d too wide (%d runes): %q", i, len([]rune(line)), line)
+		}
 	}
 }
