@@ -849,10 +849,19 @@ func (s *Server) currentProvider() string {
 }
 
 func detectProviderFromModel(model, fallbackProvider string) string {
-	lower := strings.ToLower(model)
-	if strings.HasPrefix(lower, "openai-codex/") {
-		return "openai-codex"
+	// Check if the model uses a provider-prefixed format (e.g. "minimax-portal/MiniMax-M2.7").
+	if idx := strings.IndexByte(model, '/'); idx > 0 {
+		prefix := model[:idx]
+		if provider.CatalogueModels(prefix) != nil {
+			return prefix
+		}
+		lower := strings.ToLower(prefix)
+		if provider.CatalogueModels(lower) != nil {
+			return lower
+		}
 	}
+
+	lower := strings.ToLower(model)
 	if strings.HasPrefix(lower, "claude-") || strings.Contains(lower, "anthropic") {
 		return "anthropic"
 	}
